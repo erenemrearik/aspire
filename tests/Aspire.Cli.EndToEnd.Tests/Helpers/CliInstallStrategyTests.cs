@@ -35,6 +35,17 @@ public class CliInstallStrategyTests
     }
 
     [Fact]
+    public void GetConfigureLocalHiveCommands_OverridesCliIdentity()
+    {
+        Assert.Equal(
+            [
+                "aspire config set channel local -g",
+                "SDK_VER=$(ls ~/.aspire/hives/local/packages/Aspire.Hosting.*.nupkg 2>/dev/null | head -1 | sed 's/.*Aspire\\.Hosting\\.//;s/\\.nupkg//') && aspire config set sdk.version \"$SDK_VER\" -g && export ASPIRE_CLI_CHANNEL=local ASPIRE_CLI_VERSION=\"$SDK_VER\" ASPIRE_CLI_PACKAGES=\"$HOME/.aspire/hives/local/packages\""
+            ],
+            AspireCliShellCommandHelpers.GetConfigureLocalHiveCommands());
+    }
+
+    [Fact]
     public void GetRecordAspireCliVersionCommand_IsBestEffort()
     {
         var strategy = CliInstallStrategy.FromDotnetTool(includePrerelease: true);

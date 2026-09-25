@@ -187,7 +187,7 @@ public class KubernetesServiceTests
         var watchTask = watchEnumerator.MoveNextAsync().AsTask();
         await server.WaitForWatchRequestAsync(cts.Token);
 
-        await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
+        await server.WaitForWatchRequestCountAsync(2, cts.Token);
         Assert.False(watchTask.IsCompleted);
 
         watchCts.Cancel();
@@ -431,6 +431,14 @@ public class KubernetesServiceTests
             return _responseState.WatchRequestArrived.Task.WaitAsync(cancellationToken);
         }
 
+        public async Task WaitForWatchRequestCountAsync(int expectedCount, CancellationToken cancellationToken)
+        {
+            while (Volatile.Read(ref _responseState.WatchRequestCount) < expectedCount)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
+            }
+        }
+
         public Task WaitForRequestCancellationAsync(CancellationToken cancellationToken)
         {
             return _responseState.RequestCancellationObserved.Task.WaitAsync(cancellationToken);
@@ -459,6 +467,7 @@ public class KubernetesServiceTests
                     && string.Equals(watchValues.ToString(), "true", StringComparison.OrdinalIgnoreCase);
                 if (isWatchRequest && Volatile.Read(ref responseState.BlockWatchResponses))
                 {
+                    Interlocked.Increment(ref responseState.WatchRequestCount);
                     responseState.WatchRequestArrived.TrySetResult(true);
                     try
                     {
@@ -515,6 +524,7 @@ public class KubernetesServiceTests
         {
             public bool BlockWatchResponses;
             public int RequestCount;
+            public int WatchRequestCount;
             public TaskCompletionSource<bool> RequestCancellationObserved { get; } =
                 new(TaskCreationOptions.RunContinuationsAsynchronously);
             public long ResponseDelayTicks;
