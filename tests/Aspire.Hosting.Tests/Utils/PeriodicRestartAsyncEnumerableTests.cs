@@ -114,6 +114,44 @@ public class PeriodicRestartAsyncEnumerableTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => moveNextTask);
     }
 
+    [Fact]
+    public async Task FactoryCancellationNotCausedByRestartIsPropagated()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var factoryCts = new CancellationTokenSource();
+        factoryCts.Cancel();
+
+        var enumerable = PeriodicRestartAsyncEnumerable.CreateAsync<int>(
+            (_, _) => Task.FromCanceled<IAsyncEnumerable<int>>(factoryCts.Token),
+            restartInterval: TimeSpan.FromSeconds(1),
+            cancellationToken: cts.Token);
+        await using var enumerator = enumerable.GetAsyncEnumerator();
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(1)));
+
+        Assert.Equal(factoryCts.Token, exception.CancellationToken);
+    }
+
+    [Fact]
+    public async Task ClassFactoryCancellationNotCausedByRestartIsPropagated()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var factoryCts = new CancellationTokenSource();
+        factoryCts.Cancel();
+
+        var enumerable = PeriodicRestartAsyncEnumerable.CreateAsync<string>(
+            (_, _) => Task.FromCanceled<IAsyncEnumerable<string>>(factoryCts.Token),
+            restartInterval: TimeSpan.FromSeconds(1),
+            cancellationToken: cts.Token);
+        await using var enumerator = enumerable.GetAsyncEnumerator();
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(1)));
+
+        Assert.Equal(factoryCts.Token, exception.CancellationToken);
+    }
+
     static async IAsyncEnumerable<int> CountingAsyncEnumerable(int start, TimeSpan delay, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var value = start;
