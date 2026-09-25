@@ -203,7 +203,7 @@ public partial class TemplateTestsBase
             await Task.Delay(500);
 
             // _testOutput.WriteLine($"Checking for rows again");
-            var rowsLocator = dashboardPageWrapper.Page.Locator(".main-grid .resource-row");
+            var rowsLocator = dashboardPageWrapper.Page.Locator(".main-grid tr.resource-row");
             var allRows = await rowsLocator.AllAsync();
             // _testOutput.WriteLine($"found rows#: {allRows.Count}");
             if (allRows.Count == 0)
