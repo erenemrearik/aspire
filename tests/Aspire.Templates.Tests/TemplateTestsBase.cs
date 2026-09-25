@@ -215,7 +215,7 @@ public partial class TemplateTestsBase
             foreach (var rowLoc in allRows)
             {
                 // get the cells
-                var cellLocs = await rowLoc.Locator("td[role='gridcell']").AllAsync();
+                var cellLocs = await rowLoc.Locator("[role='gridcell']").AllAsync();
 
                 // is the resource name expected?
                 var resourceNameCell = cellLocs[0];
