@@ -70,13 +70,14 @@ public sealed class NewChannelNuGetConfigTests(ITestOutputHelper output)
 
             if (channel is null && strategy.Mode is CliInstallMode.LocalArchive)
             {
+                var expectedHiveLabel = strategy.LocalArchiveHiveLabel;
                 var packageSources = XDocument.Load(nugetConfigPath)
                     .Descendants("packageSources")
                     .Elements("add")
                     .Select(element => (string?)element.Attribute("value"))
                     .OfType<string>();
 
-                Assert.Contains(packageSources, source => source.Replace('\\', '/').EndsWith("/hives/local/packages", StringComparison.Ordinal));
+                Assert.Contains(packageSources, source => source.Replace('\\', '/').EndsWith($"/hives/{expectedHiveLabel}/packages", StringComparison.Ordinal));
             }
         }
         else

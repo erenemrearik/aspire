@@ -128,7 +128,7 @@ internal static class AspireCliShellCommandHelpers
 
     internal static string GetLocalArchiveInstallCommand(string localDir, string commandPrefix)
     {
-        return $"{commandPrefix} --local-dir {QuoteBashArg(localDir)} --hive-label local";
+        return $"{commandPrefix} --local-dir {QuoteBashArg(localDir)}";
     }
 
     internal static string GetLocalArchiveInstallCommandFromCurrentRef(string localDir)
@@ -140,7 +140,7 @@ internal static class AspireCliShellCommandHelpers
             throw new InvalidOperationException($"GITHUB_SHA contains an unexpected value: '{sha}'. Expected a hex commit SHA or 'main'.");
         }
 
-        return $"curl -fsSL https://raw.githubusercontent.com/microsoft/aspire/{sha}/eng/scripts/get-aspire-cli-pr.sh | bash -s -- --local-dir {QuoteBashArg(localDir)} --hive-label local";
+        return $"curl -fsSL https://raw.githubusercontent.com/microsoft/aspire/{sha}/eng/scripts/get-aspire-cli-pr.sh | bash -s -- --local-dir {QuoteBashArg(localDir)}";
     }
 
     internal static string QuoteBashArg(string value)
@@ -268,6 +268,22 @@ internal sealed class CliInstallStrategy
     /// Used by post-install verification to assert the correct CLI binary was installed.
     /// </summary>
     public string? ExpectedVersion { get; }
+
+    /// <summary>
+    /// Gets the package hive label selected by the local-archive installer.
+    /// </summary>
+    public string LocalArchiveHiveLabel
+    {
+        get
+        {
+            if (Mode != CliInstallMode.LocalArchive)
+            {
+                throw new InvalidOperationException($"{nameof(LocalArchiveHiveLabel)} is only available for {nameof(CliInstallMode.LocalArchive)} strategies.");
+            }
+
+            return CliPackageDiscovery.GetHiveLabel(ExpectedVersion);
+        }
+    }
 
     /// <summary>
     /// Gets whether the Docker dotnet tool install command needs the generated NuGet.config for internal/prerelease feeds.
