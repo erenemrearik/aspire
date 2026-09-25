@@ -271,22 +271,25 @@ internal sealed class KubernetesService(ILogger<KubernetesService> logger, IOpti
             return ExecuteWithRetry(
                 DcpApiOperationType.Watch,
                 T.ObjectKind,
-                async (kubernetes, operationCancellationToken) =>
+                async (kubernetes, _) =>
                 {
+                    // The Kubernetes client buffers the streaming response body while this task is awaited.
+                    // A healthy watch therefore lives until the periodic restart instead of completing within
+                    // the shorter API retry budget used by non-streaming requests.
                     var responseTask = string.IsNullOrEmpty(namespaceParameter)
                         ? kubernetes.CustomObjects.ListClusterCustomObjectWithHttpMessagesAsync(
                             GroupVersion.Group,
                             GroupVersion.Version,
                             resourceType,
                             watch: true,
-                            cancellationToken: operationCancellationToken)
+                            cancellationToken: restartCancellationToken)
                         : kubernetes.CustomObjects.ListNamespacedCustomObjectWithHttpMessagesAsync(
                             GroupVersion.Group,
                             GroupVersion.Version,
                             namespaceParameter,
                             resourceType,
                             watch: true,
-                            cancellationToken: operationCancellationToken);
+                            cancellationToken: restartCancellationToken);
 
                     // KubernetesClient's lazy WatchAsync does not await the HTTP response until enumeration starts.
                     await responseTask.ConfigureAwait(false);

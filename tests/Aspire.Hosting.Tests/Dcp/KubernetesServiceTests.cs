@@ -167,6 +167,34 @@ public class KubernetesServiceTests
         }
     }
 
+    [Fact]
+    public async Task WatchAsync_RemainsActiveBeyondApiRetryTimeout()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var watchCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+
+        var (service, kubeconfigPath, fileSystem) = CreateService(
+            maxRetryDuration: TimeSpan.FromMilliseconds(100),
+            kubernetesInitializationTimeout: TimeSpan.FromMilliseconds(250));
+        using var disposableFileSystem = fileSystem;
+        using var disposableService = service;
+
+        await using var server = await TestDcpApiServer.StartAsync(cts.Token);
+        server.BlockWatchResponses();
+        WriteKubeconfig(kubeconfigPath, server.Port);
+
+        await using var watchEnumerator = service.WatchAsync<Container>(cancellationToken: watchCts.Token).GetAsyncEnumerator();
+        var watchTask = watchEnumerator.MoveNextAsync().AsTask();
+        await server.WaitForWatchRequestAsync(cts.Token);
+
+        await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token);
+        Assert.False(watchTask.IsCompleted);
+
+        watchCts.Cancel();
+        await server.WaitForRequestCancellationAsync(cts.Token);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => watchTask);
+    }
+
     // Verifies that establishing the connection survives a partially-written kubeconfig: when the file exists
     // but DCP has only flushed part of it (so it does not yet parse as a valid kubeconfig), the read is retried
     // and the operation succeeds once the complete, valid kubeconfig is written.
