@@ -26,7 +26,17 @@ internal static class PeriodicRestartAsyncEnumerable
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(restartInterval);
 
-            var enumerable = await enumerableFactory(lastValue, cts.Token).ConfigureAwait(false);
+            IAsyncEnumerable<T> enumerable;
+            try
+            {
+                enumerable = await enumerableFactory(lastValue, cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The restart interval can expire while the factory is still establishing a streaming
+                // connection. Start a fresh factory call just as we do when enumeration is canceled.
+                continue;
+            }
             var enumerator = enumerable.GetAsyncEnumerator(cts.Token);
 
             try
@@ -82,7 +92,17 @@ internal static class PeriodicRestartAsyncEnumerable
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(restartInterval);
 
-            var enumerable = await enumerableFactory(lastValue, cts.Token).ConfigureAwait(false);
+            IAsyncEnumerable<T> enumerable;
+            try
+            {
+                enumerable = await enumerableFactory(lastValue, cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The restart interval can expire while the factory is still establishing a streaming
+                // connection. Start a fresh factory call just as we do when enumeration is canceled.
+                continue;
+            }
             var enumerator = enumerable.GetAsyncEnumerator(cts.Token);
 
             try

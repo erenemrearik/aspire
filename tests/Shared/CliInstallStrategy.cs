@@ -128,7 +128,7 @@ internal static class AspireCliShellCommandHelpers
 
     internal static string GetLocalArchiveInstallCommand(string localDir, string commandPrefix)
     {
-        return $"{commandPrefix} --local-dir {QuoteBashArg(localDir)}";
+        return $"{commandPrefix} --local-dir {QuoteBashArg(localDir)} --hive-label local";
     }
 
     internal static string GetLocalArchiveInstallCommandFromCurrentRef(string localDir)
@@ -140,7 +140,7 @@ internal static class AspireCliShellCommandHelpers
             throw new InvalidOperationException($"GITHUB_SHA contains an unexpected value: '{sha}'. Expected a hex commit SHA or 'main'.");
         }
 
-        return $"curl -fsSL https://raw.githubusercontent.com/microsoft/aspire/{sha}/eng/scripts/get-aspire-cli-pr.sh | bash -s -- --local-dir {QuoteBashArg(localDir)}";
+        return $"curl -fsSL https://raw.githubusercontent.com/microsoft/aspire/{sha}/eng/scripts/get-aspire-cli-pr.sh | bash -s -- --local-dir {QuoteBashArg(localDir)} --hive-label local";
     }
 
     internal static string QuoteBashArg(string value)

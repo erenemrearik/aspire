@@ -56,6 +56,64 @@ public class PeriodicRestartAsyncEnumerableTests
         Assert.True(s_activeRunningEnumerables == 0, "expected all enumerables to be ended after cancellation");
     }
 
+    [Fact]
+    public async Task FactoryIsRecreatedWhenRestartTokenExpires()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var secondFactoryCall = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factoryCallCount = 0;
+
+        async Task<IAsyncEnumerable<int>> InnerFactory(int? lastValue, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref factoryCallCount) == 2)
+            {
+                secondFactoryCall.SetResult();
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return CountingAsyncEnumerable(0, TimeSpan.Zero, cancellationToken);
+        }
+
+        await using var enumerator = PeriodicRestartAsyncEnumerable
+            .CreateAsync<int>(InnerFactory, restartInterval: TimeSpan.FromMilliseconds(100), cancellationToken: cts.Token)
+            .GetAsyncEnumerator();
+        var moveNextTask = enumerator.MoveNextAsync().AsTask();
+
+        await secondFactoryCall.Task.WaitAsync(cts.Token);
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => moveNextTask);
+    }
+
+    [Fact]
+    public async Task ClassFactoryIsRecreatedWhenRestartTokenExpires()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var secondFactoryCall = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factoryCallCount = 0;
+
+        async Task<IAsyncEnumerable<string>> InnerFactory(string? lastValue, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref factoryCallCount) == 2)
+            {
+                secondFactoryCall.SetResult();
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return EmptyStringAsyncEnumerable();
+        }
+
+        await using var enumerator = PeriodicRestartAsyncEnumerable
+            .CreateAsync<string>(InnerFactory, restartInterval: TimeSpan.FromMilliseconds(100), cancellationToken: cts.Token)
+            .GetAsyncEnumerator();
+        var moveNextTask = enumerator.MoveNextAsync().AsTask();
+
+        await secondFactoryCall.Task.WaitAsync(cts.Token);
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => moveNextTask);
+    }
+
     static async IAsyncEnumerable<int> CountingAsyncEnumerable(int start, TimeSpan delay, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var value = start;
@@ -66,6 +124,12 @@ public class PeriodicRestartAsyncEnumerableTests
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    static async IAsyncEnumerable<string> EmptyStringAsyncEnumerable()
+    {
+        await Task.Yield();
+        yield break;
     }
 
     static async IAsyncEnumerable<int> RefCountingAsyncEnumerable(int start, TimeSpan delay, [EnumeratorCancellation] CancellationToken cancellationToken)

@@ -19,7 +19,19 @@ public class CliInstallStrategyTests
     public void GetLocalArchiveInstallCommand_FormatsCorrectly()
     {
         var command = AspireCliShellCommandHelpers.GetLocalArchiveInstallCommand("/tmp/cli-archives", "/opt/aspire-scripts/get-aspire-cli-pr.sh");
-        Assert.Equal("/opt/aspire-scripts/get-aspire-cli-pr.sh --local-dir '/tmp/cli-archives'", command);
+        Assert.Equal("/opt/aspire-scripts/get-aspire-cli-pr.sh --local-dir '/tmp/cli-archives' --hive-label local", command);
+    }
+
+    [Fact]
+    public void GetLocalArchiveInstallCommandFromCurrentRef_UsesLocalHive()
+    {
+        using var environment = new EnvironmentVariableScope(("GITHUB_SHA", "0123456789abcdef0123456789abcdef01234567"));
+
+        var command = AspireCliShellCommandHelpers.GetLocalArchiveInstallCommandFromCurrentRef("/tmp/cli-archives");
+
+        Assert.Equal(
+            "curl -fsSL https://raw.githubusercontent.com/microsoft/aspire/0123456789abcdef0123456789abcdef01234567/eng/scripts/get-aspire-cli-pr.sh | bash -s -- --local-dir '/tmp/cli-archives' --hive-label local",
+            command);
     }
 
     [Fact]
