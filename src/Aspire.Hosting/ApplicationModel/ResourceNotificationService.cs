@@ -236,8 +236,6 @@ public class ResourceNotificationService : IDisposable
     /// </remarks>
     public async Task<ResourceEvent> WaitForResourceHealthyAsync(string resourceName, WaitBehavior waitBehavior, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Waiting for resource '{ResourceName}' to enter the '{State}' state.", resourceName, HealthStatus.Healthy);
-
         if (waitBehavior == WaitBehavior.StopOnResourceUnavailable && !TryGetCurrentState(resourceName, out _))
         {
             // TryGetCurrentState returns false both when a resource doesn't exist and when it exists
@@ -253,12 +251,21 @@ public class ResourceNotificationService : IDisposable
             }
         }
 
-        var resourceEvent = await WaitForResourceCoreAsync(
+        var healthyTask = WaitForResourceCoreAsync(
             resourceName,
             re => ShouldYieldHealthyWait(waitBehavior, re.Snapshot),
             $"Resource '{resourceName}' failed to become healthy before the operation was cancelled.",
             waitCondition: "healthy",
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken);
+        // WatchAsync replays the current snapshot synchronously. Skip wait logs when the
+        // resource is already healthy, as repeated dashboard URL requests hit this path.
+        var loggedWait = !healthyTask.IsCompletedSuccessfully;
+        if (loggedWait)
+        {
+            _logger.LogDebug("Waiting for resource '{ResourceName}' to enter the '{State}' state.", resourceName, HealthStatus.Healthy);
+        }
+
+        var resourceEvent = await healthyTask.ConfigureAwait(false);
 
         if (resourceEvent.Snapshot.HealthStatus != HealthStatus.Healthy)
         {
@@ -267,18 +274,35 @@ public class ResourceNotificationService : IDisposable
         }
 
         // Now wait for the resource ready event to be executed (matching behavior of WaitUntilHealthyAsync).
-        _logger.LogDebug("Waiting for resource ready to execute for '{ResourceName}'.", resourceName);
-        resourceEvent = await WaitForResourceCoreAsync(
+        var readyTask = WaitForResourceCoreAsync(
             resourceName,
             re => re.ResourceId == resourceEvent.ResourceId && re.Snapshot.ResourceReadyEvent is not null,
             $"Resource '{resourceName}' failed to execute the resource ready event before the operation was cancelled.",
             waitCondition: "resource_ready",
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken);
+        if (loggedWait || !readyTask.IsCompletedSuccessfully)
+        {
+            _logger.LogDebug("Waiting for resource ready to execute for '{ResourceName}'.", resourceName);
+            loggedWait = true;
+        }
+
+        resourceEvent = await readyTask.ConfigureAwait(false);
 
         // Observe the result of the resource ready event task
-        await resourceEvent.Snapshot.ResourceReadyEvent!.EventTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var eventTask = resourceEvent.Snapshot.ResourceReadyEvent!.EventTask;
+        if (!eventTask.IsCompletedSuccessfully && !loggedWait)
+        {
+            _logger.LogDebug("Waiting for resource ready to execute for '{ResourceName}'.", resourceName);
+            loggedWait = true;
+        }
 
-        _logger.LogDebug("Finished waiting for resource '{ResourceName}'.", resourceName);
+        cancellationToken.ThrowIfCancellationRequested();
+        await eventTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        if (loggedWait)
+        {
+            _logger.LogDebug("Finished waiting for resource '{ResourceName}'.", resourceName);
+        }
 
         return resourceEvent;
     }
@@ -770,26 +794,24 @@ public class ResourceNotificationService : IDisposable
             OnResourceUpdated += WriteToChannel;
         }
 
-        // Return the last snapshot for each resource.
-        // We do this after subscribing to the event to avoid missing any updates.
-
-        // Keep track of the versions we have seen so far to avoid duplicates.
-        var versionsSeen = new Dictionary<string, long>();
-
-        foreach (var state in _resourceNotificationStates)
-        {
-            var resourceId = state.Key;
-
-            if (state.Value.LastSnapshot is { } snapshot)
-            {
-                versionsSeen[resourceId] = snapshot.Version;
-
-                yield return new ResourceEvent(state.Value.Resource, resourceId, snapshot);
-            }
-        }
-
         try
         {
+            // Subscribe before replaying snapshots so updates cannot be missed. Keep the
+            // replay inside try so early disposal also removes the event subscription.
+            var versionsSeen = new Dictionary<string, long>();
+
+            foreach (var state in _resourceNotificationStates)
+            {
+                var resourceId = state.Key;
+
+                if (state.Value.LastSnapshot is { } snapshot)
+                {
+                    versionsSeen[resourceId] = snapshot.Version;
+
+                    yield return new ResourceEvent(state.Value.Resource, resourceId, snapshot);
+                }
+            }
+
             await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
                 // Skip events that are older than the max version we have seen so far. This avoids duplicates.
