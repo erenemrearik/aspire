@@ -345,6 +345,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
               <PropertyGroup>
                 <TargetFramework>net10.0</TargetFramework>
                 <_AspireIntegrationNuGetConfig>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)AspireIntegration.NuGet.Config'))</_AspireIntegrationNuGetConfig>
+                <!--
+                  NuGet computes the project's source locations before the config below is applied,
+                  so the source still has to be added here. The injected config supplies the alias
+                  mapping that makes this source eligible under the ambient mapping policy.
+                -->
+                <RestoreAdditionalProjectSources>$(RestoreAdditionalProjectSources);$(AspireIntegrationPackageSources)</RestoreAdditionalProjectSources>
               </PropertyGroup>
               <ItemGroup>
                 <PackageReference Include="Project.Dependency" Version="1.0.0" />
@@ -403,19 +409,28 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var generatedProjectDirectory = workspace.CreateDirectory("generated-project");
         var restoreDirectory = workspace.CreateDirectory("integration-restore");
         // NuGet merges package sources and source mappings independently. Clear both sections so
-        // user-level mappings cannot silently constrain this test's deliberately isolated feed.
-        await File.WriteAllTextAsync(
-            Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config"),
-            """
-            <configuration>
-              <packageSources>
-                <clear />
-              </packageSources>
-              <packageSourceMapping>
-                <clear />
-              </packageSourceMapping>
-            </configuration>
-            """);
+        // user-level settings cannot leak into the restore, then declare a single ambient source for
+        // framework reference packs that the local SDK may not carry. CI cannot reach nuget.org, so
+        // honor the same service index override the CLI uses. Mapping that source to '*' enables
+        // package-source mapping for every project in the graph, which is what requires the referenced
+        // project to map the test feed through the alias hint rather than merely listing it.
+        var configuredNuGetServiceIndex = Environment.GetEnvironmentVariable(AspireCliIdentityEnvVars.NuGetServiceIndex);
+        var ambientServiceIndex = string.IsNullOrWhiteSpace(configuredNuGetServiceIndex)
+            ? PackageSources.NuGetOrg
+            : configuredNuGetServiceIndex;
+        new XDocument(
+            new XElement("configuration",
+                new XElement("packageSources",
+                    new XElement("clear"),
+                    new XElement("add",
+                        new XAttribute("key", "ambient"),
+                        new XAttribute("value", ambientServiceIndex))),
+                new XElement("packageSourceMapping",
+                    new XElement("clear"),
+                    new XElement("packageSource",
+                        new XAttribute("key", "ambient"),
+                        new XElement("package", new XAttribute("pattern", "*"))))))
+            .Save(Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config"));
         var (server, _) = CreatePackageReferenceServer(workspace);
         var restorePlan = await server.ResolveIntegrationRestorePlanAsync(
             VersionHelper.GetDefaultTemplateVersion(),
@@ -471,6 +486,9 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             UseShellExecute = false
         };
         startInfo.Environment.Remove("MSBuildSDKsPath");
+        // The referenced project restores into the default global packages folder. Isolate it so a
+        // package cached by an earlier run cannot satisfy restore without the test feed being eligible.
+        startInfo.Environment["NUGET_PACKAGES"] = workspace.CreateDirectory("project-packages").FullName;
         if (integrationPackageSources is not null)
         {
             startInfo.Environment[PrebuiltAppHostServer.IntegrationPackageSourcesPropertyName] = integrationPackageSources;
