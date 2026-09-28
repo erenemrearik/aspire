@@ -262,7 +262,7 @@ public class DistributedApplicationBuilderTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public void HttpClientFactoryLogsAreNotForwardedToCli()
+    public void HttpClientFactoryDebugLogsAreFilteredFromAllProviders()
     {
         var testSink = new TestSink();
         var appBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
@@ -277,6 +277,7 @@ public class DistributedApplicationBuilderTests(ITestOutputHelper outputHelper)
         factory.CreateLogger("Microsoft.Extensions.Http.DefaultHttpClientFactory").LogDebug("HTTP cleanup");
         factory.CreateLogger("Microsoft.Extensions.Http.DefaultHttpClientFactory").LogWarning("HTTP warning");
         factory.CreateLogger("Microsoft.Extensions.Http.DefaultHttpClientFactory.Handlers").LogInformation("HTTP nested");
+        factory.CreateLogger("Microsoft.Extensions.Http.DefaultHttpClientFactory").LogError("HTTP error");
         factory.CreateLogger("Microsoft.Extensions.Http.OtherCategory").LogDebug("Other HTTP debug");
 
         var backchannel = app.Services.GetRequiredService<BackchannelLoggerProvider>();
@@ -284,12 +285,15 @@ public class DistributedApplicationBuilderTests(ITestOutputHelper outputHelper)
         backchannel.Unsubscribe(subscriberId);
 
         Assert.Collection(entries,
+            entry => Assert.Equal("HTTP warning", entry.Message),
+            entry => Assert.Equal("HTTP nested", entry.Message),
+            entry => Assert.Equal("HTTP error", entry.Message),
             entry => Assert.Equal("Other HTTP debug", entry.Message));
         Assert.Equal(
-            ["HTTP cleanup", "HTTP warning", "HTTP nested", "Other HTTP debug"],
+            ["HTTP warning", "HTTP nested", "HTTP error", "Other HTTP debug"],
             testSink.Writes
                 .Select(write => write.Message)
-                .Where(message => message is "HTTP cleanup" or "HTTP warning" or "HTTP nested" or "Other HTTP debug"));
+                .Where(message => message is "HTTP cleanup" or "HTTP warning" or "HTTP nested" or "HTTP error" or "Other HTTP debug"));
     }
 
     [Fact]
