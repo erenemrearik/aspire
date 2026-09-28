@@ -641,19 +641,28 @@ public class AuxiliaryBackchannelTests(ITestOutputHelper outputHelper)
 
         var collector = app.Services.GetFakeLogCollector();
 
-        // Wait for the server to process the disconnect and emit a Trace log
+        // Depending on whether the RPC reader observes EOF or the socket reset, an abrupt close
+        // can complete normally or throw an IOException. Both are expected disconnects.
         await AsyncTestHelpers.AssertIsTrueRetryAsync(() =>
         {
             var logs = collector.GetSnapshot();
 
-            var hasTraceLog = logs.Any(l =>
-                l.Level == LogLevel.Trace &&
+            return logs.Any(l =>
                 l.Category == typeof(AuxiliaryBackchannelService).FullName &&
-                l.Message == "Client disconnected from auxiliary backchannel (connection reset)" &&
-                l.Exception is null);
+                l.Message.StartsWith("Client disconnected from auxiliary backchannel", StringComparison.Ordinal));
+        }, "Expected an auxiliary backchannel disconnect log");
 
-            return hasTraceLog;
-        }, "Expected a Trace disconnect log without an exception stack trace");
+        var serviceLogs = collector.GetSnapshot()
+            .Where(l => l.Category == typeof(AuxiliaryBackchannelService).FullName)
+            .ToArray();
+        Assert.All(serviceLogs, l => Assert.True(l.Level < LogLevel.Error, l.Message));
+        Assert.All(
+            serviceLogs.Where(l => l.Message.StartsWith("Client disconnected from auxiliary backchannel", StringComparison.Ordinal)),
+            l =>
+            {
+                Assert.Equal(LogLevel.Trace, l.Level);
+                Assert.Null(l.Exception);
+            });
 
         await app.StopAsync().DefaultTimeout();
     }
