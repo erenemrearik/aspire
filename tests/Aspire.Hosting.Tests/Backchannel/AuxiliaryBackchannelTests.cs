@@ -110,6 +110,12 @@ public class AuxiliaryBackchannelTests(ITestOutputHelper outputHelper)
     {
         using var builder = TestDistributedApplicationBuilder.CreateWithTestContainerRegistry(outputHelper);
 
+        builder.Services.AddLogging(b =>
+        {
+            b.AddFakeLogging();
+            b.SetMinimumLevel(LogLevel.Trace);
+        });
+
         var connectedEventReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         builder.Eventing.Subscribe<AuxiliaryBackchannelConnectedEvent>((_, _) =>
         {
@@ -135,6 +141,12 @@ public class AuxiliaryBackchannelTests(ITestOutputHelper outputHelper)
 
         var bytesRead = await stream.ReadAsync(new byte[1]).AsTask().DefaultTimeout();
         Assert.Equal(0, bytesRead);
+
+        var logs = app.Services.GetFakeLogCollector().GetSnapshot()
+            .Where(l => l.Category == typeof(AuxiliaryBackchannelService).FullName)
+            .ToArray();
+        Assert.Contains(logs, l => l.Level == LogLevel.Trace &&
+            l.Message == "Client connection handler was cancelled");
     }
 
     [Fact]
@@ -597,6 +609,7 @@ public class AuxiliaryBackchannelTests(ITestOutputHelper outputHelper)
         builder.Services.AddLogging(b =>
         {
             b.AddFakeLogging();
+            b.SetMinimumLevel(LogLevel.Trace);
         });
 
         using var app = builder.Build();
@@ -628,18 +641,19 @@ public class AuxiliaryBackchannelTests(ITestOutputHelper outputHelper)
 
         var collector = app.Services.GetFakeLogCollector();
 
-        // Wait for the server to process the disconnect and emit a Debug log
+        // Wait for the server to process the disconnect and emit a Trace log
         await AsyncTestHelpers.AssertIsTrueRetryAsync(() =>
         {
             var logs = collector.GetSnapshot();
 
-            var hasDebugLog = logs.Any(l =>
-                l.Level == LogLevel.Debug &&
+            var hasTraceLog = logs.Any(l =>
+                l.Level == LogLevel.Trace &&
                 l.Category == typeof(AuxiliaryBackchannelService).FullName &&
-                l.Message.Contains("Client disconnected from auxiliary backchannel"));
+                l.Message == "Client disconnected from auxiliary backchannel (connection reset)" &&
+                l.Exception is null);
 
-            return hasDebugLog;
-        }, "Expected a Debug log for client disconnect and no Error logs from AuxiliaryBackchannelService");
+            return hasTraceLog;
+        }, "Expected a Trace disconnect log without an exception stack trace");
 
         await app.StopAsync().DefaultTimeout();
     }
