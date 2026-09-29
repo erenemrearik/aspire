@@ -410,7 +410,9 @@ internal sealed partial class PsCommand
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to get AppHost SDK version for {AppHostPath}", info.AppHostPath);
+                // The AppHost may disconnect after the connection snapshot was taken.
+                _logger.LogDebug(AppHostFollowDisconnectHelpers.IsExpectedDisconnect(ex) ? null : ex,
+                    "Failed to get AppHost SDK version for {AppHostPath}", info.AppHostPath);
             }
 
             string? dashboardUrl = null;
@@ -422,7 +424,8 @@ internal sealed partial class PsCommand
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to get dashboard URL for {AppHostPath}", info.AppHostPath);
+                _logger.LogDebug(AppHostFollowDisconnectHelpers.IsExpectedDisconnect(ex) ? null : ex,
+                    "Failed to get dashboard URL for {AppHostPath}", info.AppHostPath);
             }
 
             appHostInfos.Add(new AppHostDisplayInfo
