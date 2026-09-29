@@ -231,6 +231,7 @@ internal sealed class NuGetClient(
             RuntimeIdentifierGraphPath = runtimeIdentifierGraphPath
         };
 
+        var pathContext = NuGetPathContext.Create(settings);
         var restoreMetadata = new ProjectRestoreMetadata
         {
             ProjectUniqueName = projectName,
@@ -238,10 +239,15 @@ internal sealed class NuGetClient(
             ProjectPath = projectPath,
             ProjectStyle = ProjectStyle.PackageReference,
             OutputPath = outputPath,
-            PackagesPath = globalPackagesFolderOverride ?? SettingsUtility.GetGlobalPackagesFolder(settings),
+            PackagesPath = globalPackagesFolderOverride ?? pathContext.UserPackageFolder,
             OriginalTargetFrameworks = [tfmShort],
             ConfigFilePaths = settings.GetConfigFilePaths().ToList(),
         };
+
+        foreach (var fallbackPackageFolder in pathContext.FallbackPackageFolders)
+        {
+            restoreMetadata.FallbackFolders.Add(fallbackPackageFolder);
+        }
 
         foreach (var source in sources)
         {

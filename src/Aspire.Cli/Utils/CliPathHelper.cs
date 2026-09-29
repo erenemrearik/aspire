@@ -15,7 +15,6 @@ internal static class CliPathHelper
 {
     internal const string AspireHomeEnvironmentVariable = AspireHomeDirectory.EnvironmentVariable;
     internal const string NuGetPackagesEnvironmentVariable = "NUGET_PACKAGES";
-    internal const string NuGetFallbackPackagesEnvironmentVariable = "NUGET_FALLBACK_PACKAGES";
 
     /// <summary>
     /// Name of the directory under <c>ASPIRE_HOME</c> that holds NuGet package caches keyed by
@@ -98,22 +97,6 @@ internal static class CliPathHelper
         }
 
         return Path.GetFullPath(path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar));
-    }
-
-    internal static IReadOnlyList<string>? GetNuGetFallbackPackagesEnvironmentPaths(IEnvironment environment)
-    {
-        var value = environment.GetEnvironmentVariable(NuGetFallbackPackagesEnvironmentVariable);
-        if (string.IsNullOrEmpty(value))
-        {
-            return null;
-        }
-
-        return value
-            .Split(';', StringSplitOptions.RemoveEmptyEntries)
-            .Select(static path => Path.IsPathRooted(path)
-                ? Path.GetFullPath(path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar))
-                : path)
-            .ToArray();
     }
 
     /// <summary>

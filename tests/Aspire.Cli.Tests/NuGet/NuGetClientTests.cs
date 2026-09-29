@@ -677,6 +677,151 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
+    public async Task RestoreAsync_RespectsFallbackPackageFolderFromAmbientConfigWithOverlay()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var feedDirectory = workspace.CreateDirectory("feed");
+        var emptyFeedDirectory = workspace.CreateDirectory("empty-feed");
+        var fallbackPackagesDirectory = workspace.CreateDirectory("fallback-packages");
+        var globalPackagesDirectory = workspace.CreateDirectory("global-packages");
+        var seedRestoreDirectory = workspace.CreateDirectory("seed-restore");
+        var restoreDirectory = workspace.CreateDirectory("restore");
+        var packageId = $"Aspire.Test.Package.{Guid.NewGuid():N}";
+        CreatePackage(feedDirectory.FullName, packageId);
+
+        var client = new NuGetClient(
+            new TestFeatures(),
+            new TestEnvironment(),
+            NullLogger<NuGetClient>.Instance);
+
+        await PopulatePackageFolderAsync(
+            client,
+            packageId,
+            feedDirectory.FullName,
+            fallbackPackagesDirectory.FullName,
+            seedRestoreDirectory.FullName,
+            workspace.WorkspaceRoot.FullName);
+
+        var ambientConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "ambient.config");
+        WriteFallbackPackagesConfig(
+            ambientConfigPath,
+            globalPackagesDirectory.FullName,
+            fallbackPackagesDirectory.FullName);
+
+        var overlayConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "overlay.config");
+        client.WriteConfigOverlay(
+            new NuGetConfigOverlayRequest(
+                [new("selected", emptyFeedDirectory.FullName)],
+                [new("selected", [packageId])],
+                ClearDisabledPackageSources: false,
+                DisabledPackageSourceKeys: [],
+                GlobalPackagesFolder: null),
+            overlayConfigPath);
+
+        await client.RestoreAsync(
+            [(packageId, "[1.0.0]")],
+            "net10.0",
+            runtimeIdentifier: null,
+            restoreDirectory.FullName,
+            sources: [],
+            nugetConfigPaths: [overlayConfigPath, ambientConfigPath],
+            workingDirectory: workspace.WorkspaceRoot.FullName,
+            globalPackagesFolderOverride: null,
+            sensitiveSources: [],
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var assets = new LockFileFormat().Read(Path.Combine(restoreDirectory.FullName, LockFileFormat.AssetsFileName));
+        Assert.Equal(
+            [
+                Path.TrimEndingDirectorySeparator(globalPackagesDirectory.FullName),
+                Path.TrimEndingDirectorySeparator(fallbackPackagesDirectory.FullName)
+            ],
+            assets.PackageFolders.Select(static folder => Path.TrimEndingDirectorySeparator(folder.Path)));
+        Assert.False(Directory.Exists(Path.Combine(globalPackagesDirectory.FullName, packageId.ToLowerInvariant(), "1.0.0")));
+    }
+
+    [Fact]
+    public async Task RestoreAsync_NuGetFallbackPackagesEnvironmentVariableOverridesConfig()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var feedDirectory = workspace.CreateDirectory("feed");
+        var configuredFallbackDirectory = workspace.CreateDirectory("configured-fallback");
+        var firstEnvironmentFallbackDirectory = workspace.CreateDirectory("environment-fallback-1");
+        var secondEnvironmentFallbackDirectory = workspace.CreateDirectory("environment-fallback-2");
+        var globalPackagesDirectory = workspace.CreateDirectory("global-packages");
+        var seedRestoreDirectory = workspace.CreateDirectory("seed-restore");
+        var restoreDirectory = workspace.CreateDirectory("restore");
+        var packageId = $"Aspire.Test.Package.{Guid.NewGuid():N}";
+        CreatePackage(feedDirectory.FullName, packageId);
+
+        var client = new NuGetClient(
+            new TestFeatures(),
+            new TestEnvironment(),
+            NullLogger<NuGetClient>.Instance);
+
+        await PopulatePackageFolderAsync(
+            client,
+            packageId,
+            feedDirectory.FullName,
+            secondEnvironmentFallbackDirectory.FullName,
+            seedRestoreDirectory.FullName,
+            workspace.WorkspaceRoot.FullName);
+
+        var nugetConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "nuget.config");
+        WriteFallbackPackagesConfig(
+            nugetConfigPath,
+            globalPackagesDirectory.FullName,
+            configuredFallbackDirectory.FullName);
+
+        var options = new RemoteInvokeOptions();
+        options.StartInfo.Environment.Remove("NUGET_PACKAGES");
+        options.StartInfo.Environment["NUGET_FALLBACK_PACKAGES"] =
+            $"{firstEnvironmentFallbackDirectory.FullName};{secondEnvironmentFallbackDirectory.FullName}";
+
+        RemoteExecutor.Invoke(
+            static async (packageId, restorePath, workingDirectory) =>
+            {
+                var configPath = Path.Combine(workingDirectory, "nuget.config");
+                var globalPackagesPath = Path.Combine(workingDirectory, "global-packages");
+                var firstFallbackPackagesPath = Path.Combine(workingDirectory, "environment-fallback-1");
+                var secondFallbackPackagesPath = Path.Combine(workingDirectory, "environment-fallback-2");
+                Environment.SetEnvironmentVariable("NUGET_PACKAGES", null);
+                Environment.SetEnvironmentVariable(
+                    "NUGET_FALLBACK_PACKAGES",
+                    $"{firstFallbackPackagesPath};{secondFallbackPackagesPath}");
+
+                var client = new NuGetClient(
+                    new TestFeatures(),
+                    new TestEnvironment(),
+                    NullLogger<NuGetClient>.Instance);
+
+                await client.RestoreAsync(
+                    [(packageId, "[1.0.0]")],
+                    "net10.0",
+                    runtimeIdentifier: null,
+                    restorePath,
+                    [],
+                    configPath,
+                    workingDirectory,
+                    CancellationToken.None);
+
+                var assets = new LockFileFormat().Read(Path.Combine(restorePath, LockFileFormat.AssetsFileName));
+                Assert.Equal(
+                    [
+                        Path.TrimEndingDirectorySeparator(globalPackagesPath),
+                        Path.TrimEndingDirectorySeparator(firstFallbackPackagesPath),
+                        Path.TrimEndingDirectorySeparator(secondFallbackPackagesPath)
+                    ],
+                    assets.PackageFolders.Select(static folder => Path.TrimEndingDirectorySeparator(folder.Path)));
+                Assert.False(Directory.Exists(Path.Combine(globalPackagesPath, packageId.ToLowerInvariant(), "1.0.0")));
+            },
+            packageId,
+            restoreDirectory.FullName,
+            workspace.WorkspaceRoot.FullName,
+            options).Dispose();
+    }
+
+    [Fact]
     public async Task RestoreAndWriteManifestAsync_UsesRuntimeGraphFallbackAssets()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
@@ -1314,6 +1459,48 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
 
         return nugetConfigPath;
     }
+
+    private static void WriteFallbackPackagesConfig(
+        string configPath,
+        string globalPackagesFolder,
+        string fallbackPackagesFolder)
+    {
+        File.WriteAllText(
+            configPath,
+            $"""
+            <configuration>
+              <config>
+                <add key="globalPackagesFolder" value="{globalPackagesFolder}" />
+              </config>
+              <packageSources>
+                <clear />
+              </packageSources>
+              <fallbackPackageFolders>
+                <clear />
+                <add key="fallback" value="{fallbackPackagesFolder}" />
+              </fallbackPackageFolders>
+            </configuration>
+            """);
+    }
+
+    private static Task PopulatePackageFolderAsync(
+        NuGetClient client,
+        string packageId,
+        string feedDirectory,
+        string packageFolder,
+        string restoreDirectory,
+        string workingDirectory)
+        => client.RestoreAsync(
+            [(packageId, "[1.0.0]")],
+            "net10.0",
+            runtimeIdentifier: null,
+            restoreDirectory,
+            [feedDirectory],
+            nugetConfigPaths: [],
+            workingDirectory: workingDirectory,
+            globalPackagesFolderOverride: packageFolder,
+            sensitiveSources: [],
+            cancellationToken: TestContext.Current.CancellationToken);
 
     private static void WriteTrustedSignerConfig(string configPath, string fingerprint)
     {
