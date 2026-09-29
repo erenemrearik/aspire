@@ -408,7 +408,7 @@ internal sealed partial class PsCommand
                     }
                 }
             }
-            catch (Exception ex) when (AppHostFollowDisconnectHelpers.IsExpectedDisconnect(ex))
+            catch (Exception ex) when (BackchannelDisconnectHelpers.IsExpectedDisconnect(ex))
             {
                 // The AppHost may disconnect after the connection snapshot was taken.
             }
@@ -424,7 +424,7 @@ internal sealed partial class PsCommand
                 var dashboardUrls = await connection.GetDashboardUrlsAsync(cancellationToken).ConfigureAwait(false);
                 dashboardUrl = dashboardUrls?.BaseUrlWithLoginToken;
             }
-            catch (Exception ex) when (AppHostFollowDisconnectHelpers.IsExpectedDisconnect(ex))
+            catch (Exception ex) when (BackchannelDisconnectHelpers.IsExpectedDisconnect(ex))
             {
                 // Keep following even when the AppHost disconnects during a dashboard URL request.
             }
