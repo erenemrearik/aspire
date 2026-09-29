@@ -90,6 +90,12 @@ public sealed class ProjectReferenceTests(ITestOutputHelper output)
               <PropertyGroup>
                 <TargetFramework>net10.0</TargetFramework>
                 <_AspireIntegrationNuGetConfig>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)AspireIntegration.NuGet.Config'))</_AspireIntegrationNuGetConfig>
+                <!--
+                  NuGet computes the project's source locations before the config below is applied,
+                  so the source still has to be added here. The injected config supplies the alias
+                  mapping that makes this source eligible under the ambient mapping policy.
+                -->
+                <RestoreAdditionalProjectSources>$(RestoreAdditionalProjectSources);$(AspireIntegrationPackageSources)</RestoreAdditionalProjectSources>
               </PropertyGroup>
               <ItemGroup>
                 <PackageReference Include="Aspire.Hosting" Version="$(AspireIntegrationHostingVersion)" />

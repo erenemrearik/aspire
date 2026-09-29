@@ -431,7 +431,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                         new XAttribute("key", "ambient"),
                         new XElement("package", new XAttribute("pattern", "*"))))))
             .Save(Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config"));
-        var (server, _) = CreatePackageReferenceServer(workspace);
+        var (server, _) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.DiscoverAmbient);
         var restorePlan = await server.ResolveIntegrationRestorePlanAsync(
             VersionHelper.GetDefaultTemplateVersion(),
             requestedChannel: null,
@@ -477,6 +477,10 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             .Select(static source => source.Attribute("value")!.Value)
             .ToArray();
         Assert.Equal([feedDirectory.FullName], configuredSources);
+        Assert.Equal(["*"], GetPackagePatternsForKey(restoreConfig, "ambient"));
+        Assert.Equal(
+            ["Direct.Integration", "*"],
+            GetPackagePatternsForSource(restoreConfig, feedDirectory.FullName));
 
         var startInfo = new ProcessStartInfo("dotnet")
         {
@@ -712,7 +716,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
         var executionContext = CreateContextWithIdentityChannel(identityChannel, identityVersion);
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService, executionContext);
+        var (server, nuGetClient) = CreatePackageReferenceServer(
+            workspace,
+            NuGetSettingsMode.Isolated,
+            packagingService,
+            executionContext);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -752,7 +760,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
         var executionContext = CreateContextWithIdentityChannel(identityChannel, identityVersion);
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService, executionContext);
+        var (server, nuGetClient) = CreatePackageReferenceServer(
+            workspace,
+            NuGetSettingsMode.Isolated,
+            packagingService,
+            executionContext);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -799,7 +811,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 [stableChannel, identityPackageChannel])
         };
         var executionContext = CreateContextWithIdentityChannel(identityChannel, identityVersion);
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService, executionContext);
+        var (server, nuGetClient) = CreatePackageReferenceServer(
+            workspace,
+            NuGetSettingsMode.Isolated,
+            packagingService,
+            executionContext);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -1807,13 +1823,16 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         TestDotNetCliRunner? dotNetCliRunner = null,
         IPackagingService? packagingService = null,
         CliExecutionContext? executionContext = null,
-        BundleNuGetService? nugetService = null)
+        FakeNuGetClient? nuGetClient = null)
     {
         executionContext ??= TestExecutionContextFactory.CreateTestContext();
-
-        nugetService ??= new BundleNuGetService(
+        nuGetClient ??= CreateIsolatedNuGetClient();
+        var nugetService = new BundleNuGetService(
             NullLogger<BundleNuGetService>.Instance,
-            CreatePolicyWritingFakeNuGetClient());
+            nuGetClient)
+        {
+            SourceIdentityKeyFactory = static () => s_sourceIdentityKey
+        };
 
         return new PrebuiltAppHostServer(
             appPath ?? workspace.WorkspaceRoot.FullName,
@@ -1967,7 +1986,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -2003,7 +2022,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         using var cancellation = new CancellationTokenSource();
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
         nuGetClient.RestoreCallback = (_, _, _, _, _, _, _, _, _, cancellationToken) =>
         {
             cancellation.Cancel();
@@ -2030,7 +2049,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var packageSourceOverride = workspace.CreateDirectory(
             Path.Combine("aspire-pr-hive", "packages")).FullName;
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2062,7 +2081,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var packageSourceOverride = workspace.CreateDirectory(
             Path.Combine("aspire-pr-hive", "packages")).FullName;
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2111,7 +2130,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2160,7 +2179,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2214,7 +2233,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2260,7 +2279,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2301,7 +2320,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromException<IEnumerable<PackageChannel>>(
                 new InvalidOperationException("simulated packaging service failure"))
         };
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2351,7 +2370,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2413,7 +2432,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         };
 
         XDocument? policyOverlay = null;
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
         nuGetClient.RestoreCallback = (_, _, _, _, _, configPaths, _, _, _, _) =>
         {
             // Read the temp NuGet.config while it still exists; PrepareAsync deletes it
@@ -2463,7 +2482,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             }
             """);
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
         nuGetClient.RestoreCallback = (_, _, _, _, _, _, _, _, _, _) =>
             Task.FromException(new InvalidOperationException("simulated restore failure"));
 
@@ -2499,7 +2518,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         const string packageSourceOverride = "/tmp/aspire-pr-hive/packages";
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
         nuGetClient.RestoreCallback = (_, _, _, _, _, _, _, _, _, _) =>
             Task.FromException(new InvalidOperationException("simulated restore failure"));
 
@@ -2686,18 +2705,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             },
             WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
         };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient)
-        {
-            SourceIdentityKeyFactory = static () => s_sourceIdentityKey
-        };
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
             packagingService: packagingService,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -2911,26 +2924,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             """);
 
         var layout = CreateBundleLayout(workspace);
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        var nuGetClient = new FakeNuGetClient
-        {
-            GetSettingsCallback = settingsClient.GetSettings,
-            WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
-        };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient)
-        {
-            SourceIdentityKeyFactory = static () => s_sourceIdentityKey
-        };
+        var nuGetClient = CreateSettingsAwareNuGetClient();
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -2987,21 +2986,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             """);
 
         var layout = CreateBundleLayout(workspace);
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        var nuGetClient = new FakeNuGetClient
-        {
-            GetSettingsCallback = settingsClient.GetSettings,
-            WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
-        };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient)
-        {
-            SourceIdentityKeyFactory = static () => s_sourceIdentityKey
-        };
+        var nuGetClient = CreateSettingsAwareNuGetClient();
         var channel = PackageChannel.CreateExplicitChannel(
             name: "daily",
             quality: PackageChannelQuality.Both,
@@ -3017,7 +3002,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             workspace,
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
-            nugetService: nugetService,
+            nuGetClient: nuGetClient,
             packagingService: packagingService);
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -3064,12 +3049,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             </configuration>
             """);
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        nuGetClient.GetSettingsCallback = settingsClient.GetSettings;
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.DiscoverAmbient);
 
         var workingDirectory = GetWorkingDirectory(server);
         try
@@ -3139,16 +3119,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         {
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([dailyChannel])
         };
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(
+            workspace,
+            NuGetSettingsMode.DiscoverAmbient,
+            packagingService);
         XDocument? restoreOverlay = null;
         string[]? restoreConfigPaths = null;
         string? policyOverlayPath = null;
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        nuGetClient.GetSettingsCallback = settingsClient.GetSettings;
-        nuGetClient.WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay;
         nuGetClient.RestoreCallback = (_, _, _, _, _, configPaths, _, _, _, _) =>
         {
             restoreConfigPaths = [.. configPaths];
@@ -3228,24 +3205,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([dailyChannel])
         };
         var layout = CreateBundleLayout(workspace);
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        var nuGetClient = new FakeNuGetClient
-        {
-            GetSettingsCallback = settingsClient.GetSettings,
-            WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
-        };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient);
+        var nuGetClient = CreateSettingsAwareNuGetClient();
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
             packagingService: packagingService,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
         var integrations = new[]
         {
@@ -3316,24 +3282,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([dailyChannel])
         };
         var layout = CreateBundleLayout(workspace);
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        var nuGetClient = new FakeNuGetClient
-        {
-            GetSettingsCallback = settingsClient.GetSettings,
-            WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
-        };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient);
+        var nuGetClient = CreateSettingsAwareNuGetClient();
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
             packagingService: packagingService,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
         var integrations = new[]
         {
@@ -3588,7 +3543,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([prChannel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
         nuGetClient.RestoreCallback = (_, _, _, _, _, _, _, _, _, _) =>
             Task.FromException(new InvalidOperationException("simulated restore failure"));
 
@@ -3739,7 +3694,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         IReadOnlyList<string>? restoreSources = null;
         string? restoreWorkingDirectory = null;
         string? temporaryNuGetConfigContent = null;
-        var nuGetClient = CreatePolicyWritingFakeNuGetClient();
+        var nuGetClient = CreateIsolatedNuGetClient();
         nuGetClient.RestoreCallback = (_, _, _, _, sources, configPaths, workingDirectory, _, _, _) =>
         {
             restoreSources = sources;
@@ -3747,10 +3702,6 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             temporaryNuGetConfigContent = File.ReadAllText(configPaths[0]);
             return Task.CompletedTask;
         };
-
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient);
 
         var stagingChannel = PackageChannel.CreateExplicitChannel(
             PackageChannelNames.Staging,
@@ -3774,7 +3725,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             layout: layout,
             packagingService: packagingService,
             executionContext: executionContext,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -3983,12 +3934,6 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             },
             WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
         };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient)
-        {
-            SourceIdentityKeyFactory = static () => s_sourceIdentityKey
-        };
         var closureFiles = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["MyIntegration.dll"] = "integration-v1"
@@ -4007,7 +3952,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
             packagingService: packagingService,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -4389,27 +4334,25 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         return CreatePrebuiltAppHostServer(workspace, layout: layout, dotNetCliRunner: dotNetCliRunner);
     }
 
-    private static (PrebuiltAppHostServer Server, FakeNuGetClient NuGetClient) CreatePackageReferenceServer(TemporaryWorkspace workspace)
-    {
-        return CreatePackageReferenceServer(workspace, MockPackagingServiceFactory.Create());
-    }
-
     private static (PrebuiltAppHostServer Server, FakeNuGetClient NuGetClient) CreatePackageReferenceServer(
         TemporaryWorkspace workspace,
-        IPackagingService packagingService,
+        NuGetSettingsMode settingsMode,
+        IPackagingService? packagingService = null,
         CliExecutionContext? executionContext = null)
     {
         var layout = CreateBundleLayout(workspace);
-        var nuGetClient = CreatePolicyWritingFakeNuGetClient();
-        var nugetService = new BundleNuGetService(
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<BundleNuGetService>.Instance,
-            nuGetClient);
+        var nuGetClient = settingsMode switch
+        {
+            NuGetSettingsMode.Isolated => CreateIsolatedNuGetClient(),
+            NuGetSettingsMode.DiscoverAmbient => CreateSettingsAwareNuGetClient(),
+            _ => throw new ArgumentOutOfRangeException(nameof(settingsMode))
+        };
 
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
-            packagingService: packagingService,
-            nugetService: nugetService,
+            packagingService: packagingService ?? MockPackagingServiceFactory.Create(),
+            nuGetClient: nuGetClient,
             executionContext: executionContext);
 
         return (server, nuGetClient);
@@ -4429,7 +4372,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         return new LayoutConfiguration { LayoutPath = layoutRoot.FullName };
     }
 
-    private static FakeNuGetClient CreatePolicyWritingFakeNuGetClient()
+    private static FakeNuGetClient CreateIsolatedNuGetClient()
     {
         var settingsClient = new NuGetClient(
             new TestFeatures(),
@@ -4437,6 +4380,19 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             NullLogger<NuGetClient>.Instance);
         return new FakeNuGetClient
         {
+            WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
+        };
+    }
+
+    private static FakeNuGetClient CreateSettingsAwareNuGetClient()
+    {
+        var settingsClient = new NuGetClient(
+            new TestFeatures(),
+            new TestEnvironment(),
+            NullLogger<NuGetClient>.Instance);
+        return new FakeNuGetClient
+        {
+            GetSettingsCallback = settingsClient.GetSettings,
             WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
         };
     }
@@ -4842,15 +4798,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var layout = CreateBundleLayout(workspace);
         var executionContext = TestExecutionContextFactory.CreateTestContext();
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            new FakeNuGetClient());
+        var nuGetClient = CreateIsolatedNuGetClient();
 
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             executionContext: executionContext,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
 
         var startInfo = server.CreateStartInfo(123);
 
@@ -4905,6 +4859,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
+
+    private enum NuGetSettingsMode
+    {
+        Isolated,
+        DiscoverAmbient
     }
 
     private sealed class FixedLayoutDiscovery(LayoutConfiguration layout) : ILayoutDiscovery
