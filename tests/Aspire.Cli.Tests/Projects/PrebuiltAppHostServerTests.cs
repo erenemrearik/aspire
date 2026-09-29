@@ -3426,6 +3426,75 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         }
     }
 
+    [Fact]
+    public async Task PrepareAsync_WhenDependencyGraphSpecIsStale_OmitsRawProjectRestoreFailure()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        const string unverifiedSource = "https://packages.example.com/v3/index.json?token=unverified-secret";
+        var staleGraphWasDeletedBeforeBuild = false;
+        string? dependencyGraphSpecPath = null;
+        var dotNetCliRunner = new TestDotNetCliRunner
+        {
+            BuildAsyncCallback = (_, _, options, _) =>
+            {
+                staleGraphWasDeletedBeforeBuild = !File.Exists(dependencyGraphSpecPath);
+                options.StandardErrorCallback?.Invoke(
+                    $"NU1301: Unable to load the service index for source {unverifiedSource}.");
+                return 1;
+            }
+        };
+        var server = CreatePrebuiltAppHostServer(workspace, dotNetCliRunner: dotNetCliRunner);
+        var workingDirectory = GetWorkingDirectory(server);
+        var restoreDirectory = Path.Combine(workingDirectory, IntegrationClosureBuilder.IntegrationRestoreFolderName);
+        var generatedProjectFile = new FileInfo(
+            Path.Combine(restoreDirectory, PrebuiltAppHostServer.IntegrationProjectFileName));
+        var intermediateOutputPath = Path.Combine(restoreDirectory, "obj");
+        dependencyGraphSpecPath = Path.Combine(
+            intermediateOutputPath,
+            $"{generatedProjectFile.Name}.nuget.dgspec.json");
+        WriteDependencyGraphSpec(
+            generatedProjectFile,
+            JsonSerializer.Serialize(new
+            {
+                projects = new Dictionary<string, object>
+                {
+                    [generatedProjectFile.FullName] = new
+                    {
+                        restore = new
+                        {
+                            sources = new Dictionary<string, object>
+                            {
+                                [PackageSources.NuGetOrg] = new { }
+                            }
+                        }
+                    }
+                }
+            }),
+            intermediateOutputPath);
+
+        try
+        {
+            var result = await server.PrepareAsync(
+                "13.4.0",
+                [
+                    IntegrationReference.FromPackage("Aspire.Hosting.Redis", "13.4.0"),
+                    IntegrationReference.FromProject("MyIntegration", "/path/to/MyIntegration.csproj")
+                ]);
+
+            Assert.False(result.Success);
+            Assert.True(staleGraphWasDeletedBeforeBuild);
+            Assert.NotNull(result.Output);
+            Assert.Equal(
+                [(OutputLineStream.StdErr, ErrorStrings.IntegrationBuildFailed)],
+                result.Output.GetLines());
+        }
+        finally
+        {
+            server.Dispose();
+            DeleteWorkingDirectory(workingDirectory);
+        }
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("{")]

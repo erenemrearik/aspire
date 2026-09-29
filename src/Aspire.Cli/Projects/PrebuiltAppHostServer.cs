@@ -632,6 +632,17 @@ internal sealed class PrebuiltAppHostServer : IAppHostServerProject, IDisposable
         await WriteIfChangedAsync(
             Path.Combine(restoreDir, "Directory.Build.targets"), "<Project />", cancellationToken);
 
+        // Restore graph generation can fail before NuGet replaces a graph from a previous build.
+        // Remove it first so failure redaction never trusts stale source metadata when deciding
+        // whether the current build output is safe to replay.
+        var dependencyGraphSpecPath = Path.Combine(
+            intermediateOutputPath,
+            $"{Path.GetFileName(projectFilePath)}.nuget.dgspec.json");
+        if (File.Exists(dependencyGraphSpecPath))
+        {
+            File.Delete(dependencyGraphSpecPath);
+        }
+
         _logger.LogDebug("Building integration project with {ProjectCount} project references", projectRefs.Count);
 
         var (exitCode, buildOutput) = await BuildIntegrationProjectAsync(
