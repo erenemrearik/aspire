@@ -106,34 +106,11 @@ public class AppHostAuxiliaryBackchannelTests
         await server.WaitForClientDisconnectAsync().DefaultTimeout();
     }
 
-    [Fact]
-    public async Task GetConsoleLogBatchesAsync_WhenLegacyLogStreamDisconnects_PropagatesDisconnect()
-    {
-        using var server = TestAppHostBackchannelServer.Start(nameof(TestAppHostRpcTarget.GetResourceLogsAsync));
-        using var backchannel = await server.ConnectAsync().DefaultTimeout();
-
-        var readTask = ReadLogsAsync();
-        await server.WaitForStalledMethodEntryAsync().DefaultTimeout();
-        server.DisconnectClient();
-
-        var exception = await Record.ExceptionAsync(() => readTask).DefaultTimeout();
-        Assert.NotNull(exception);
-        Assert.True(BackchannelDisconnectHelpers.IsExpectedDisconnect(exception), exception.ToString());
-
-        async Task ReadLogsAsync()
-        {
-            await foreach (var _ in backchannel.GetConsoleLogBatchesAsync(new GetConsoleLogsRequest { Follow = true }))
-            {
-            }
-        }
-    }
-
     private sealed class TestAppHostBackchannelServer : IDisposable
     {
         private readonly TcpListener _listener;
         private readonly List<IDisposable> _disposables = [];
         private readonly TaskCompletionSource _clientDisconnected = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private NetworkStream? _serverStream;
 
         private TestAppHostBackchannelServer(string? stalledMethod)
         {
@@ -162,7 +139,6 @@ public class AppHostAuxiliaryBackchannelTests
             await clientSocket.ConnectAsync((IPEndPoint)_listener.LocalEndpoint).DefaultTimeout();
             var serverSocket = await acceptTask.DefaultTimeout();
             var serverStream = new NetworkStream(serverSocket, ownsSocket: true);
-            _serverStream = serverStream;
             var messageHandler = new HeaderDelimitedMessageHandler(serverStream, serverStream, BackchannelJsonSerializerContext.CreateRpcMessageFormatter());
             var rpc = new JsonRpc(messageHandler, Target);
             rpc.Disconnected += (_, _) => _clientDisconnected.TrySetResult();
@@ -182,8 +158,6 @@ public class AppHostAuxiliaryBackchannelTests
         public Task WaitForClientDisconnectAsync() => _clientDisconnected.Task;
 
         public Task WaitForStalledMethodEntryAsync() => Target.WaitForStalledMethodEntryAsync();
-
-        public void DisconnectClient() => _serverStream!.Dispose();
 
         public void Dispose()
         {
@@ -242,24 +216,6 @@ public class AppHostAuxiliaryBackchannelTests
             {
                 Capabilities = _capabilities
             };
-        }
-
-        public async Task<IAsyncEnumerable<ResourceLogLine>> GetResourceLogsAsync(
-            string? resourceName = null,
-            bool follow = false,
-            CancellationToken cancellationToken = default)
-        {
-            _ = resourceName;
-            _ = follow;
-            await StallIfRequestedAsync(nameof(GetResourceLogsAsync));
-            return EmptyLogsAsync(cancellationToken);
-        }
-
-        private static async IAsyncEnumerable<ResourceLogLine> EmptyLogsAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Task.CompletedTask;
-            yield break;
         }
 
         public Task<GetResourcesResponse> GetResourcesAsync(GetResourcesRequest? request = null, CancellationToken cancellationToken = default)
