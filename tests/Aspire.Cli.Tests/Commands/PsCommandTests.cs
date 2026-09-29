@@ -566,7 +566,7 @@ public class PsCommandTests(ITestOutputHelper outputHelper)
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task PsCommand_FollowJsonFormat_LogsRpcFailuresWithoutExpectedDisconnectStacks(bool expectedDisconnect)
+    public async Task PsCommand_FollowJsonFormat_IgnoresExpectedDisconnectsAndLogsUnexpectedRpcFailures(bool expectedDisconnect)
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         using var cancellationTokenSource = new CancellationTokenSource();
@@ -609,19 +609,27 @@ public class PsCommandTests(ITestOutputHelper outputHelper)
         Assert.Null(output.SdkVersion);
         Assert.Null(output.DashboardUrl);
 
-        Assert.Collection(logger.Collector.GetSnapshot(),
-            sdkLog =>
-            {
-                Assert.Equal(LogLevel.Debug, sdkLog.Level);
-                Assert.Equal($"Failed to get AppHost SDK version for {appHostPath}", sdkLog.Message);
-                Assert.Same(expectedDisconnect ? null : rpcException, sdkLog.Exception);
-            },
-            dashboardLog =>
-            {
-                Assert.Equal(LogLevel.Debug, dashboardLog.Level);
-                Assert.Equal($"Failed to get dashboard URL for {appHostPath}", dashboardLog.Message);
-                Assert.Same(expectedDisconnect ? null : rpcException, dashboardLog.Exception);
-            });
+        var logs = logger.Collector.GetSnapshot();
+        if (expectedDisconnect)
+        {
+            Assert.Empty(logs);
+        }
+        else
+        {
+            Assert.Collection(logs,
+                sdkLog =>
+                {
+                    Assert.Equal(LogLevel.Debug, sdkLog.Level);
+                    Assert.Equal($"Failed to get AppHost SDK version for {appHostPath}", sdkLog.Message);
+                    Assert.Same(rpcException, sdkLog.Exception);
+                },
+                dashboardLog =>
+                {
+                    Assert.Equal(LogLevel.Debug, dashboardLog.Level);
+                    Assert.Equal($"Failed to get dashboard URL for {appHostPath}", dashboardLog.Message);
+                    Assert.Same(rpcException, dashboardLog.Exception);
+                });
+        }
     }
 
     [Fact]

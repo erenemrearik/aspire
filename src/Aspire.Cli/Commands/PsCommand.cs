@@ -408,11 +408,13 @@ internal sealed partial class PsCommand
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (AppHostFollowDisconnectHelpers.IsExpectedDisconnect(ex))
             {
                 // The AppHost may disconnect after the connection snapshot was taken.
-                _logger.LogDebug(AppHostFollowDisconnectHelpers.IsExpectedDisconnect(ex) ? null : ex,
-                    "Failed to get AppHost SDK version for {AppHostPath}", info.AppHostPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to get AppHost SDK version for {AppHostPath}", info.AppHostPath);
             }
 
             string? dashboardUrl = null;
@@ -422,10 +424,13 @@ internal sealed partial class PsCommand
                 var dashboardUrls = await connection.GetDashboardUrlsAsync(cancellationToken).ConfigureAwait(false);
                 dashboardUrl = dashboardUrls?.BaseUrlWithLoginToken;
             }
+            catch (Exception ex) when (AppHostFollowDisconnectHelpers.IsExpectedDisconnect(ex))
+            {
+                // Keep following even when the AppHost disconnects during a dashboard URL request.
+            }
             catch (Exception ex)
             {
-                _logger.LogDebug(AppHostFollowDisconnectHelpers.IsExpectedDisconnect(ex) ? null : ex,
-                    "Failed to get dashboard URL for {AppHostPath}", info.AppHostPath);
+                _logger.LogDebug(ex, "Failed to get dashboard URL for {AppHostPath}", info.AppHostPath);
             }
 
             appHostInfos.Add(new AppHostDisplayInfo
