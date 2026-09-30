@@ -38,6 +38,13 @@ public class DashboardTerminalScriptTests(ITestOutputHelper output)
 
     [Fact]
     [RequiresTools(["node"])]
+    public async Task ClipboardFeedbackWaitsForWrite()
+    {
+        await RunScriptAsync("Clipboard.test.mjs");
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
     public async Task TerminalDockNavigationAndCleanup()
     {
         await RunScriptAsync("TerminalDock.test.mjs");

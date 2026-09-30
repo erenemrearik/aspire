@@ -162,6 +162,9 @@ window.copyTextToClipboard = function (id, text, precopy, postcopy) {
         delete button.dataset.copyTimeout;
     }
 
+    // An earlier clipboard request may still be pending when the same button is clicked again.
+    const request = Symbol();
+    button.copyRequest = request;
     const copyIcon = button.querySelector('.copy-icon');
     const checkmarkIcon = button.querySelector('.checkmark-icon');
     const copyStatus = button.nextElementSibling?.classList.contains('terminal-copy-status')
@@ -169,11 +172,20 @@ window.copyTextToClipboard = function (id, text, precopy, postcopy) {
     if (copyStatus) {
         copyStatus.textContent = '';
     }
-
     const anchoredTooltip = document.querySelector(`fluent-tooltip[anchor="${id}"]`);
     const tooltipDiv = anchoredTooltip ? anchoredTooltip.children[0] : null;
+    if (tooltipDiv) {
+        tooltipDiv.innerText = precopy;
+    }
+    if (copyIcon && checkmarkIcon) {
+        copyIcon.style.display = '';
+        checkmarkIcon.style.display = 'none';
+    }
     navigator.clipboard.writeText(text)
         .then(() => {
+            if (button.copyRequest !== request) {
+                return;
+            }
             if (copyStatus) {
                 copyStatus.textContent = postcopy;
             }
@@ -186,6 +198,9 @@ window.copyTextToClipboard = function (id, text, precopy, postcopy) {
             }
         })
         .catch(error => {
+            if (button.copyRequest !== request) {
+                return;
+            }
             if (copyStatus) {
                 copyStatus.textContent = button.getAttribute('data-copyfailed');
             }
@@ -194,22 +209,26 @@ window.copyTextToClipboard = function (id, text, precopy, postcopy) {
             } else {
                 console.warn("Dashboard clipboard copy failed.", error);
             }
+        })
+        .finally(() => {
+            if (button.copyRequest !== request) {
+                return;
+            }
+            button.dataset.copyTimeout = setTimeout(function () {
+                if (copyStatus) {
+                    copyStatus.textContent = '';
+                }
+                if (tooltipDiv) {
+                    tooltipDiv.innerText = precopy;
+                }
+
+                if (copyIcon && checkmarkIcon) {
+                    copyIcon.style.display = '';
+                    checkmarkIcon.style.display = 'none';
+                }
+                delete button.dataset.copyTimeout;
+            }, 1500);
         });
-
-    button.dataset.copyTimeout = setTimeout(function () {
-        if (copyStatus) {
-            copyStatus.textContent = '';
-        }
-        if (tooltipDiv) {
-            tooltipDiv.innerText = precopy;
-        }
-
-        if (copyIcon && checkmarkIcon) {
-            copyIcon.style.display = '';
-            checkmarkIcon.style.display = 'none';
-        }
-        delete button.dataset.copyTimeout;
-    }, 1500);
 };
 
 window.copyText = function (text) {
