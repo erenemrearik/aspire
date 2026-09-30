@@ -358,7 +358,6 @@ internal sealed class AddCommand : BaseCommand
                 if (mappings is { Length: > 0 })
                 {
                     var projectDir = effectiveAppHostProjectFile.Directory!;
-                    projectDir.Create();
                     var nugetConfigPath = Path.Combine(projectDir.FullName, "nuget.config");
                     if (!File.Exists(nugetConfigPath))
                     {
