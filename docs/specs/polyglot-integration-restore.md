@@ -24,7 +24,7 @@ In this document:
 - **Authoritative mapping** means competing ambient mappings are removed for a package pattern so the selected source controls that pattern.
 - **Source-only policy** means a source is added without introducing a package-source-mapping overlay.
 
-Both paths apply the same Aspire-selected package source policy while preserving NuGet's native configuration behavior for credentials, trusted signers, fallback folders, audit settings, relative paths, and other user-owned settings. When the SDK path is required, the generated root includes the selected `Aspire.Hosting` version together with every other direct integration package, so ordinary NuGet graph resolution also enforces hosting-version compatibility.
+Both paths apply the same Aspire-selected package source policy while preserving NuGet's native configuration behavior for credentials, trusted signers, audit settings, relative paths, the global packages folder, and other supported user-owned settings. When the SDK path is required, the generated root includes the selected `Aspire.Hosting` version together with every other direct integration package, so ordinary NuGet graph resolution also enforces hosting-version compatibility.
 
 ## Configuration boundary
 
@@ -72,7 +72,7 @@ When a stable project with custom NuGet configuration moves to a mapping-based s
 - The selected channel becomes authoritative for its Aspire package patterns.
 - Competing ambient Aspire mappings are temporarily replaced.
 - Ambient sources and mappings for unrelated packages remain effective.
-- Channel-required global-package-cache isolation prevents entries in the ordinary global packages folder from satisfying the new restore. Configured fallback folders remain part of NuGet's native policy and can still satisfy packages.
+- Channel-required global-package-cache isolation prevents entries in the ordinary global packages folder from satisfying the new restore.
 
 Moving back to stable removes the source-specific Aspire policy. The project's ambient Aspire mappings become effective again without requiring the user to reconstruct their NuGet configuration.
 
@@ -113,7 +113,7 @@ The higher-level source-scoped package discovery behavior is shared with C# AppH
 
 Relative local sources are resolved against the AppHost directory before they are used from the integration cache.
 
-Cache isolation is an explicit channel policy rather than something inferred from a local source path. Staging feeds opt into a source-specific global packages folder because distinct feeds can publish different packages under the same stable-shaped version. This isolates the writable global cache; it does not disable configured fallback folders.
+Cache isolation is an explicit channel policy rather than something inferred from a local source path. Staging feeds opt into a source-specific global packages folder because distinct feeds can publish different packages under the same stable-shaped version. This isolates the writable global cache.
 
 Local and PR package hives use [NuGet's normal global-packages behavior](https://learn.microsoft.com/nuget/consume-packages/managing-the-global-packages-and-cache-folders): an existing package with the requested ID and version is reused without consulting the selected source. Replacing package contents under an existing version therefore requires publishing a new version, removing the cached package, or selecting a fresh global packages folder through standard NuGet configuration.
 
@@ -125,7 +125,7 @@ For a requested discovery directory, the operation:
 
 1. Loads the normal NuGet hierarchy with `Settings.LoadDefaultSettings`.
 2. Returns configuration paths in highest-to-lowest precedence order.
-3. Computes an opaque cache identity from NuGet's effective package and audit sources, package-source mappings, signature-validation mode, trusted signers, global packages folder, fallback folders, and configuration path ordering.
+3. Computes an opaque cache identity from NuGet's effective package and audit sources, package-source mappings, signature-validation mode, trusted signers, the global packages folder, and configuration path ordering.
 4. Returns non-secret source descriptors containing the source name, enabled state, credential and client-certificate capability flags, and a per-invocation keyed identity of the resolved location.
 5. Returns the effective package-source mapping entries produced by NuGet after applying the configuration hierarchy.
 6. Returns disabled and reserved source keys needed to avoid accidentally inheriting name-bound credentials, certificates, or disabled state when Aspire introduces a source.
@@ -169,7 +169,9 @@ For a selected `Aspire*` policy:
 
 The CLI composes this policy from NuGet's evaluated mapping model. It does not parse and merge each discovered configuration file independently. The in-process NuGet client serializes the resulting source, disabled-source, mapping, and global-package-folder entries through NuGet's typed settings APIs.
 
-The overlay never copies arbitrary user settings. Authentication, trusted signers, fallback folders, audit settings, and unknown sections continue to come from NuGet's native hierarchy loading.
+The overlay never copies arbitrary user settings. Authentication, trusted signers, audit settings, and unknown sections continue to come from NuGet's native hierarchy loading.
+
+Package-only restores do not currently consume NuGet fallback package folders from configuration or `NUGET_FALLBACK_PACKAGES`. Complete support requires both restore-time folder selection and manifest asset resolution across the ordered package folders, and is tracked by [#20631](https://github.com/microsoft/aspire/issues/20631).
 
 ## Package-only restore
 
@@ -273,7 +275,7 @@ Package-only cache identity includes:
 - An exact, normalized source-policy identity for isolated global package caches.
 - An opaque identity computed from NuGet's effective package and audit sources, package-source mappings, signature-validation mode, trusted signers, and ordered configuration paths.
 - Stable content identity for invocation-scoped policy overlays.
-- Effective global and fallback package folder inputs.
+- The effective global package folder input.
 - The managed restore implementation identity.
 
 The SDK project-reference path does not attempt to reproduce MSBuild evaluation with directory walking or file hashes. It always runs implicit restore, allowing MSBuild and NuGet to evaluate imports, conditions, project graphs, configuration, and package versions directly. This deliberately favors correctness over warm-build performance. Safely skipping restore would require a complete model of every input consumed by MSBuild and NuGet, including imported projects, props and targets, environment-derived configuration, the evaluated project graph, external sources, and mutable package caches. An approximate fingerprint can both miss meaningful changes and invalidate unnecessarily. Package-only restores retain their reusable cache; the less common project-reference path restores before each build. The immutable copied-local layout is reused only after the completed build describes the concrete resolved closure.
@@ -284,7 +286,7 @@ The SDK project-reference path does not attempt to reproduce MSBuild evaluation 
 |---|---|---|
 | Explicit stable channel | Uses ambient source policy and the AppHost hierarchy | Can opt into the selected version; ambient source policy remains authoritative |
 | No channel | Uses ambient source policy, plus an authoritative invocation-local `Aspire*` source when needed to restore the running CLI's own SDK version | Can opt into the selected version; the source hint requires a compatible project mapping policy |
-| No AppHost NuGet.Config | Uses normal NuGet default, user, and machine configuration | Uses each project's normal discovery hierarchy |
+| No AppHost NuGet.Config | Uses normal NuGet default, user, and machine source, mapping, authentication, trust, audit, and global-packages configuration | Uses each project's normal discovery hierarchy |
 | Daily, staging, or PR channel | Replaces competing Aspire mappings while retaining unrelated ambient policy | Can opt into the selected version; the source hint requires a compatible project mapping policy |
 | Local channel | Maps `Aspire*` to the absolute local hive while retaining unrelated ambient mappings | Can opt into the selected version; the local source hint requires a compatible project mapping policy |
 | NuGet service-index proxy override | Does not add or rewrite restore sources; configured ambient URLs remain authoritative | Retains its own restore policy |

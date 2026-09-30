@@ -251,11 +251,6 @@ internal sealed class NuGetClient(
             ConfigFilePaths = settings.GetConfigFilePaths().ToList(),
         };
 
-        foreach (var fallbackPackageFolder in pathContext.FallbackPackageFolders)
-        {
-            restoreMetadata.FallbackFolders.Add(fallbackPackageFolder);
-        }
-
         foreach (var source in sources)
         {
             restoreMetadata.Sources.Add(source);
@@ -825,11 +820,6 @@ internal sealed class NuGetClient(
         var pathContext = NuGetPathContext.Create(settings);
         AppendCacheIdentityValue(hash, "global-packages");
         AppendCacheIdentityValue(hash, pathContext.UserPackageFolder);
-        foreach (var fallbackPackageFolder in pathContext.FallbackPackageFolders)
-        {
-            AppendCacheIdentityValue(hash, "fallback-packages");
-            AppendCacheIdentityValue(hash, fallbackPackageFolder);
-        }
 
         return Convert.ToHexString(hash.GetCurrentHash());
     }
