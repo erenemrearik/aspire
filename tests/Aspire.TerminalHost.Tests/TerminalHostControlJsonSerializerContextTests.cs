@@ -103,6 +103,7 @@ public class TerminalHostControlJsonSerializerContextTests
             started.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         }));
+        server.AddLocalRpcMethod("ping", (Func<bool>)(() => true));
         server.StartListening();
         client.StartListening();
 
@@ -113,6 +114,7 @@ public class TerminalHostControlJsonSerializerContextTests
 
         await cancelled.Task.DefaultTimeout();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => invocation.DefaultTimeout());
+        Assert.True(await client.InvokeAsync<bool>("ping").DefaultTimeout());
     }
 
     private static SystemTextJsonFormatter CreateFormatter(bool sourceGenerated)

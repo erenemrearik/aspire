@@ -58,9 +58,6 @@
     <OpenTelemetryInstrumentationRuntimeVersion>1.18.0</OpenTelemetryInstrumentationRuntimeVersion>
     <OpenTelemetryExporterOpenTelemetryProtocolVersion>1.18.0</OpenTelemetryExporterOpenTelemetryProtocolVersion>
     <AzureMonitorOpenTelemetryExporterVersion>1.9.0</AzureMonitorOpenTelemetryExporterVersion>
-    <!-- Aspire.Cli needs this StreamJsonRpc preview for native AOT support.
-         Aspire.TerminalHost shares it for source-generated RPC serialization. -->
-    <StreamJsonRpcPackageVersionForAot>2.23.32-alpha</StreamJsonRpcPackageVersionForAot>
     <!-- Aspire.Cli runs NuGet restore in-process in a native AOT binary, which needs newer NuGet.*
          builds than the stable versions the rest of the repo uses (see Directory.Packages.props).
          These prereleases come from the dotnet11 feed, which does not carry the stable versions,
