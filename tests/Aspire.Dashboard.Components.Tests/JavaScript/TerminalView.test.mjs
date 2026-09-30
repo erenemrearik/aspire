@@ -604,12 +604,31 @@ test("palette, theme and contrast changes replace the complete overlay without r
     assert.equal(view.style["--terminal-background"], attempt.options.lightModePalette.background);
     const focusCalls = attempt.client.focusCalls;
     const selection = attempt.client.selection;
+    function paintedTrack() {
+        const painted = [];
+        const context = {
+            globalAlpha: 1,
+            save() {},
+            restore() {},
+            fillRect() { painted.push({ color: this.fillStyle, opacity: this.globalAlpha }); },
+        };
+        attempt.client.scrollbar.render({
+            context, opacity: 1,
+            track: { left: 0, top: 0, width: 8, height: 40 },
+            thumb: { left: 0, top: 0, width: 0, height: 0 },
+            markers: [],
+            colors: { track: "#202020" },
+            interaction: { focused: false, dragging: false },
+        });
+        return painted;
+    }
     for (const [theme, palette] of [["dark", attempt.options.darkModePalette], ["light", attempt.options.lightModePalette]]) {
         terminal.setTerminalPalette(theme);
         document.documentElement.dataset.theme = theme;
         themeObservers[0].callback();
         assert.equal(attempt.client.colorMode, theme);
         assert.equal(view.style["--terminal-background"], palette.background);
+        assert.deepEqual(paintedTrack(), [{ color: theme === "dark" ? "#837f82" : "#848189", opacity: 0.35 }]);
     }
     for (const query of ["(forced-colors: active)", "(prefers-contrast: more)"]) {
         const previous = attempt.client.scrollbar;
@@ -620,7 +639,11 @@ test("palette, theme and contrast changes replace the complete overlay without r
         assert.equal(attempt.client.scrollbar.placement, "overlay");
         assert.equal(attempt.client.scrollbar.markers, true);
         assert.equal(attempt.client.colorMode, "light");
+        assert.deepEqual(paintedTrack(), [{ color: "rgb(100, 100, 100)", opacity: 1 }]);
     }
+    mediaQueries.get("(forced-colors: active)").matches = false;
+    mediaQueries.get("(forced-colors: active)").dispatchEvent(new Event("change"));
+    assert.deepEqual(paintedTrack(), [{ color: "#848189", opacity: 1 }]);
     assert.equal(attempts.length, 1);
     assert.deepEqual(attempt.client.sizingCalls, []);
     assert.equal(attempt.client.selectionClears, 0);
@@ -2030,13 +2053,13 @@ test("frontend manifest, lockfile, minified bundle and backend use the exact pai
     const lockfile = JSON.parse(await readFile(new URL("package-lock.json", dashboard), "utf8"));
     const bundle = await readFile(new URL("dist/index.min.js", assets), "utf8");
     const version = manifest.dependencies["@hex1b/web-terminal"];
-    assert.equal(version, "0.172.0");
+    assert.equal(version, "0.171.0");
     assert.ok(bundle.startsWith(`// @hex1b/web-terminal ${version}; minified with Terser. See ../LICENSE.\n`));
     assert.equal(lockfile.packages[""].dependencies["@hex1b/web-terminal"], version);
     assert.equal(lockfile.packages["node_modules/@hex1b/web-terminal"].version, version);
 
     // Central package rows have the form:
-    //   <PackageVersion Include="Hex1b" Version="0.172.0" />
+    //   <PackageVersion Include="Hex1b" Version="0.171.0" />
     // Match the exact Include value, not Hex1b.Tool or Hex1b.McpServer;
     // whitespace, attribute order and either XML quote style are allowed.
     const packages = await readFile(new URL("../../Directory.Packages.props", dashboard), "utf8");
