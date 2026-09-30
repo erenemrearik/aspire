@@ -16,7 +16,7 @@ namespace Aspire.Shared.TerminalHost;
 [JsonSerializable(typeof(TerminalHostSessionInfo))]
 [JsonSerializable(typeof(TerminalHostInfoResponse))]
 [JsonSerializable(typeof(CommonErrorData))]
-[JsonSerializable(typeof(JsonElement))]
+// StreamJsonRpc uses object for untyped results (including shutdown's null response) and error-data fallback.
 [JsonSerializable(typeof(object))]
 internal partial class TerminalHostControlJsonSerializerContext : JsonSerializerContext
 {
