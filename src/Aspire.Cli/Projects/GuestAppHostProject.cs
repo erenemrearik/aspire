@@ -323,8 +323,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
     {
         ArgumentNullException.ThrowIfNull(appHostFile);
 
-        var directory = appHostFile.Directory
-            ?? throw new InvalidOperationException($"The AppHost file '{appHostFile.FullName}' does not have a parent directory.");
+        var directory = appHostFile.Directory!;
         var config = LoadConfiguration(directory);
         return BuildAndGenerateSdkAsync(
             directory,
