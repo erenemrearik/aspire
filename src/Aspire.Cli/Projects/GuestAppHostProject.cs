@@ -1594,6 +1594,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             });
 
         var explicitChannelName = context.Channel.ShouldPersistChannelName() ? context.Channel.Name : null;
+        // A non-stable explicit channel changes the persisted pin, while explicit stable removes an existing pin.
         var persistedChannelSelectionChanged =
             (context.Channel.Type is PackageChannelType.Explicit &&
                 string.Equals(context.Channel.Name, PackageChannelNames.Stable, StringComparisons.ChannelName) &&
