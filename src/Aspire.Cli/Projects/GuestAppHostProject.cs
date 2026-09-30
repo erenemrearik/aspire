@@ -1597,19 +1597,19 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         var clearExplicitChannel = context.Channel.Type is PackageChannelType.Explicit &&
             string.Equals(context.Channel.Name, PackageChannelNames.Stable, StringComparisons.ChannelName) &&
             config.Channel is not null;
-        var explicitChannelChanged = clearExplicitChannel ||
+        var persistedChannelSelectionChanged = clearExplicitChannel ||
             explicitChannelName is not null &&
             !string.Equals(config.Channel, explicitChannelName, StringComparisons.CliInputOrOutput);
 
         var hasProjectUpdates = updates.Count > 0 || newSdkVersion is not null;
-        if (explicitChannelChanged && updateCheckFailure is not null)
+        if (persistedChannelSelectionChanged && updateCheckFailure is not null)
         {
             // A channel transition changes the restore policy as well as version selection.
             // Do not persist a partial transition when any package version could not be evaluated.
             updateCheckFailure.Throw();
         }
 
-        if (!hasProjectUpdates && context.AdditionalUpdateSteps.Count == 0 && !explicitChannelChanged)
+        if (!hasProjectUpdates && context.AdditionalUpdateSteps.Count == 0 && !persistedChannelSelectionChanged)
         {
             _interactionService.DisplayMessage(KnownEmojis.CheckMarkButton, UpdateCommandStrings.ProjectUpToDateMessage);
             return new UpdatePackagesResult { UpdatesApplied = false };
@@ -1648,7 +1648,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         // Non-stable explicit channels are persisted because their source policy must be
         // reproducible. Selecting the explicit stable channel clears any previous pin so the
         // project returns to the ambient stable source policy without persisting "stable".
-        if (explicitChannelChanged)
+        if (persistedChannelSelectionChanged)
         {
             config.Channel = explicitChannelName;
         }
@@ -1656,7 +1656,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         {
             config.AddOrUpdatePackage(packageId, newVersion);
         }
-        if (hasProjectUpdates || explicitChannelChanged)
+        if (hasProjectUpdates || persistedChannelSelectionChanged)
         {
             // Regeneration also installs guest dependencies. Complete it before saving
             // config or editing CLI pins so failure leaves both update plans unapplied.
@@ -1690,7 +1690,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             }
         }
 
-        if (hasProjectUpdates || explicitChannelChanged)
+        if (hasProjectUpdates || persistedChannelSelectionChanged)
         {
             SaveConfiguration(config, directory);
         }
@@ -1700,7 +1700,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             await step.Callback();
         }
 
-        if (hasProjectUpdates || explicitChannelChanged)
+        if (hasProjectUpdates || persistedChannelSelectionChanged)
         {
             _interactionService.DisplayMessage(KnownEmojis.Package, UpdateCommandStrings.RegeneratedSdkCode);
         }
