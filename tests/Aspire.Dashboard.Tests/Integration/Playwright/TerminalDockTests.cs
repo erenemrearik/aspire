@@ -24,10 +24,13 @@ public sealed class TerminalDockTests(TerminalDockTests.TerminalDockDashboardSer
     {
         await RunTestAsync(async page =>
         {
-            await fixture.StartSessionAsync();
+            var (updates, _) = await fixture.StartSessionAsync();
             await page.SetViewportSizeAsync(1280, 900);
             await page.GotoAsync("/").DefaultTimeout();
-            await page.GetByRole(AriaRole.Button, new() { Name = "Toggle terminal (`)", Exact = true }).ClickAsync();
+            await updates.Writer.WriteAsync(new WatchTerminalsUpdate
+            {
+                Snapshot = new TerminalDescriptorList { ActivatedTerminalId = "missing" }
+            });
             var panel = page.Locator(".terminal-dock-panel");
             var heading = panel.GetByRole(AriaRole.Heading, new() { Name = "No docked terminals", Exact = true });
             var hint = panel.Locator(".terminal-dock-panel-hint");
@@ -321,7 +324,7 @@ public sealed class TerminalDockTests(TerminalDockTests.TerminalDockDashboardSer
             if (hideDock)
             {
                 await page.Locator(".terminal-dock-collapse").ClickAsync();
-                focusTarget = page.GetByRole(AriaRole.Button, new() { Name = "Toggle terminal (`)", Exact = true });
+                focusTarget = page.Locator("#dashboard-settings-button");
             }
             else
             {
