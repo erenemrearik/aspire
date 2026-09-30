@@ -1,0 +1,15 @@
+{
+  "id": "eventhubs-tests-windows-testhost-crash-e0434352",
+  "type": "infra-failure",
+  "title": "Aspire.Azure.Messaging.EventHubs.Tests (windows-latest) net9.0 test host crashes with unhandled CLR exception (0xE0434352) despite all tests passing",
+  "error_pattern": "Test application process didn't exit gracefully, exit code is '-532462766' (0xE0434352 COMPLUS_Exception)\nD:\\a\\aspire\\aspire\\artifacts\\bin\\Aspire.Azure.Messaging.EventHubs.Tests\\Debug\\net9.0\\Aspire.Azure.Messaging.EventHubs.Tests.dll (net9.0|x64) failed [+3/x0/?3] (14s 167ms)\nTest run summary: total: 490, failed: 0, succeeded: 387, skipped: 103\nNo failed tests in any .trx file",
+  "occurrences": [
+    {
+      "run_id": 36786285217,
+      "run_url": "https://github.com/microsoft/aspire/actions/runs/36786285217",
+      "job": "Tests / No-package tests (regular, Aspire.Azure.Messaging.EventHubs.Tests, Azure.Messaging.EventHubs, Azu... / Azure.Messaging.EventHubs (windows-latest)",
+      "pr_number": 0,
+      "observed_at": "2026-09-30T23:37:43Z"
+    }
+  ]
+}

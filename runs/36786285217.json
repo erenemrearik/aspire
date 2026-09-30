@@ -1,0 +1,65 @@
+{
+  "run_id": 36786285217,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/36786285217",
+  "run_scope": "main",
+  "analyzed_at": "2026-09-30T23:37:43Z",
+  "verdict": "transient-infra",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20622,
+    "title": "Temporarily disable source indexing in official builds",
+    "author": "joperezr",
+    "state": "closed",
+    "head_branch": "joperezr-official-build-failures",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20622",
+    "merged_at": "2026-09-30T22:33:44Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "e45a06d72b2e41ca6343719b0a1d7f7b7ccb2c8c",
+    "failed_sha": "b30c80b35381ab559111cbb5e9f00e3ac8995a9e",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "0a51605b4256eb4f31e5217f531b86d070934c72",
+        "message": "Generate template dependency manifest instead of internal basic tests (#20574) ## Description Replace the internal basic template-test stage, whose dependency-discovery step grew to roughly 22–25 minutes, with automatic generation of `artifacts/cg/templates/cgmanifest.json` after managed packing. Regular GitHub template tests remain unchanged. Fixes #20451 ### Implementation - Generate on every internal and GitHub CI/PR managed-package build, after all same-build packages exist and before the ex",
+        "html_url": "https://github.com/microsoft/aspire/commit/0a51605b4256eb4f31e5217f531b86d070934c72",
+        "pull_request": {
+          "number": 20574,
+          "title": "Generate template dependency manifest instead of internal basic tests",
+          "url": "https://github.com/microsoft/aspire/pull/20574",
+          "merged_at": "2026-09-30T22:24:56Z"
+        }
+      },
+      {
+        "sha": "b30c80b35381ab559111cbb5e9f00e3ac8995a9e",
+        "message": "Temporarily disable source indexing in official builds (#20622) ## Description Temporarily skip the standalone `source_index` stage so the source-index publishing access failure does not mark otherwise successful official builds as failed. The Azure CLI task currently fails while selecting its configured subscription, before the index upload script runs. Adds `condition: 'false'` to the stage and a comment directly above it linking to #20621, which tracks restoring access and re-enabling source ",
+        "html_url": "https://github.com/microsoft/aspire/commit/b30c80b35381ab559111cbb5e9f00e3ac8995a9e",
+        "pull_request": {
+          "number": 20622,
+          "title": "Temporarily disable source indexing in official builds",
+          "url": "https://github.com/microsoft/aspire/pull/20622",
+          "merged_at": "2026-09-30T22:33:44Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Azure.Messaging.EventHubs.Tests, Azure.Messaging.EventHubs, Azu... / Azure.Messaging.EventHubs (windows-latest)",
+      "id": 110129476416,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/36786285217/job/110129476416",
+      "classification": "transient-infra",
+      "reason": "The 'Run tests (Windows)' step failed because the net9.0 test host process crashed with exit code -532462766 (0xE0434352, an unhandled CLR exception / COMPLUS_Exception) after all 3 tests in that run had already completed. TRX results show 0 failed tests (490 total, 387 succeeded, 103 skipped) and 'No failed tests' for every .trx file, so this is a test-host process crash unrelated to any test assertion or PR code change.",
+      "failed_steps": [
+        "Run tests (Windows)"
+      ]
+    }
+  ],
+  "failed_tests": [],
+  "causes": [
+    "eventhubs-tests-windows-testhost-crash-e0434352"
+  ]
+}
