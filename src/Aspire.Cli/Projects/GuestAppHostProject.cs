@@ -150,16 +150,13 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
     private FileInfo ResolveAppHostFile(DirectoryInfo directory)
     {
         // Restore source aliases use the same file-based workload identity as DCP.
-        foreach (var pattern in _resolvedLanguage.DetectionPatterns)
+        var appHostPath = FileSystemHelper.FindFirstFile(
+            directory.FullName,
+            recurseLimit: 0,
+            patterns: _resolvedLanguage.DetectionPatterns);
+        if (appHostPath is not null)
         {
-            var appHostPath = Directory.EnumerateFiles(
-                directory.FullName,
-                pattern,
-                SearchOption.TopDirectoryOnly).FirstOrDefault();
-            if (appHostPath is not null)
-            {
-                return new FileInfo(appHostPath);
-            }
+            return new FileInfo(appHostPath);
         }
 
         var appHostFileName = _resolvedLanguage.AppHostFileName
