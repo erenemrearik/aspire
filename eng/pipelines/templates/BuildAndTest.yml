@@ -109,6 +109,10 @@ steps:
       inputs:
         path: '$(Build.SourcesDirectory)/artifacts/cg/templates/cgmanifest.json'
         artifactName: template-component-manifest
+        # Diagnostic inventory, not a shipping payload. 1ES SBOM generation expects an
+        # artifact directory and fails on this single-file path; existing shipping SBOMs remain enabled.
+        sbomEnabled: false
+        isProduction: false
 
     - ${{ if eq(parameters.validateNpmPackageSignatures, true) }}:
       - pwsh: |
