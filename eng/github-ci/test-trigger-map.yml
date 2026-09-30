@@ -517,6 +517,11 @@ path_rules:
       - tools/CreateLayout/**
     targets: [CLI_BUNDLE]
     reason: CreateLayout assembles the CLI bundle consumed by CLI e2e, extension e2e, and installers
+  - paths:
+      - eng/scripts/generate-template-cgmanifest.ps1
+      - src/Aspire.ProjectTemplates/Aspire.ProjectTemplates.csproj
+    targets: [test:Infrastructure.Tests]
+    reason: template manifest wrapper and restore workspace cleanup coverage
 
 # Project rules: an affected production/non-test project (Layer 1, matched by project-NAME glob) -> targets.
 # This follows the graph's transitive closure: a change to a project's dependency marks it affected,

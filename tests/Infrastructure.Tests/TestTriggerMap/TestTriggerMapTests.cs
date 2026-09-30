@@ -56,6 +56,26 @@ public sealed class TestTriggerMapTests
     }
 
     [Theory]
+    [InlineData("eng/scripts/generate-template-cgmanifest.ps1")]
+    public void TemplateManifestInputsSelectInfrastructureCoverage(string path)
+    {
+        var result = SelectWithRealMap(path);
+
+        Assert.False(result.SelectsAll);
+        Assert.Equal(["Infrastructure.Tests"], result.TestProjects);
+        Assert.Empty(result.Jobs);
+    }
+
+    [Fact]
+    public void TemplateManifestBuildTargetSelectsInfrastructureCoverage()
+    {
+        var result = SelectWithRealMap("src/Aspire.ProjectTemplates/Aspire.ProjectTemplates.csproj");
+
+        Assert.False(result.SelectsAll);
+        Assert.Contains("Infrastructure.Tests", result.TestProjects);
+    }
+
+    [Theory]
     [InlineData("eng/WarningPolicy.proj")]
     [InlineData("eng/build.ps1")]
     [InlineData("eng/build.sh")]
