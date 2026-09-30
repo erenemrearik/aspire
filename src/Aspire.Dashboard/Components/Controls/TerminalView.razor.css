@@ -21,7 +21,7 @@
     min-height: 0;
     box-sizing: border-box;
     background: var(--terminal-background, var(--colorNeutralBackground1));
-    border: 2px solid var(--colorNeutralStroke1);
+    border: 1px solid var(--colorNeutralStroke1);
     border-radius: 6px;
     overflow: hidden;
 }
@@ -41,6 +41,7 @@
 
 .terminal-footer {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     flex: 0 0 auto;
@@ -58,9 +59,16 @@
 
 .terminal-controls {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
+    justify-content: flex-end;
     gap: 6px;
+    min-width: 0;
     margin-inline-start: auto;
+}
+
+.terminal-select-label {
+    white-space: nowrap;
 }
 
 .terminal-controls ::deep .toolbar-button {
@@ -83,7 +91,8 @@
 
 .terminal-controls ::deep .terminal-size-select,
 .terminal-controls ::deep .terminal-palette-select {
-    width: auto;
+    width: max-content;
+    min-width: 0;
 }
 
 .terminal-font-size {
@@ -141,7 +150,7 @@
     flex: 1;
     min-width: 0;
     min-height: 0;
-    padding: 6px;
+    padding: 12px;
     box-sizing: border-box;
 }
 

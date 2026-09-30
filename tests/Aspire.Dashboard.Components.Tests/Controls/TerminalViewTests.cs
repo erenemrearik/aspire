@@ -66,6 +66,11 @@ public class TerminalViewTests : DashboardTestContext
         Assert.Equal(chromeless, cut.Find(".terminal-view").ClassList.Contains("terminal-chromeless"));
         Assert.Equal(chromeless ? 0 : 1, cut.FindAll(".terminal-titlebar").Count);
         Assert.Equal(showDimensions ? 1 : 0, cut.FindAll(".terminal-size-select").Count);
+        Assert.Equal(showDimensions ? 2 : 1, cut.FindAll(".terminal-select-label").Count);
+        foreach (var label in cut.FindAll(".terminal-select-label"))
+        {
+            Assert.NotNull(cut.Find($"#{label.GetAttribute("for")}"));
+        }
         Assert.Equal(showDimensions ? 1 : 0, cut.FindAll(".terminal-fit").Count);
         Assert.Single(cut.FindAll(".terminal-font-minus"));
         Assert.Single(cut.FindAll(".terminal-font-plus"));
@@ -99,7 +104,7 @@ public class TerminalViewTests : DashboardTestContext
         Assert.Equal("dark", select.Instance.Value);
         Assert.False(select.Instance.Disabled);
         Assert.Equal(Resources.TerminalStrings.TerminalPalette, select.Instance.AriaLabel);
-        Assert.Equal(["Aspire light", "Aspire dark"], select.Instance.Items!.Select(select.Instance.OptionText!));
+        Assert.Equal(["Light", "Dark"], select.Instance.Items!.Select(select.Instance.OptionText!));
         Assert.Equal("terminal-palette-select aspire-input", cut.Find(".terminal-controls").LastElementChild!.ClassName);
 
         await cut.InvokeAsync(() => select.Instance.ValueChanged.InvokeAsync("light"));

@@ -133,7 +133,7 @@ input and selection behavior; links also work in read-only views. Remote file
 paths and custom URI schemes are not enabled.
 
 The **Terminal palette** dropdown to the right of the footer's dimensions selector
-selects **Aspire dark** or **Aspire light** independently of the site. **Aspire dark** is the default,
+selects **Dark** or **Light** independently of the site. **Dark** is the default,
 including for the former **Follow Dashboard** preference. Site theme changes do
 not change the selected terminal palette. This non-sensitive
 preference is stored in browser local storage and applies to all terminal surfaces,

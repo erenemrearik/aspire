@@ -38,6 +38,8 @@ public sealed partial class TerminalView : ComponentBase, IAsyncDisposable
     private string? _sessionEndpoint;
     private int _paletteResetVersion;
     private static readonly string[] s_paletteChoices = ["light", "dark"];
+    private readonly string _sizeSelectId = $"terminal-size-{Guid.NewGuid():N}";
+    private readonly string _paletteSelectId = $"terminal-palette-{Guid.NewGuid():N}";
 
     /// <summary>Gets or sets the display name of the resource that owns the terminal.</summary>
     [Parameter]

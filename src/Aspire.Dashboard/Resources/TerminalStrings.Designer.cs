@@ -57,6 +57,12 @@ namespace Aspire.Dashboard.Resources {
             }
         }
 
+        public static string TerminalPaletteLabel {
+            get {
+                return ResourceManager.GetString("TerminalPaletteLabel", resourceCulture);
+            }
+        }
+
         public static string TerminalPaletteLight {
             get {
                 return ResourceManager.GetString("TerminalPaletteLight", resourceCulture);
@@ -66,6 +72,12 @@ namespace Aspire.Dashboard.Resources {
         public static string TerminalPaletteDark {
             get {
                 return ResourceManager.GetString("TerminalPaletteDark", resourceCulture);
+            }
+        }
+
+        public static string TerminalSizeLabel {
+            get {
+                return ResourceManager.GetString("TerminalSizeLabel", resourceCulture);
             }
         }
 

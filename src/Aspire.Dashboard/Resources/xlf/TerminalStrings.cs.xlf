@@ -153,13 +153,18 @@
         <note />
       </trans-unit>
       <trans-unit id="TerminalPaletteDark">
-        <source>Aspire dark</source>
-        <target state="new">Aspire dark</target>
+        <source>Dark</source>
+        <target state="new">Dark</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="TerminalPaletteLabel">
+        <source>Palette</source>
+        <target state="new">Palette</target>
         <note />
       </trans-unit>
       <trans-unit id="TerminalPaletteLight">
-        <source>Aspire light</source>
-        <target state="new">Aspire light</target>
+        <source>Light</source>
+        <target state="new">Light</target>
         <note />
       </trans-unit>
       <trans-unit id="TerminalPaletteSaveFailed">
@@ -185,6 +190,11 @@
       <trans-unit id="TerminalRetry">
         <source>Reconnect terminal</source>
         <target state="new">Reconnect terminal</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="TerminalSizeLabel">
+        <source>Size</source>
+        <target state="new">Size</target>
         <note />
       </trans-unit>
       <trans-unit id="TerminalSizingFailed">
