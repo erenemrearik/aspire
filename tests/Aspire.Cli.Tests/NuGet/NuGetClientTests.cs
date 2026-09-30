@@ -731,13 +731,16 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
             cancellationToken: TestContext.Current.CancellationToken);
 
         var assets = new LockFileFormat().Read(Path.Combine(restoreDirectory.FullName, LockFileFormat.AssetsFileName));
+        var effectiveGlobalPackagesFolder = GetEffectiveGlobalPackagesFolder(
+            ambientConfigPath,
+            workspace.WorkspaceRoot.FullName);
         Assert.Equal(
             [
-                Path.TrimEndingDirectorySeparator(globalPackagesDirectory.FullName),
+                Path.TrimEndingDirectorySeparator(effectiveGlobalPackagesFolder),
                 Path.TrimEndingDirectorySeparator(fallbackPackagesDirectory.FullName)
             ],
             assets.PackageFolders.Select(static folder => Path.TrimEndingDirectorySeparator(folder.Path)));
-        Assert.False(Directory.Exists(Path.Combine(globalPackagesDirectory.FullName, packageId.ToLowerInvariant(), "1.0.0")));
+        Assert.False(Directory.Exists(Path.Combine(effectiveGlobalPackagesFolder, packageId.ToLowerInvariant(), "1.0.0")));
     }
 
     [Fact]
