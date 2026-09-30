@@ -116,6 +116,27 @@ public sealed class CiWorkflowTests
             testRunner);
     }
 
+    [Theory]
+    [InlineData("Inject enablePlaywrightInstall into runsheet properties", "steps.generate_tests_matrix_raw.outputs.runsheet")]
+    [InlineData("Check if any test requires NuGets", "steps.inject_properties.outputs.runsheet")]
+    [InlineData("Check if any test requires CLI archives", "steps.inject_properties.outputs.runsheet")]
+    [InlineData("Check if any test requires GitHub token", "steps.inject_properties.outputs.runsheet")]
+    public void SpecializedTestRunnerPassesRunsheetThroughEnvironment(
+        string stepName,
+        string runsheetOutput)
+    {
+        var workflow = ReadWorkflow("specialized-test-runner.yml");
+        var step = GetStep(GetJob(workflow, "generate_tests_matrix"), stepName);
+
+        Assert.Contains($"RUNSHEET: ${{{{ {runsheetOutput} }}}}", step);
+
+        var run = System.Text.RegularExpressions.Regex.Match(
+            step,
+            "(?ms)^        run: \\|\\r?\\n(?<body>.*)$");
+        Assert.True(run.Success, $"Could not find the run script for '{stepName}'.");
+        Assert.DoesNotContain("${{", run.Groups["body"].Value);
+    }
+
     [Fact]
     public void CiFailureTrackerCheckoutDoesNotPinMain()
     {
