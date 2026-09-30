@@ -1594,12 +1594,12 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             });
 
         var explicitChannelName = context.Channel.ShouldPersistChannelName() ? context.Channel.Name : null;
-        var clearExplicitChannel = context.Channel.Type is PackageChannelType.Explicit &&
-            string.Equals(context.Channel.Name, PackageChannelNames.Stable, StringComparisons.ChannelName) &&
-            config.Channel is not null;
-        var persistedChannelSelectionChanged = clearExplicitChannel ||
-            explicitChannelName is not null &&
-            !string.Equals(config.Channel, explicitChannelName, StringComparisons.CliInputOrOutput);
+        var persistedChannelSelectionChanged =
+            (context.Channel.Type is PackageChannelType.Explicit &&
+                string.Equals(context.Channel.Name, PackageChannelNames.Stable, StringComparisons.ChannelName) &&
+                config.Channel is not null) ||
+            (explicitChannelName is not null &&
+                !string.Equals(config.Channel, explicitChannelName, StringComparisons.CliInputOrOutput));
 
         var hasProjectUpdates = updates.Count > 0 || newSdkVersion is not null;
         if (persistedChannelSelectionChanged && updateCheckFailure is not null)
