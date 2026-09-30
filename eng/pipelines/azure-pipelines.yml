@@ -243,6 +243,7 @@ extends:
       - stage: source_index
         displayName: Source Index
         dependsOn: []
+        condition: 'false' # Re-enable when source-index publishing access is restored.
         jobs:
         - template: /eng/common/templates-official/jobs/jobs.yml@self
           parameters:
