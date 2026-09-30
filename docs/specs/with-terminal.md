@@ -215,6 +215,11 @@ Three actors and three socket roles:
 The producer/consumer split lets multiple consumers (dashboard + multiple CLI
 sessions) attach simultaneously without coupling DCP to consumer counts.
 
+The control socket uses StreamJsonRpc for `getSession`, `getInfo`, and `shutdown`.
+Both the AppHost client and terminal host listener use the shared
+`TerminalHostControlJsonSerializerContext` for source-generated JSON serialization,
+preserving the default property names and null handling of `SystemTextJsonFormatter`.
+
 ## Wire protocol
 
 We do **not** define a custom protocol. The terminal traffic uses
