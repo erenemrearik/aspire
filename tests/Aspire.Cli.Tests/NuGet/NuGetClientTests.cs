@@ -169,6 +169,47 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
+    public async Task SearchAsync_RedactsCredentialBearingAmbientSourceDiagnostics()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        const string sourceNameSecret = "source-name-secret";
+        const string sourceValueSecret = "source-value-secret";
+        var sourceName = $"https://alias.example/v3/index.json?sig={sourceNameSecret}";
+        var sourceValue = $"https://127.0.0.1:1/v3/index.json?sig={sourceValueSecret}";
+        var nugetConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "nuget.config");
+        File.WriteAllText(
+            nugetConfigPath,
+            $"""
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="{sourceName}" value="{sourceValue}" />
+              </packageSources>
+            </configuration>
+            """);
+        var logger = new FakeLogger<NuGetClient>();
+        var client = new NuGetClient(
+            new TestFeatures(),
+            new TestEnvironment(),
+            logger);
+
+        var results = await client.SearchAsync(
+            "Aspire.Test.Package",
+            prerelease: false,
+            take: 100,
+            [],
+            nugetConfigPath,
+            workspace.WorkspaceRoot.FullName,
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(results);
+        var logRecords = logger.Collector.GetSnapshot();
+        Assert.NotEmpty(logRecords);
+        Assert.DoesNotContain(logRecords, record => record.Message.Contains(sourceNameSecret, StringComparison.Ordinal));
+        Assert.DoesNotContain(logRecords, record => record.Message.Contains(sourceValueSecret, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RestoreAsync_FailureReportsHelperOutput()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);

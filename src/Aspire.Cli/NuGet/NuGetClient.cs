@@ -375,12 +375,23 @@ internal sealed class NuGetClient(
         string workingDirectory,
         CancellationToken cancellationToken)
     {
-        using var operation = BeginOperation();
         var output = new NuGetOperationOutput(logger);
         try
         {
+            // NuGet initializes credential providers when the operation begins, and both those providers and protocol
+            // resources can log source URLs immediately. Discover credential-bearing source spellings first so every
+            // diagnostic path is protected for the operation's entire lifetime.
             var settings = LoadSettings(nugetConfigPath, workingDirectory);
-            var packageSources = LoadPackageSources(settings, explicitSources, output);
+            var packageSources = LoadPackageSources(settings, explicitSources, out var usedNuGetOrgFallback);
+            var sensitiveSources = GetSensitiveSourceValues(packageSources);
+            output = new NuGetOperationOutput(logger, sensitiveSources);
+
+            using var operation = BeginOperation(sensitiveSources);
+            if (usedNuGetOrgFallback)
+            {
+                output.WriteLine("Note: No package sources configured, using nuget.org as fallback.");
+            }
+
             var searchFilter = new global::NuGet.Protocol.Core.Types.SearchFilter(prerelease);
 
             var searchResults = await Task.WhenAll(packageSources.Select(source => SearchSourceSafelyAsync(
@@ -569,8 +580,9 @@ internal sealed class NuGetClient(
     private static List<PackageSource> LoadPackageSources(
         ISettings settings,
         IReadOnlyList<string> explicitSources,
-        NuGetOperationOutput output)
+        out bool usedNuGetOrgFallback)
     {
+        usedNuGetOrgFallback = false;
         var sources = explicitSources.Select(source => new PackageSource(source)).ToList();
 
         if (sources.Count == 0)
@@ -583,11 +595,20 @@ internal sealed class NuGetClient(
         if (sources.Count == 0)
         {
             sources.Add(new PackageSource(NuGetOrgUrl, "nuget.org"));
-            output.WriteLine("Note: No package sources configured, using nuget.org as fallback.");
+            usedNuGetOrgFallback = true;
         }
 
         return sources;
     }
+
+    private static string[] GetSensitiveSourceValues(IEnumerable<PackageSource> sources)
+        => sources
+            // Source names are user-controlled and can themselves be URL-shaped. Track both
+            // spellings so diagnostics redact credential material regardless of which NuGet logs.
+            .SelectMany(static source => new[] { source.Source, source.Name })
+            .Where(NuGetSourceIdentity.HasCredentialMaterial)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
     private static List<PackageSource> ResolvePackageSources(
         ISettings settings,
@@ -631,15 +652,7 @@ internal sealed class NuGetClient(
         var sources = packageSources
             .Select(source => CreateSourceInfo(source, sourceIdentityKey))
             .ToArray();
-        var sensitiveSourceValues = packageSources
-            .Concat(auditSources)
-            // Source names are user-controlled and can themselves be URL-shaped. Track both
-            // spellings so diagnostics redact credential material without changing NuGet's
-            // alias-bound mapping, credential, or certificate behavior.
-            .SelectMany(static source => new[] { source.Source, source.Name })
-            .Where(NuGetSourceIdentity.HasCredentialMaterial)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+        var sensitiveSourceValues = GetSensitiveSourceValues(packageSources.Concat(auditSources));
         var packageSourceMappings = new PackageSourceMappingProvider(settings)
             .GetPackageSourceMappingItems()
             .Select(static mapping => new NuGetPackageSourceMapping(
