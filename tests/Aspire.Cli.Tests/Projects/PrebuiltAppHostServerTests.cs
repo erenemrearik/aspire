@@ -1348,7 +1348,6 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 CreateNuGetSourceInfo("unrelated", "https://example.com/unrelated", isEnabled: false)
             ],
             SensitiveSourceValues: [],
-            PackageSourceMappingEnabled: false,
             PackageSourceMappings: [],
             DisabledPackageSourceKeys: ["private", "unrelated"],
             ReservedPackageSourceKeys: ["Private", "unrelated"],
@@ -4852,7 +4851,6 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 .Where(NuGetSourceIdentity.HasCredentialMaterial)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray(),
-            mappingArray.Length > 0,
             mappingArray
                 .Select(static mapping => new NuGetPackageSourceMapping(mapping.SourceKey, mapping.Patterns))
                 .ToArray(),
@@ -4903,12 +4901,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     private static string[] GetPatterns(
         IReadOnlyList<NuGetPackageSourceMapping> mappings,
         string sourceKey)
-        => mappings
+        => [.. mappings
             .SingleOrDefault(mapping => string.Equals(
                 mapping.SourceKey,
                 sourceKey,
                 StringComparison.OrdinalIgnoreCase))
-            ?.Patterns ?? [];
+            ?.Patterns ?? []];
 
     private static string[] GetPackagePatternsForKey(XDocument doc, string sourceKey)
     {

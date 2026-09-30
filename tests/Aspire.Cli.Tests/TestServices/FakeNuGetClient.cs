@@ -138,7 +138,6 @@ internal sealed class FakeNuGetClient : INuGetClient
                 "settings",
                 [],
                 [],
-                PackageSourceMappingEnabled: false,
                 [],
                 [],
                 [],

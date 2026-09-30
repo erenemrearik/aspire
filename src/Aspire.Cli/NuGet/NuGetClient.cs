@@ -71,6 +71,13 @@ internal interface INuGetClient
     void WriteConfigOverlay(NuGetConfigOverlay overlay, string outputPath);
 }
 
+internal sealed record NuGetConfigOverlay(
+    IReadOnlyList<(string Key, string Source)> Sources,
+    IReadOnlyList<NuGetPackageSourceMapping> PackageSourceMappings,
+    bool ClearDisabledPackageSources,
+    IReadOnlyList<string> DisabledPackageSourceKeys,
+    string? GlobalPackagesFolder);
+
 internal sealed record NuGetSearchResult(
     string Id,
     string Version,
@@ -675,7 +682,6 @@ internal sealed class NuGetClient(
             ComputeSettingsCacheIdentity(settings, packageSources, auditSources, packageSourceMappings),
             sources,
             sensitiveSourceValues,
-            packageSourceMappings.Length > 0,
             packageSourceMappings,
             disabledPackageSourceKeys,
             reservedPackageSourceKeys,
@@ -728,7 +734,7 @@ internal sealed class NuGetClient(
             }
         }
 
-        if (overlay.PackageSourceMappings.Length > 0)
+        if (overlay.PackageSourceMappings.Count > 0)
         {
             settings.AddOrUpdate(
                 ConfigurationConstants.PackageSourceMapping,

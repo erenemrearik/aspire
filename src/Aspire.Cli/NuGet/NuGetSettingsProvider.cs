@@ -22,6 +22,6 @@ internal sealed class NuGetSettingsProvider(
         var settings = bundleNuGetService.GetNuGetSettings(
             workingDirectory.FullName,
             cancellationToken);
-        return settings.PackageSourceMappingEnabled;
+        return settings.PackageSourceMappings.Count > 0;
     }
 }

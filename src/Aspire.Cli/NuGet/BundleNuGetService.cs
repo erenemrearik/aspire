@@ -16,12 +16,22 @@ using NuGet.ProjectModel;
 
 namespace Aspire.Cli.NuGet;
 
+internal sealed record NuGetSourceInfo(
+    string Name,
+    string Identity,
+    bool IsEnabled,
+    bool HasCredentials,
+    bool HasClientCertificates);
+
+internal sealed record NuGetPackageSourceMapping(
+    string SourceKey,
+    IReadOnlyList<string> Patterns);
+
 internal sealed record NuGetSettingsInfo(
     IReadOnlyList<string> ConfigPaths,
     string CacheIdentity,
     IReadOnlyList<NuGetSourceInfo> Sources,
     IReadOnlyList<string> SensitiveSourceValues,
-    bool PackageSourceMappingEnabled,
     IReadOnlyList<NuGetPackageSourceMapping> PackageSourceMappings,
     IReadOnlyList<string> DisabledPackageSourceKeys,
     IReadOnlyList<string> ReservedPackageSourceKeys,

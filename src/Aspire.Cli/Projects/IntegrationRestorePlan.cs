@@ -542,7 +542,7 @@ internal sealed class IntegrationRestorePlan
         return new NuGetConfigOverlay(
             selectedSources
                 .Where(static source => !source.IsAmbient)
-                .Select(static source => new NuGetConfigSourceDefinition(source.Key, source.Source))
+                .Select(static source => (Key: source.Key, Source: source.Source))
                 .ToArray(),
             ComposePackageSourceMappings(
                 selectedMappings,

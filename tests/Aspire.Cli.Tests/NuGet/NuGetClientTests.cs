@@ -711,7 +711,7 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
         var overlayConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "overlay.config");
         client.WriteConfigOverlay(
             new NuGetConfigOverlay(
-                [new("selected", emptyFeedDirectory.FullName)],
+                [("selected", emptyFeedDirectory.FullName)],
                 [new("selected", [packageId])],
                 ClearDisabledPackageSources: false,
                 DisabledPackageSourceKeys: [],
@@ -1321,7 +1321,6 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
         Assert.False(sourceInfo.IsEnabled);
         Assert.True(sourceInfo.HasCredentials);
         Assert.Contains(source, settings.SensitiveSourceValues);
-        Assert.True(settings.PackageSourceMappingEnabled);
         var mapping = Assert.Single(settings.PackageSourceMappings);
         Assert.Equal("private", mapping.SourceKey);
         Assert.Equal(["Aspire.*"], mapping.Patterns);
@@ -1395,7 +1394,7 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
 
         client.WriteConfigOverlay(
             new NuGetConfigOverlay(
-                [new("private", "https://packages.example.com/v3/index.json")],
+                [("private", "https://packages.example.com/v3/index.json")],
                 [new("private", ["Aspire.*"])],
                 ClearDisabledPackageSources: true,
                 DisabledPackageSourceKeys: ["other"],
