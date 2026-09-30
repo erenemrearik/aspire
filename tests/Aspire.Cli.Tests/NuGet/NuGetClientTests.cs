@@ -4,10 +4,10 @@
 using System.IO.Compression;
 using System.Xml.Linq;
 using Aspire.Cli.NuGet;
+using Aspire.Cli.Packaging;
 using Aspire.Cli.Tests.TestServices;
 using Aspire.Cli.Tests.Utils;
 using Aspire.Hosting;
-using Aspire.Shared;
 using Microsoft.DotNet.RemoteExecutor;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Testing;

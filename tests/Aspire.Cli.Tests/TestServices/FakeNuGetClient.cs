@@ -3,7 +3,6 @@
 
 using System.Xml.Linq;
 using Aspire.Cli.NuGet;
-using Aspire.Shared;
 
 namespace Aspire.Cli.Tests.TestServices;
 

@@ -2,8 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Aspire.Cli.Utils;
-using Aspire.Shared;
-
 namespace Aspire.Cli.Packaging;
 
 internal static class PackageSourceOverrideMappings

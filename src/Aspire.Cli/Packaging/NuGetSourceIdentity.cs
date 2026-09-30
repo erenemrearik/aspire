@@ -4,7 +4,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Aspire.Shared;
+namespace Aspire.Cli.Packaging;
 
 internal static class NuGetSourceIdentity
 {
