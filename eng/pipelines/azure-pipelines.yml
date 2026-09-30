@@ -243,7 +243,8 @@ extends:
       - stage: source_index
         displayName: Source Index
         dependsOn: []
-        condition: 'false' # Re-enable when source-index publishing access is restored.
+        # Re-enable when publishing access is restored: https://github.com/microsoft/aspire/issues/20621
+        condition: 'false'
         jobs:
         - template: /eng/common/templates-official/jobs/jobs.yml@self
           parameters:
