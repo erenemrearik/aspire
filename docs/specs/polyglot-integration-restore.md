@@ -105,6 +105,8 @@ An explicit source scopes package discovery, polyglot compatibility filtering, a
 
 After selection, the selected canonical package ID is mapped authoritatively to the explicit source, and that source remains generally eligible for dependencies it also contains. The effective ambient and project-channel policy remains eligible for the rest of the package's dependency closure, including transitive Aspire packages that the specified source does not contain. The `--source` value and its exact package pattern are invocation-scoped; integration references do not persist a per-package restore source.
 
+The selected channel is likewise used only for the add invocation; selecting a package from another channel does not replace the channel persisted for the AppHost. Aspire does not currently persist per-integration channel or source provenance. The add can therefore succeed while a later restore cannot resolve the selected package version through the persisted project policy. That package requires either a project-wide channel change or user-owned NuGet configuration that makes it available. Persisting the selected channel automatically would instead change source policy for every integration in the AppHost.
+
 The higher-level source-scoped package discovery behavior is shared with C# AppHosts, but the restore policy and overlays described here are polyglot-specific.
 
 ### Source paths and cache isolation
@@ -274,7 +276,7 @@ Package-only cache identity includes:
 - Effective global and fallback package folder inputs.
 - The managed restore implementation identity.
 
-The SDK project-reference path does not attempt to reproduce MSBuild evaluation with directory walking or file hashes. It always runs implicit restore, allowing MSBuild and NuGet to evaluate imports, conditions, project graphs, configuration, and package versions directly. The immutable copied-local layout is reused only after the completed build describes the concrete resolved closure.
+The SDK project-reference path does not attempt to reproduce MSBuild evaluation with directory walking or file hashes. It always runs implicit restore, allowing MSBuild and NuGet to evaluate imports, conditions, project graphs, configuration, and package versions directly. This deliberately favors correctness over warm-build performance. Safely skipping restore would require a complete model of every input consumed by MSBuild and NuGet, including imported projects, props and targets, environment-derived configuration, the evaluated project graph, external sources, and mutable package caches. An approximate fingerprint can both miss meaningful changes and invalidate unnecessarily. Package-only restores retain their reusable cache; the less common project-reference path restores before each build. The immutable copied-local layout is reused only after the completed build describes the concrete resolved closure.
 
 ## Expected scenarios
 
