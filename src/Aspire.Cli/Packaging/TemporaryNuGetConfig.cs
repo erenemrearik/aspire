@@ -48,15 +48,15 @@ internal sealed class TemporaryNuGetConfig : IDisposable
     }
 
     public static async Task<TemporaryNuGetConfig> CreateRestoreOverlayAsync(
-        Func<string, Task> writeConfigAsync)
+        Action<string> writeConfig)
     {
-        ArgumentNullException.ThrowIfNull(writeConfigAsync);
+        ArgumentNullException.ThrowIfNull(writeConfig);
 
         var tempDirectory = Directory.CreateTempSubdirectory("aspire-nuget-config").FullName;
         try
         {
             var configFile = new FileInfo(Path.Combine(tempDirectory, "nuget.config"));
-            await writeConfigAsync(configFile.FullName).ConfigureAwait(false);
+            writeConfig(configFile.FullName);
 
             return new TemporaryNuGetConfig(configFile, await ComputeCacheIdentityAsync(configFile).ConfigureAwait(false));
         }
@@ -73,11 +73,11 @@ internal sealed class TemporaryNuGetConfig : IDisposable
     public static Task GenerateAsync(PackageMapping[] mappings, string targetPath)
         => GenerateNuGetConfigAsync(mappings, new FileInfo(targetPath));
 
-    public async Task RegenerateAsync(Func<string, Task> writeConfigAsync)
+    public async Task RegenerateAsync(Action<string> writeConfig)
     {
-        ArgumentNullException.ThrowIfNull(writeConfigAsync);
+        ArgumentNullException.ThrowIfNull(writeConfig);
 
-        await writeConfigAsync(_configFile.FullName).ConfigureAwait(false);
+        writeConfig(_configFile.FullName);
         CacheIdentity = await ComputeCacheIdentityAsync(_configFile).ConfigureAwait(false);
     }
 

@@ -19,7 +19,6 @@ internal sealed class FakeNuGetClient : INuGetClient
     public IReadOnlyList<string>? LastConfiguredRestoreSources { get; private set; }
     public string? LastWorkingDirectory { get; private set; }
     public string? LastSettingsWorkingDirectory { get; private set; }
-    public NuGetConfigOverlayRequest? LastConfigOverlayRequest { get; private set; }
     public string? LastConfigOverlayPath { get; private set; }
 
     public Func<
@@ -49,7 +48,7 @@ internal sealed class FakeNuGetClient : INuGetClient
 
     public Func<string, byte[], NuGetSettingsInfo>? GetSettingsCallback { get; set; }
 
-    public Action<NuGetConfigOverlayRequest, string>? WriteConfigOverlayCallback { get; set; }
+    public Action<NuGetConfigOverlay, string>? WriteConfigOverlayCallback { get; set; }
 
     public Task RestoreAsync(
         IReadOnlyList<(string Id, string Version)> packages,
@@ -146,14 +145,13 @@ internal sealed class FakeNuGetClient : INuGetClient
                 sourceIdentityKey);
     }
 
-    public void WriteConfigOverlay(NuGetConfigOverlayRequest request, string outputPath)
+    public void WriteConfigOverlay(NuGetConfigOverlay overlay, string outputPath)
     {
         WriteConfigOverlayCallCount++;
-        LastConfigOverlayRequest = request;
         LastConfigOverlayPath = outputPath;
         if (WriteConfigOverlayCallback is not null)
         {
-            WriteConfigOverlayCallback(request, outputPath);
+            WriteConfigOverlayCallback(overlay, outputPath);
             return;
         }
 

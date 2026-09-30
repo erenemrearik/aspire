@@ -84,7 +84,7 @@ public class TemporaryNuGetConfigTests
     public async Task CreateRestoreOverlayAsync_UsesProvidedWriter()
     {
         using var config = await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-            path => File.WriteAllTextAsync(
+            path => File.WriteAllText(
                 path,
                 """
                 <configuration>
@@ -109,13 +109,13 @@ public class TemporaryNuGetConfigTests
     public async Task RegenerateAsync_RewritesConfigAndCacheIdentity()
     {
         using var config = await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-            path => File.WriteAllTextAsync(
+            path => File.WriteAllText(
                 path,
                 "<configuration><packageSourceMapping><clear /></packageSourceMapping></configuration>"));
         var originalIdentity = config.CacheIdentity;
 
         await config.RegenerateAsync(
-            path => File.WriteAllTextAsync(
+            path => File.WriteAllText(
                 path,
                 "<configuration><packageSourceMapping><clear /><packageSource key=\"private\"><package pattern=\"Aspire*\" /></packageSource></packageSourceMapping></configuration>"));
 
@@ -133,13 +133,13 @@ public class TemporaryNuGetConfigTests
     public async Task Dispose_RemovesDirectoryWhenFailedRegenerationDeletedConfig()
     {
         using var config = await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-            path => File.WriteAllTextAsync(path, "<configuration />"));
+            path => File.WriteAllText(path, "<configuration />"));
         var directory = config.ConfigFile.Directory!.FullName;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => config.RegenerateAsync(path =>
         {
             File.Delete(path);
-            return Task.FromException(new InvalidOperationException("Failed to regenerate the configuration."));
+            throw new InvalidOperationException("Failed to regenerate the configuration.");
         }));
 
         Assert.False(config.ConfigFile.Exists);
@@ -154,11 +154,11 @@ public class TemporaryNuGetConfigTests
     public async Task CacheIdentity_DoesNotDependOnGlobalPackagesFolderLocation()
     {
         using var first = await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-            path => File.WriteAllTextAsync(
+            path => File.WriteAllText(
                 path,
                 "<configuration><config><add key=\"globalPackagesFolder\" value=\"/packages/first\" /></config></configuration>"));
         using var second = await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-            path => File.WriteAllTextAsync(
+            path => File.WriteAllText(
                 path,
                 "<configuration><config><add key=\"globalPackagesFolder\" value=\"/packages/second\" /></config></configuration>"));
 
@@ -169,11 +169,11 @@ public class TemporaryNuGetConfigTests
     public async Task CacheIdentity_DoesNotChangeWhenGlobalPackagesFolderIsAdded()
     {
         using var config = await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-            path => File.WriteAllTextAsync(path, "<configuration />"));
+            path => File.WriteAllText(path, "<configuration />"));
         var originalIdentity = config.CacheIdentity;
 
         await config.RegenerateAsync(
-            path => File.WriteAllTextAsync(
+            path => File.WriteAllText(
                 path,
                 "<configuration><config><add key=\"globalPackagesFolder\" value=\"/packages\" /></config></configuration>"));
 

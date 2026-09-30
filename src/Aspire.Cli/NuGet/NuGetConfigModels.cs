@@ -14,7 +14,7 @@ internal sealed record NuGetPackageSourceMapping(
     string SourceKey,
     string[] Patterns);
 
-internal sealed record NuGetConfigOverlayRequest(
+internal sealed record NuGetConfigOverlay(
     NuGetConfigSourceDefinition[] Sources,
     NuGetPackageSourceMapping[] PackageSourceMappings,
     bool ClearDisabledPackageSources,

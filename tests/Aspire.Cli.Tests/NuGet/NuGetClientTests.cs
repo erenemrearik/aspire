@@ -710,7 +710,7 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
 
         var overlayConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "overlay.config");
         client.WriteConfigOverlay(
-            new NuGetConfigOverlayRequest(
+            new NuGetConfigOverlay(
                 [new("selected", emptyFeedDirectory.FullName)],
                 [new("selected", [packageId])],
                 ClearDisabledPackageSources: false,
@@ -1394,7 +1394,7 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
             NullLogger<NuGetClient>.Instance);
 
         client.WriteConfigOverlay(
-            new NuGetConfigOverlayRequest(
+            new NuGetConfigOverlay(
                 [new("private", "https://packages.example.com/v3/index.json")],
                 [new("private", ["Aspire.*"])],
                 ClearDisabledPackageSources: true,

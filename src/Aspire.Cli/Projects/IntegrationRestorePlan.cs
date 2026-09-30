@@ -100,9 +100,9 @@ internal sealed class IntegrationRestorePlanResolver(
             executionContext.NuGetServiceIndexOverride);
         restoreSources = NormalizeSources(restoreSources, new DirectoryInfo(appDirectoryPath));
 
-        var settings = await nugetService.GetNuGetSettingsAsync(
+        var settings = nugetService.GetNuGetSettings(
             appDirectoryPath,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         var configSources = IntegrationRestorePlan.ResolveNuGetConfigSources(
             restoreSources.PackageSourceMappings,
             workloadId,
@@ -382,7 +382,7 @@ internal sealed class IntegrationRestorePlan
             GetGlobalPackagesFolder(overlay));
     }
 
-    public async Task<IntegrationProjectRestoreConfiguration> ApplyProjectRestoreConfigurationAsync(
+    public IntegrationProjectRestoreConfiguration ApplyProjectRestoreConfiguration(
         DirectoryInfo policyDirectory,
         CancellationToken cancellationToken)
     {
@@ -411,10 +411,10 @@ internal sealed class IntegrationRestorePlan
                 _settings,
                 _configSources,
                 globalPackagesFolder);
-            await _nugetService.WriteNuGetConfigOverlayAsync(
+            _nugetService.WriteNuGetConfigOverlay(
                 overlay,
                 restoreOverlayFile.FullName,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken);
         }
 
         var rootAdditionalSources = _restoreSources.PackageSourceMappings is null
@@ -518,7 +518,7 @@ internal sealed class IntegrationRestorePlan
         return [.. resolvedSources];
     }
 
-    internal static NuGetConfigOverlayRequest CreateNuGetConfigOverlay(
+    internal static NuGetConfigOverlay CreateNuGetConfigOverlay(
         PackageMapping[] selectedMappings,
         NuGetSettingsInfo settings,
         IReadOnlyList<NuGetConfigSource> selectedSources,
@@ -539,7 +539,7 @@ internal sealed class IntegrationRestorePlan
                 .ToArray()
             : [];
 
-        return new NuGetConfigOverlayRequest(
+        return new NuGetConfigOverlay(
             selectedSources
                 .Where(static source => !source.IsAmbient)
                 .Select(static source => new NuGetConfigSourceDefinition(source.Key, source.Source))
@@ -695,7 +695,7 @@ internal sealed class IntegrationRestorePlan
             _configSources,
             globalPackagesFolder: null);
         var config = await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-            path => _nugetService.WriteNuGetConfigOverlayAsync(
+            path => _nugetService.WriteNuGetConfigOverlay(
                 overlay,
                 path,
                 cancellationToken)).ConfigureAwait(false);
@@ -707,7 +707,7 @@ internal sealed class IntegrationRestorePlan
 
     private async Task<TemporaryNuGetConfig> ConfigureGlobalPackagesFolderAsync(
         TemporaryNuGetConfig config,
-        NuGetConfigOverlayRequest overlay,
+        NuGetConfigOverlay overlay,
         CancellationToken cancellationToken)
     {
         var globalPackagesFolder = GetGlobalPackagesFolder(config);
@@ -719,7 +719,7 @@ internal sealed class IntegrationRestorePlan
         try
         {
             await config.RegenerateAsync(
-                path => _nugetService.WriteNuGetConfigOverlayAsync(
+                path => _nugetService.WriteNuGetConfigOverlay(
                     overlay with { GlobalPackagesFolder = globalPackagesFolder },
                     path,
                     cancellationToken)).ConfigureAwait(false);

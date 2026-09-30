@@ -438,7 +438,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             packageSourceOverride: feedDirectory.FullName,
             packageSourceOverridePattern: "Direct.Integration",
             TestContext.Current.CancellationToken);
-        var restoreConfiguration = await restorePlan.ApplyProjectRestoreConfigurationAsync(
+        var restoreConfiguration = restorePlan.ApplyProjectRestoreConfiguration(
             IntegrationClosureBuilder.GetAppHostIntegrationPolicyDirectory(workspace.WorkspaceRoot),
             TestContext.Current.CancellationToken);
         var integrationPackageSources = IntegrationClosureBuilder.CreateRestoreAdditionalProjectSourcesValue(

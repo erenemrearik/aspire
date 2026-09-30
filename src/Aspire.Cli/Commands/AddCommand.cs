@@ -362,7 +362,7 @@ internal sealed class AddCommand : BaseCommand
                     var nugetConfigPath = Path.Combine(projectDir.FullName, "nuget.config");
                     if (!File.Exists(nugetConfigPath))
                     {
-                        var packageSourceMappingEnabled = await _nugetSettingsProvider.IsPackageSourceMappingEnabledAsync(
+                        var packageSourceMappingEnabled = _nugetSettingsProvider.IsPackageSourceMappingEnabled(
                             projectDir,
                             cancellationToken);
                         CreateAdditiveLocalSourceNuGetConfig(

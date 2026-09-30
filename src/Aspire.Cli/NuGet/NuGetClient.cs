@@ -68,7 +68,7 @@ internal interface INuGetClient
 
     NuGetSettingsInfo GetSettings(string workingDirectory, byte[] sourceIdentityKey);
 
-    void WriteConfigOverlay(NuGetConfigOverlayRequest request, string outputPath);
+    void WriteConfigOverlay(NuGetConfigOverlay overlay, string outputPath);
 }
 
 internal sealed record NuGetSearchResult(
@@ -682,9 +682,9 @@ internal sealed class NuGetClient(
             sourceIdentityKey);
     }
 
-    public void WriteConfigOverlay(NuGetConfigOverlayRequest request, string outputPath)
+    public void WriteConfigOverlay(NuGetConfigOverlay overlay, string outputPath)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(overlay);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
         var outputFile = new FileInfo(outputPath);
@@ -708,19 +708,19 @@ internal sealed class NuGetClient(
             settings.Remove(ConfigurationConstants.PackageSources, defaultSource);
         }
 
-        foreach (var source in request.Sources)
+        foreach (var source in overlay.Sources)
         {
             settings.AddOrUpdate(
                 ConfigurationConstants.PackageSources,
                 new SourceItem(source.Key, source.Source));
         }
 
-        if (request.ClearDisabledPackageSources)
+        if (overlay.ClearDisabledPackageSources)
         {
             settings.AddOrUpdate(
                 ConfigurationConstants.DisabledPackageSources,
                 new ClearItem());
-            foreach (var sourceKey in request.DisabledPackageSourceKeys)
+            foreach (var sourceKey in overlay.DisabledPackageSourceKeys)
             {
                 settings.AddOrUpdate(
                     ConfigurationConstants.DisabledPackageSources,
@@ -728,12 +728,12 @@ internal sealed class NuGetClient(
             }
         }
 
-        if (request.PackageSourceMappings.Length > 0)
+        if (overlay.PackageSourceMappings.Length > 0)
         {
             settings.AddOrUpdate(
                 ConfigurationConstants.PackageSourceMapping,
                 new ClearItem());
-            var mappings = request.PackageSourceMappings
+            var mappings = overlay.PackageSourceMappings
                 .Select(static mapping => new PackageSourceMappingSourceItem(
                     mapping.SourceKey,
                     mapping.Patterns.Select(static pattern => new PackagePatternItem(pattern))))
@@ -742,13 +742,13 @@ internal sealed class NuGetClient(
                 .SavePackageSourceMappings(mappings);
         }
 
-        if (!string.IsNullOrEmpty(request.GlobalPackagesFolder))
+        if (!string.IsNullOrEmpty(overlay.GlobalPackagesFolder))
         {
             settings.AddOrUpdate(
                 ConfigurationConstants.Config,
                 new AddItem(
                     ConfigurationConstants.GlobalPackagesFolder,
-                    request.GlobalPackagesFolder));
+                    overlay.GlobalPackagesFolder));
         }
 
         settings.SaveToDisk();

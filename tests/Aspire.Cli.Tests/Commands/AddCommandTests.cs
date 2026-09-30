@@ -2928,7 +2928,7 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public async Task AddCommand_WithInheritedPrHiveSource_WritesMatchingLocalSourceMapping()
+    public void AddCommand_WithInheritedPrHiveSource_WritesMatchingLocalSourceMapping()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var projectDirectory = workspace.CreateDirectory("AppHost");
@@ -2953,9 +2953,16 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
               </packageSourceMapping>
             </configuration>
             """);
+        var settingsProvider = new NuGetSettingsProvider(
+            new BundleNuGetService(
+                NullLogger<BundleNuGetService>.Instance,
+                new NuGetClient(
+                    new TestFeatures(),
+                    new TestEnvironment(),
+                    NullLogger<NuGetClient>.Instance)));
 
-        Assert.True(await NuGetSettingsProvider.HasPackageSourceMappingAsync(
-            [parentConfigPath],
+        Assert.True(settingsProvider.IsPackageSourceMappingEnabled(
+            projectDirectory,
             CancellationToken.None));
 
         AddCommand.CreateAdditiveLocalSourceNuGetConfig(
@@ -2990,8 +2997,8 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
             </configuration>
             """);
 
-        Assert.False(await NuGetSettingsProvider.HasPackageSourceMappingAsync(
-            [higherPrecedenceConfigPath, parentConfigPath],
+        Assert.False(settingsProvider.IsPackageSourceMappingEnabled(
+            projectDirectory,
             CancellationToken.None));
 
         var projectWithoutInheritedMapping = workspace.CreateDirectory("AppHostWithoutInheritedMapping");
@@ -3003,61 +3010,6 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
         var configWithoutInheritedMapping = XDocument.Load(
             Path.Combine(projectWithoutInheritedMapping.FullName, "nuget.config"));
         Assert.Empty(configWithoutInheritedMapping.Descendants("packageSourceMapping"));
-    }
-
-    [Fact]
-    public async Task HasPackageSourceMappingAsync_MatchesNuGetSectionAndItemSemantics()
-    {
-        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
-        var nonCanonicalSectionPath = Path.Combine(workspace.WorkspaceRoot.FullName, "noncanonical.config");
-        var mappingThenClearPath = Path.Combine(workspace.WorkspaceRoot.FullName, "mapping-then-clear.config");
-        var clearThenMappingPath = Path.Combine(workspace.WorkspaceRoot.FullName, "clear-then-mapping.config");
-
-        File.WriteAllText(
-            nonCanonicalSectionPath,
-            """
-            <configuration>
-              <PackageSourceMapping>
-                <packageSource key="private">
-                  <package pattern="*" />
-                </packageSource>
-              </PackageSourceMapping>
-            </configuration>
-            """);
-        File.WriteAllText(
-            mappingThenClearPath,
-            """
-            <configuration>
-              <packageSourceMapping>
-                <packageSource key="private">
-                  <package pattern="*" />
-                </packageSource>
-                <clear />
-              </packageSourceMapping>
-            </configuration>
-            """);
-        File.WriteAllText(
-            clearThenMappingPath,
-            """
-            <configuration>
-              <packageSourceMapping>
-                <clear />
-                <PackageSource key="private">
-                  <package pattern="*" />
-                </PackageSource>
-              </packageSourceMapping>
-            </configuration>
-            """);
-
-        Assert.False(await NuGetSettingsProvider.HasPackageSourceMappingAsync(
-            [nonCanonicalSectionPath],
-            CancellationToken.None));
-        Assert.False(await NuGetSettingsProvider.HasPackageSourceMappingAsync(
-            [mappingThenClearPath],
-            CancellationToken.None));
-        Assert.True(await NuGetSettingsProvider.HasPackageSourceMappingAsync(
-            [clearThenMappingPath],
-            CancellationToken.None));
     }
 
     [Fact]

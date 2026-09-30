@@ -579,9 +579,9 @@ internal sealed class PrebuiltAppHostServer : IAppHostServerProject, IDisposable
 
         var policyDirectory = IntegrationClosureBuilder.GetAppHostIntegrationPolicyDirectory(
             new DirectoryInfo(_appDirectoryPath));
-        var restoreConfiguration = await restorePlan.ApplyProjectRestoreConfigurationAsync(
+        var restoreConfiguration = restorePlan.ApplyProjectRestoreConfiguration(
             policyDirectory,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         var integrationPackageSources = IntegrationClosureBuilder.CreateRestoreAdditionalProjectSourcesValue(
             existingValue: null,
             restoreConfiguration.PackageSourceHints);
