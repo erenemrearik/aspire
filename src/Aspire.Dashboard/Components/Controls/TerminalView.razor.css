@@ -120,6 +120,7 @@
     align-items: center;
     flex: 0 0 30px;
     min-width: 0;
+    min-height: 36px;
     padding: 0 12px;
     padding-inline-end: 8px;
     box-sizing: border-box;

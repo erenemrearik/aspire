@@ -380,7 +380,10 @@ The package handles Ctrl/Cmd+click on authoritative OSC 8 hyperlinks in live
 output and history. HMP state replay preserves link destinations across late
 attachment and reconnect. It only opens absolute HTTP, HTTPS and mailto destinations
 with `noopener,noreferrer`; plain clicks and drags retain selection/application
-behavior. Aspire adds no custom opener or plain-text URL detection. See the
+behavior. Aspire also enables Hex1b's per-view plain-text HTTP/HTTPS URL detector
+with dashed underlines and a Ctrl/Cmd-click action that opens a new tab with
+`noopener,noreferrer`. Remote file paths and custom URI schemes are not enabled.
+See the
 [hyperlink PR](https://github.com/mitchdenny/hex1b/pull/489),
 [renderer PR](https://github.com/mitchdenny/hex1b/pull/491), and
 [hyperlink replay fix](https://github.com/mitchdenny/hex1b/pull/493).

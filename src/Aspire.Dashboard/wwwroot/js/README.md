@@ -160,8 +160,10 @@ the Dashboard controls and scrollbar styling.
 
 Workload-reported titles (OSC 0/2), working directories (OSC 7) and progress
 (OSC 9;4) flow through the public client callbacks to the Dashboard title bar.
-The resource view, active dock pane, detached window and interaction dialog
-share the same title/directory/progress presentation. Titles and directory URIs
+The resource view, detached window and interaction dialog share the same
+title/directory/progress presentation. Dock panes are chromeless and omit this
+header; their tabs retain the titles captured when they were created.
+Titles and directory URIs
 are treated as untrusted text, not HTML or navigable links. The decoded directory
 is displayed at the right of the title bar as a copy button. Clicking anywhere
 on the path copies the full value using the Dashboard's shared client-side
@@ -283,20 +285,24 @@ Ctrl/Cmd+click opens server-authoritative OSC 8 hyperlinks using the package's
 built-in routing, including links in history and read-only views. Only absolute
 HTTP, HTTPS and mailto destinations are allowed, and tabs use
 `noopener,noreferrer`. Plain clicks and drags retain selection/application
-behavior; Shift and Alt reserve selection gestures. Aspire does not add its own
-opener, custom-scheme support, or plain-text URL detection. HMP state replay
+behavior; Shift and Alt reserve selection gestures. Aspire also enables Hex1b's
+per-view plain-text HTTP/HTTPS URL detector with dashed underlines and a
+Ctrl/Cmd-click action that opens a new tab with `noopener,noreferrer`.
+Remote file paths and custom URI schemes are not enabled. HMP state replay
 preserves link destinations when a browser attaches or reconnects. See
 [the hyperlink PR](https://github.com/mitchdenny/hex1b/pull/489) and
 [the replay fix](https://github.com/mitchdenny/hex1b/pull/493).
 
 The public API supports auto/fixed sizing, primary requests, keyboard and mouse
 input, paste/copy, selection, and producer-backed history. It exposes workload
-title, progress, and shell-integration state with change callbacks; the dashboard
-does not yet consume these and still labels the terminal with the resource name.
-It has no terminal theme setter, search API, or clear-buffer API. Terminal
-colors and content are server-authoritative; inspection UI uses the package's
-theme defaults/tokens. The previous terminal hardcoded dark xterm colors rather
-than offering a theme control. Search, filtering, clearing the log display, and
+title, working directory, progress, and shell-integration state with change
+callbacks. The dashboard consumes title, directory and progress updates for its
+metadata headers, falling back to the resource name when no workload title is
+present. Dock panes omit the header and retain their creation-time tab titles.
+The terminal palette selector uses `setColorMode` to switch between Dark and
+Light independently of the Dashboard theme, recoloring default and indexed
+colors while preserving explicit RGB colors and image pixels. There is no
+terminal search API or clear-buffer API. Search, filtering, clearing the log display, and
 downloads belong to the separate Blazor `LogViewer`, which does not use xterm
 and is unchanged by this migration.
 

@@ -1,7 +1,7 @@
 .terminal-metadata {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     min-width: 0;
     flex: 1;
     color: var(--colorNeutralForeground1);
@@ -101,29 +101,29 @@
     opacity: 1;
 }
 
-.terminal-progress[data-state] {
+.terminal-icon[data-state] {
     display: flex;
     align-items: center;
     box-sizing: content-box;
     width: 16px;
     color: var(--colorBrandForegroundLink);
-    padding-inline-end: 12px;
+    padding-inline-end: 8px;
     border-inline-end: 1px solid var(--terminal-titlebar-border-color, var(--colorNeutralStroke1));
     flex-shrink: 0;
 }
 
-.terminal-progress[data-state="error"] {
+.terminal-icon[data-state="error"] {
     color: var(--error);
     --colorBrandStroke1: var(--error);
 }
 
-.terminal-progress[data-state="warning"] {
+.terminal-icon[data-state="warning"] {
     color: var(--warning);
     --colorBrandStroke1: var(--warning);
 }
 
 @media (forced-colors: active) {
-    .terminal-progress[data-state] {
+    .terminal-icon[data-state] {
         color: CanvasText;
         --colorBrandStroke1: CanvasText;
         --colorNeutralStroke2: Canvas;

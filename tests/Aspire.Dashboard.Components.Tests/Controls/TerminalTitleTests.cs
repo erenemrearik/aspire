@@ -150,11 +150,11 @@ public class TerminalTitleTests : DashboardTestContext
         var progress = cut.Find("[role=progressbar]");
         Assert.Equal(expectedValue, progress.GetAttribute("aria-valuenow"));
         Assert.Equal(Resources.TerminalStrings.ResourceManager.GetString(label), progress.GetAttribute("aria-label"));
-        var indicator = cut.Find(".terminal-progress");
+        var indicator = cut.Find(".terminal-icon");
         Assert.Equal(state, indicator.GetAttribute("data-state"));
         Assert.Equal(expectedValue is null ? Resources.TerminalStrings.ResourceManager.GetString(label) : expectedText, indicator.GetAttribute("title"));
         Assert.Empty(indicator.TextContent.Trim());
-        Assert.Equal("terminal-progress", cut.Find(".terminal-metadata").Children[0].ClassName);
+        Assert.Equal("terminal-icon", cut.Find(".terminal-metadata").Children[0].ClassName);
         Assert.Equal("terminal-title-container", cut.Find(".terminal-metadata").Children[1].ClassName);
         Assert.Single(indicator.Children);
     }
@@ -170,7 +170,7 @@ public class TerminalTitleTests : DashboardTestContext
             Connected = connected, ProgressState = state, ProgressPercentage = 42
         }));
         Assert.Empty(cut.FindAll("[role=progressbar]"));
-        Assert.Equal("none", cut.Find(".terminal-progress").GetAttribute("data-state"));
+        Assert.Equal("none", cut.Find(".terminal-icon").GetAttribute("data-state"));
         Assert.IsType<Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.WindowConsole>(cut.FindComponent<FluentIcon<Icon>>().Instance.Value);
     }
 
@@ -186,13 +186,13 @@ public class TerminalTitleTests : DashboardTestContext
             Connected = true, ProgressState = "normal", ProgressPercentage = 42
         }));
         Assert.Single(cut.FindAll("[role=progressbar]"));
-        Assert.Equal("42%", cut.Find(".terminal-progress").GetAttribute("title"));
+        Assert.Equal("42%", cut.Find(".terminal-icon").GetAttribute("title"));
         Assert.Empty(cut.FindComponents<FluentIcon<Icon>>());
 
         cut.Render(builder => builder.Add(p => p.State, new TerminalToolbarState { Connected = true, ProgressState = "none" }));
         Assert.Same(icon, cut.FindComponent<FluentIcon<Icon>>().Instance.Value);
         cut.Render(builder => builder.Add(p => p.State, new TerminalToolbarState { Connected = false, ProgressState = "normal", ProgressPercentage = 42 }));
         Assert.Same(icon, cut.FindComponent<FluentIcon<Icon>>().Instance.Value);
-        Assert.Null(cut.Find(".terminal-progress").GetAttribute("title"));
+        Assert.Null(cut.Find(".terminal-icon").GetAttribute("title"));
     }
 }

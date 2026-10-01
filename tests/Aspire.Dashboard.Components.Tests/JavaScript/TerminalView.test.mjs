@@ -2054,7 +2054,7 @@ test("frontend manifest, lockfile, minified bundle and backend use the exact pai
     const bundle = await readFile(new URL("dist/index.min.js", assets), "utf8");
     const version = manifest.dependencies["@hex1b/web-terminal"];
     assert.equal(version, "0.171.0");
-    assert.ok(bundle.startsWith(`// @hex1b/web-terminal ${version}; minified with Terser. See ../LICENSE.\n`));
+    assert.equal(bundle.split(/\r?\n/, 1)[0], `// @hex1b/web-terminal ${version}; minified with Terser. See ../LICENSE.`);
     assert.equal(lockfile.packages[""].dependencies["@hex1b/web-terminal"], version);
     assert.equal(lockfile.packages["node_modules/@hex1b/web-terminal"].version, version);
 

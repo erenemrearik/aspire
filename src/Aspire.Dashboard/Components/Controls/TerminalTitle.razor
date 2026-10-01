@@ -1,14 +1,14 @@
 @namespace Aspire.Dashboard.Components.Controls
 
 <div class="terminal-metadata" data-directory="@State?.WorkingDirectory" @ref="_metadataElement">
-    <div class="terminal-progress" data-state="@(HasProgress ? State!.ProgressState : "none")" title="@(HasProgress ? ProgressTooltip : null)">
+    <div class="terminal-icon" data-state="@(HasProgress ? State!.ProgressState : "none")" title="@(HasProgress ? ProgressTooltip : null)">
         @if (HasProgress)
         {
             <AspireProgressRing Width="16px" Value="@ProgressValue" AriaLabel="@ProgressLabel" />
         }
         else
         {
-            <FluentIcon Class="terminal-idle-icon" Value="@(IdleIcon ?? s_terminalIcon)" Width="16px" Color="Color.Custom" CustomColor="currentColor" aria-hidden="true" />
+            <FluentIcon Class="terminal-idle-icon" Value="@(IdleIcon ?? s_terminalIcon)" Width="16px" Color="Color.Primary" aria-hidden="true" />
         }
     </div>
     @if (!string.IsNullOrEmpty(DisplayTitle))
@@ -21,8 +21,8 @@
                 <span class="terminal-title-content">
                     <span class="terminal-title">@DisplayTitle</span>
                     <span class="terminal-title-copy-icons" aria-hidden="true">
-                        <FluentIcon Class="copy-icon" Icon="Icons.Regular.Size16.Copy" Color="Color.Default" />
-                        <FluentIcon Class="checkmark-icon" Icon="Icons.Regular.Size16.Checkmark" Color="Color.Default" Style="display:none" />
+                        <FluentIcon Class="copy-icon" Icon="Icons.Regular.Size16.Copy" Color="Color.Primary" />
+                        <FluentIcon Class="checkmark-icon" Icon="Icons.Regular.Size16.Checkmark" Color="Color.Primary" Style="display:none" />
                     </span>
                 </span>
             </FluentButton>
@@ -42,8 +42,8 @@
                         <span class="terminal-directory-display" aria-hidden="true"></span>
                     </span>
                     <span class="terminal-directory-copy-icons" aria-hidden="true">
-                        <FluentIcon Class="copy-icon" Icon="Icons.Regular.Size16.Copy" Color="Color.Default" />
-                        <FluentIcon Class="checkmark-icon" Icon="Icons.Regular.Size16.Checkmark" Color="Color.Default" Style="display:none" />
+                        <FluentIcon Class="copy-icon" Icon="Icons.Regular.Size16.Copy" Color="Color.Primary" />
+                        <FluentIcon Class="checkmark-icon" Icon="Icons.Regular.Size16.Checkmark" Color="Color.Primary" Style="display:none" />
                     </span>
                 </span>
             </FluentButton>

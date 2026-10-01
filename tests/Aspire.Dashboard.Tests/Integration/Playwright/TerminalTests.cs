@@ -382,9 +382,9 @@ public sealed class TerminalTests(TerminalTests.TerminalDashboardServerFixture f
             await input.FocusAsync();
             await WriteMetadataAsync(page, connection, "Building <app> & \u03bb", "/work/source files");
             connection.Workload.Write("\u001b]9;4;1;42\u0007");
-            await Assertions.Expect(page.Locator(".terminal-progress")).ToHaveAttributeAsync("data-state", "normal");
-            await Assertions.Expect(page.Locator(".terminal-progress")).ToHaveAttributeAsync("title", "42%");
-            await Assertions.Expect(page.Locator(".terminal-progress [role=progressbar]")).ToHaveAttributeAsync("aria-valuenow", "42");
+            await Assertions.Expect(page.Locator(".terminal-icon")).ToHaveAttributeAsync("data-state", "normal");
+            await Assertions.Expect(page.Locator(".terminal-icon")).ToHaveAttributeAsync("title", "42%");
+            await Assertions.Expect(page.Locator(".terminal-icon [role=progressbar]")).ToHaveAttributeAsync("aria-valuenow", "42");
             await Assertions.Expect(input).ToBeFocusedAsync();
             await titleButton.ClickAsync();
             await ExpectClipboardTextAsync(page, "Building <app> & \u03bb");
@@ -394,9 +394,9 @@ public sealed class TerminalTests(TerminalTests.TerminalDashboardServerFixture f
             await directoryButton.FocusAsync();
             await WriteMetadataAsync(page, connection, "Build failed", "/work/build output");
             connection.Workload.Write("\u001b]9;4;2;75\u0007");
-            await Assertions.Expect(page.Locator(".terminal-progress")).ToHaveAttributeAsync("data-state", "error");
-            await Assertions.Expect(page.Locator(".terminal-progress")).ToHaveAttributeAsync("title", "75%");
-            await Assertions.Expect(page.Locator(".terminal-progress [role=progressbar]")).ToHaveAttributeAsync("aria-valuenow", "75");
+            await Assertions.Expect(page.Locator(".terminal-icon")).ToHaveAttributeAsync("data-state", "error");
+            await Assertions.Expect(page.Locator(".terminal-icon")).ToHaveAttributeAsync("title", "75%");
+            await Assertions.Expect(page.Locator(".terminal-icon [role=progressbar]")).ToHaveAttributeAsync("aria-valuenow", "75");
             await Assertions.Expect(directoryButton).ToBeFocusedAsync();
             await page.Keyboard.PressAsync("Enter");
             await ExpectClipboardTextAsync(page, "/work/build output");
@@ -406,8 +406,8 @@ public sealed class TerminalTests(TerminalTests.TerminalDashboardServerFixture f
             await input.FocusAsync();
             connection.Workload.Write("\u001b]2;\u0007\u001b]9;4;0\u0007");
             await Assertions.Expect(page.Locator(".terminal-title")).ToHaveTextAsync(ResourceName);
-            await Assertions.Expect(page.Locator(".terminal-progress")).ToHaveAttributeAsync("data-state", "none");
-            await Assertions.Expect(page.Locator(".terminal-progress [role=progressbar]")).ToHaveCountAsync(0);
+            await Assertions.Expect(page.Locator(".terminal-icon")).ToHaveAttributeAsync("data-state", "none");
+            await Assertions.Expect(page.Locator(".terminal-icon [role=progressbar]")).ToHaveCountAsync(0);
             await Assertions.Expect(input).ToBeFocusedAsync();
             Assert.True(await inputElement.EvaluateAsync<bool>("element => element.isConnected"));
             Assert.Equal(1, connection.ConnectionCount);
