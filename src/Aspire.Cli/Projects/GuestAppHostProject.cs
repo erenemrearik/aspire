@@ -1594,7 +1594,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             });
 
         var explicitChannelName = context.Channel.ShouldPersistChannelName() ? context.Channel.Name : null;
-        // A non-stable explicit channel changes the persisted pin, while explicit stable removes an existing pin.
+        // Determine if this restore involves a change from a previously persisted channel selection in the Aspire config to a new channel selection.
         var persistedChannelSelectionChanged =
             (context.Channel.Type is PackageChannelType.Explicit &&
                 string.Equals(context.Channel.Name, PackageChannelNames.Stable, StringComparisons.ChannelName) &&
@@ -1689,10 +1689,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             {
                 return regenerateResult;
             }
-        }
 
-        if (hasProjectUpdates || persistedChannelSelectionChanged)
-        {
             SaveConfiguration(config, directory);
         }
 
