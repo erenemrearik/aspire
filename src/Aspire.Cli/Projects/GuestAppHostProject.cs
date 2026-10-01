@@ -388,7 +388,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         // code directory (.aspire/modules) may not exist yet and dependency files reference it.
         await GenerateCodeViaRpcAsync(
             directory.FullName,
-            appHostFile: null,
+            appHostFile,
             rpcClient,
             integrations,
             targetSdkVersion: config.SdkVersion,

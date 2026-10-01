@@ -713,6 +713,43 @@ public class GuestAppHostProjectTests : IDisposable
         Assert.Equal("// transport.ts", convertedFiles["transport.ts"]);
     }
 
+    [Fact]
+    public async Task BuildAndGenerateSdkAsync_SelectedLegacyAppHost_UsesLegacyLayoutWhenModernSiblingExists()
+    {
+        var legacyAppHostPath = Path.Combine(_workspace.WorkspaceRoot.FullName, LegacyTypeScriptAppHost.LegacyAppHostFileName);
+        await File.WriteAllTextAsync(legacyAppHostPath, "import { aspire } from './.modules/aspire.js';");
+        await File.WriteAllTextAsync(
+            Path.Combine(_workspace.WorkspaceRoot.FullName, LegacyTypeScriptAppHost.ModernAppHostFileName),
+            "import { aspire } from './.aspire/modules/aspire.mjs';");
+
+        var projectFactory = new TestAppHostServerProjectFactory
+        {
+            CreateAsyncCallback = (path, _) =>
+                Task.FromResult<IAppHostServerProject>(new FakeSucceedingAppHostServerProject(path))
+        };
+        var interactionService = new TestInteractionService();
+        var project = CreateGuestAppHostProject(
+            interactionService: interactionService,
+            appHostServerProjectFactory: projectFactory,
+            serverSessionFactory: new FakeAppHostServerSessionFactory());
+
+        var success = await project.BuildAndGenerateSdkAsync(
+            new FileInfo(legacyAppHostPath),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(success);
+        Assert.Equal(legacyAppHostPath, projectFactory.AppHostFile?.FullName);
+        Assert.True(Directory.Exists(Path.Combine(
+            _workspace.WorkspaceRoot.FullName,
+            LanguageInfo.LegacyGeneratedFolderName)));
+        Assert.False(Directory.Exists(Path.Combine(
+            _workspace.WorkspaceRoot.FullName,
+            LanguageInfo.GeneratedFolderName)));
+        Assert.Contains(
+            interactionService.DisplayedMessages,
+            message => Markup.Remove(message.Message) == ErrorStrings.LegacyTypeScriptAppHostWarning);
+    }
+
     /// <summary>
     /// Regression test for issue #17077: <c>aspire update</c> must not leave
     /// <c>aspire.config.json</c> advanced to newer package versions when guest SDK
