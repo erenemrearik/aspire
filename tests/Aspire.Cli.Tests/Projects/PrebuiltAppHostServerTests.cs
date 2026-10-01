@@ -87,10 +87,10 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public void GetIntegrationBuildFailureMessage_ExplainsAPackageDowngrade()
+    public void GetIntegrationBuildFailureMessage_ExplainsAnAspireHostingPackageDowngrade()
     {
         var output = new OutputCollector();
-        // Localized MSBuild output: the error code is the only stable part to match on.
+        // MSBuild localizes the diagnostic text, but the error code and package ID remain stable.
         output.AppendOutput("IntegrationRestore.csproj : error NU1605: Advertencia como error: Degradación del paquete detectada: Aspire.Hosting de 13.6.0-dev a 13.5.0.");
 
         var message = PrebuiltAppHostServer.GetIntegrationBuildFailureMessage(output);
@@ -100,12 +100,101 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
+    public void GetIntegrationBuildFailureMessage_FallsBackForAnUnrelatedPackageDowngrade()
+    {
+        var output = new OutputCollector();
+        output.AppendOutput("IntegrationRestore.csproj : error NU1605: Advertencia como error: Degradación del paquete detectada: Conflict.Dependency de 2.0.0 a 1.0.0.");
+        output.AppendOutput("IntegrationRestore -> Aspire.Hosting (>= 13.6.0)");
+
+        Assert.Equal(ErrorStrings.IntegrationBuildFailed, PrebuiltAppHostServer.GetIntegrationBuildFailureMessage(output));
+    }
+
+    [Fact]
     public void GetIntegrationBuildFailureMessage_FallsBackForOtherFailures()
     {
         var output = new OutputCollector();
         output.AppendOutput("Program.cs(3,1): error CS0103: The name 'Foo' does not exist in the current context");
 
         Assert.Equal(ErrorStrings.IntegrationBuildFailed, PrebuiltAppHostServer.GetIntegrationBuildFailureMessage(output));
+    }
+
+    [Fact]
+    public async Task DotNetRestore_PackageDowngradeIncludesAspireHostingOnTheDiagnosticLine()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var feedDirectory = workspace.CreateDirectory("feed");
+        var packagesDirectory = workspace.CreateDirectory("packages");
+        var projectDirectory = workspace.CreateDirectory("project");
+
+        CreateDependencyPackage(feedDirectory, "Aspire.Hosting", "1.0.0");
+        CreateDependencyPackage(feedDirectory, "Aspire.Hosting", "2.0.0");
+        CreateDependencyPackage(
+            feedDirectory,
+            "Conflict.Requirement",
+            "1.0.0",
+            dependencyId: "Aspire.Hosting",
+            dependencyVersion: "[2.0.0]");
+
+        var projectPath = Path.Combine(projectDirectory.FullName, "PackageDowngrade.csproj");
+        await File.WriteAllTextAsync(
+            projectPath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <NuGetAudit>false</NuGetAudit>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="Conflict.Requirement" Version="1.0.0" />
+                <PackageReference Include="Aspire.Hosting" Version="1.0.0" />
+              </ItemGroup>
+            </Project>
+            """);
+        var nuGetConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config");
+        await File.WriteAllTextAsync(
+            nuGetConfigPath,
+            $$"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="test" value="{{feedDirectory.FullName}}" />
+              </packageSources>
+            </configuration>
+            """);
+
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            WorkingDirectory = projectDirectory.FullName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.Environment.Remove("MSBuildSDKsPath");
+        startInfo.ArgumentList.Add("restore");
+        startInfo.ArgumentList.Add(projectPath);
+        startInfo.ArgumentList.Add("--configfile");
+        startInfo.ArgumentList.Add(nuGetConfigPath);
+        startInfo.ArgumentList.Add("--packages");
+        startInfo.ArgumentList.Add(packagesDirectory.FullName);
+        startInfo.ArgumentList.Add("--nologo");
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start dotnet restore.");
+        // Read both streams concurrently to avoid deadlock when a pipe buffer fills.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        var output = $"{await stdoutTask}{Environment.NewLine}{await stderrTask}";
+        var outputLines = output.Split(
+            [Environment.NewLine],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        Assert.True(process.ExitCode != 0, $"Expected dotnet restore to fail with NU1605:{Environment.NewLine}{output}");
+        Assert.True(
+            outputLines.Any(static line =>
+                line.Contains("NU1605", StringComparison.Ordinal) &&
+                line.Contains(" Aspire.Hosting ", StringComparison.OrdinalIgnoreCase)),
+            $"Expected one NU1605 diagnostic line to contain the exact Aspire.Hosting package ID:{Environment.NewLine}{output}");
     }
 
     [Fact]
@@ -3655,7 +3744,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             BuildAsyncCallback = (_, _, options, _) =>
             {
                 options.StandardErrorCallback?.Invoke(
-                    "error NU1605: Warning As Error: Detected package downgrade: Aspire.Hosting");
+                    "error NU1605: Warning As Error: Detected package downgrade: Aspire.Hosting from 13.5.0 to 13.4.0.");
                 return 1;
             }
         };

@@ -382,23 +382,24 @@ internal sealed class PrebuiltAppHostServer : IAppHostServerProject, IDisposable
         => GeneratedFileWriter.WriteIfChangedAsync(path, content, cancellationToken);
 
     /// <summary>
-    /// Produces the failure message for a failed integration build, recognizing the one failure
-    /// mode that is a configuration problem rather than a build problem.
+    /// Produces the failure message for a failed integration build, recognizing an
+    /// Aspire.Hosting package downgrade as a configuration problem rather than a build problem.
     /// </summary>
     /// <remarks>
     /// The AppHost server is the CLI itself, so the synthesized project pins Aspire.Hosting to the
     /// selected AppHost SDK version. A project reference that requires a newer Aspire.Hosting cannot
     /// be satisfied, and NuGet reports it as a downgrade:
     ///   error NU1605: Warning As Error: Detected package downgrade: Aspire.Hosting from 13.6.0-dev to 13.5.0
-    /// The raw output is unusable here because MSBuild localizes it, so the diagnostic is matched on
-    /// the error code alone and the actionable explanation is supplied in the CLI's own language.
+    /// MSBuild localizes the diagnostic text, but the error code and package ID remain stable.
     /// </remarks>
     internal static string GetIntegrationBuildFailureMessage(OutputCollector buildOutput)
     {
-        var hasPackageDowngrade = buildOutput.GetLines()
-            .Any(static l => l.Line.Contains("NU1605", StringComparison.Ordinal));
+        var hasAspireHostingPackageDowngrade = buildOutput.GetLines()
+            .Any(static l =>
+                l.Line.Contains("NU1605", StringComparison.Ordinal) &&
+                l.Line.Contains(" Aspire.Hosting ", StringComparison.OrdinalIgnoreCase));
 
-        return hasPackageDowngrade
+        return hasAspireHostingPackageDowngrade
             ? string.Format(
                 CultureInfo.CurrentCulture,
                 ErrorStrings.IntegrationBuildPackageDowngradeFailed,
