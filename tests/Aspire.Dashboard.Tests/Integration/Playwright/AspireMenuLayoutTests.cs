@@ -24,6 +24,7 @@ public sealed class AspireMenuLayoutTests : PlaywrightTestsBase<DashboardServerF
 
     [Fact]
     [OuterloopTest("Resource-intensive Playwright browser test")]
+    [ActiveIssue("https://github.com/microsoft/aspire/issues/20640")]
     public async Task StructuredLogActions_TriggerRemainsVisibleAndMenuItemsSharePopup()
     {
         var repository = DashboardServerFixture.DashboardApp.Services.GetRequiredService<ITelemetryRepositoryWriter>();

@@ -194,6 +194,7 @@ public sealed class TerminalTests(TerminalTests.TerminalDashboardServerFixture f
 
     [Fact]
     [OuterloopTest("Resource-intensive Playwright browser test")]
+    [ActiveIssue("https://github.com/microsoft/aspire/issues/20641")]
     public async Task ExplicitSizing_TakesPrimaryAndAppliesRequestedGrid()
     {
         await RunTestAsync(async page =>
