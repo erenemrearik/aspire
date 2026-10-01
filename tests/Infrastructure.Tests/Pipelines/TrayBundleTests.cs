@@ -9,6 +9,7 @@ using Aspire.SelectTests;
 using Aspire.Tools.CreateLayout;
 using Aspire.TestUtilities;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace Infrastructure.Tests;
 
@@ -330,6 +331,21 @@ public sealed class TrayBundleTests(ITestOutputHelper output)
         Assert.Contains("-PublishDirectory (Join-Path $scratch \"$rid/tray\")", workflow);
         Assert.Contains("eng/scripts/tray-registration-control/run.ps1 -Architecture ($rid -replace '^win-', '') -CompareArchitectures:($rid -eq 'win-arm64')", workflow);
         Assert.Contains("artifacts/bundle/aspire-ci-bundlepayload-$rid.tar.gz", workflow);
+        var yaml = new YamlStream();
+        yaml.Load(new StringReader(workflow));
+        var root = Assert.IsType<YamlMappingNode>(yaml.Documents[0].RootNode);
+        var jobs = Assert.IsType<YamlMappingNode>(root.Children[new YamlScalarNode("jobs")]);
+        var job = Assert.IsType<YamlMappingNode>(jobs.Children[new YamlScalarNode("build_cli_archives")]);
+        var steps = Assert.IsType<YamlSequenceNode>(job.Children[new YamlScalarNode("steps")]);
+        var smoke = Assert.Single(steps.Children.OfType<YamlMappingNode>(),
+            step => step.Children.TryGetValue(new YamlScalarNode("name"), out var name) && name.ToString() == "Smoke Windows native tray");
+        var environment = Assert.IsType<YamlMappingNode>(smoke.Children[new YamlScalarNode("env")]);
+        Assert.Equal("${{ matrix.targets.rids }}", environment.Children[new YamlScalarNode("TRAY_RID")].ToString());
+        Assert.Equal("${{ inputs.configuration }}", environment.Children[new YamlScalarNode("TRAY_CONFIGURATION")].ToString());
+        var script = smoke.Children[new YamlScalarNode("run")].ToString();
+        Assert.Equal(-1, script.IndexOf("${{", StringComparison.Ordinal));
+        Assert.Contains("$rid = $env:TRAY_RID", script);
+        Assert.Contains("-Configuration $env:TRAY_CONFIGURATION", script);
         var publish = File.ReadAllText(Path.Combine(RepoRoot.Path, "src/Aspire.Tray/Windows/publish.ps1"));
         Assert.Contains("$startInfo.ArgumentList.Add($argument)", publish);
         Assert.Contains("$process.StandardOutput.ReadToEndAsync()", publish);

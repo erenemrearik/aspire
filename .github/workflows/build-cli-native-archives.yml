@@ -205,10 +205,13 @@ jobs:
       - name: Smoke Windows native tray
         if: runner.os == 'Windows' && matrix.targets.rids != 'win-arm64' && steps.windows_tray_desktop.outputs.available == 'true'
         shell: pwsh
+        env:
+          TRAY_RID: ${{ matrix.targets.rids }}
+          TRAY_CONFIGURATION: ${{ inputs.configuration }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $rid = '${{ matrix.targets.rids }}'
-          $archive = @(Get-ChildItem -Path 'artifacts/packages/${{ inputs.configuration }}' -Filter "aspire-cli-$rid-*.zip" -Recurse -File)
+          $rid = $env:TRAY_RID
+          $archive = @(Get-ChildItem -Path "artifacts/packages/$env:TRAY_CONFIGURATION" -Filter "aspire-cli-$rid-*.zip" -Recurse -File)
           if ($archive.Count -ne 1) {
             throw "Expected exactly one native CLI archive for $rid."
           }
@@ -221,7 +224,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Could not extract native tray smoke payload.' }
             src/Aspire.Tray/Windows/publish.ps1 `
               -Architecture ($rid -replace '^win-', '') `
-              -Configuration '${{ inputs.configuration }}' `
+              -Configuration $env:TRAY_CONFIGURATION `
               -PublishDirectory (Join-Path $scratch "$rid/tray") `
               -SkipPublish -CliPath $cli -SmokeSeconds 60
           }

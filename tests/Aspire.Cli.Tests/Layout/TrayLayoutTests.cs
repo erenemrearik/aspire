@@ -24,8 +24,10 @@ public sealed class TrayLayoutTests(ITestOutputHelper output)
         var root = workspace.Path;
         var components = bundleDirectory ? Path.Combine(root, "bundle") : root;
         Directory.CreateDirectory(Path.Combine(components, "managed"));
+        Directory.CreateDirectory(Path.Combine(components, "dashboard"));
         Directory.CreateDirectory(Path.Combine(components, "dcp"));
         File.WriteAllText(Path.Combine(components, "managed", BundleDiscovery.GetExecutableFileName(BundleDiscovery.ManagedExecutableName)), "");
+        File.WriteAllText(Path.Combine(components, "dashboard", BundleDiscovery.GetExecutableFileName(BundleDiscovery.DashboardExecutableName)), "");
         File.WriteAllText(BundleDiscovery.GetDcpExecutablePath(Path.Combine(components, "dcp")), "");
         var trayPath = Path.Combine(components, OperatingSystem.IsWindows()
             ? WindowsTrayPayload.ExecutablePath : LayoutComponents.MacTrayExecutablePath);
