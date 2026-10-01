@@ -97,6 +97,11 @@
     pointer-events: none;
 }
 
+::deep.layout > header .notification-counter-badge-overflow {
+    width: 20px;
+    min-width: 20px;
+}
+
 ::deep.layout > .messagebar-container > .top-messagebar {
     flex: 1 1 auto;
     min-width: 0;
