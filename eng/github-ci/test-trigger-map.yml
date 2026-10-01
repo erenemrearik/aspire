@@ -522,6 +522,11 @@ path_rules:
   - paths: [src/Aspire.Tray/Windows/publish.ps1]
     targets: [CLI_BUNDLE, test:Infrastructure.Tests]
     reason: Windows native publishing and smoke invocation
+  - paths:
+      - eng/scripts/generate-template-cgmanifest.ps1
+      - src/Aspire.ProjectTemplates/Aspire.ProjectTemplates.csproj
+    targets: [test:Infrastructure.Tests]
+    reason: template manifest wrapper and restore workspace cleanup coverage
 
 # Project rules: an affected production/non-test project (Layer 1, matched by project-NAME glob) -> targets.
 # This follows the graph's transitive closure: a change to a project's dependency marks it affected,

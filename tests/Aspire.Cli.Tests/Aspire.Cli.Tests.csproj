@@ -11,6 +11,9 @@
     <RunOnAzdoHelixWindows>false</RunOnAzdoHelixWindows>
     <RunOnAzdoHelixLinux>false</RunOnAzdoHelixLinux>
     <RunOnGithubActionsMacOS>true</RunOnGithubActionsMacOS>
+    <!-- The outerloop-only Maven reactor tests execute fixtures compiled for Java 21. Regular CLI test
+         runs exclude those tests, so avoid provisioning a JDK for every CLI job. -->
+    <RequiresJava Condition="'$(RunOuterloopTests)' == 'true'">true</RequiresJava>
   </PropertyGroup>
 
   <ItemGroup>
