@@ -73,7 +73,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         var resolvedId = options.Region is not null ? $"{tunnelId}.{options.RegionCode}" : tunnelId;
         var existing = await FindExistingAsync<DevTunnelStatus>(
             (stdout, stderr, log, ct) => _cli.ShowTunnelAsync(resolvedId, stdout, stderr, log, ct),
-            "tunnel", $"dev tunnel '{resolvedId}'", logger, cancellationToken).ConfigureAwait(false);
+            "tunnel", $"dev tunnel '{resolvedId}'", t => ValidateTunnelIdentity(resolvedId, t.TunnelId), logger, cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
             var access = existing.AccessControl;
@@ -90,6 +90,10 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
                 var (updated, updateExitCode, updateError) = await CallCliAsJsonAsync<DevTunnelStatus>(
                     (stdout, stderr, log, ct) => _cli.UpdateTunnelAsync(existing.TunnelId, options, stdout, stderr, log, ct),
                     "tunnel", logger, cancellationToken).ConfigureAwait(false);
+                if (updated is not null)
+                {
+                    ValidateTunnelIdentity(existing.TunnelId, updated.TunnelId);
+                }
                 existing = updated ?? throw new RetryableProvisioningException($"Failed to update dev tunnel '{existing.TunnelId}'. Exit code {updateExitCode}: {updateError}");
             }
 
@@ -115,6 +119,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
 
             if (exitCode == 0 && tunnel is not null)
             {
+                ValidateTunnelIdentity(resolvedId, tunnel.TunnelId);
                 logger?.LogTrace("Dev tunnel '{TunnelId}' created successfully.", tunnelId);
                 return tunnel;
             }
@@ -143,6 +148,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
 
                 if (exitCode == 0 && tunnel is not null)
                 {
+                    ValidateTunnelIdentity(resolvedTunnelId, tunnel.TunnelId);
                     resolvedTunnelId = tunnel.TunnelId;
                     logger?.LogTrace("Dev tunnel '{TunnelId}' updated successfully.", resolvedTunnelId);
 
@@ -197,6 +203,10 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         {
             throw new DevTunnelNotFoundException(tunnelId, error);
         }
+        if (tunnel is not null)
+        {
+            ValidateTunnelIdentity(tunnelId, tunnel.TunnelId);
+        }
         return tunnel ?? throw new DistributedApplicationException($"Failed to get dev tunnel '{tunnelId}'. Exit code {exitCode}: {error}");
     }
 
@@ -217,9 +227,10 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         ArgumentException.ThrowIfNullOrWhiteSpace(tunnelId);
         var existing = await FindExistingAsync<DevTunnelPortStatus>(
             (stdout, stderr, log, ct) => _cli.ShowPortAsync(tunnelId, portNumber, stdout, stderr, log, ct),
-            "port", $"port '{portNumber}' on dev tunnel '{tunnelId}'", logger, cancellationToken).ConfigureAwait(false);
+            "port", $"port '{portNumber}' on dev tunnel '{tunnelId}'", p => ValidatePortIdentity(tunnelId, portNumber, p), logger, cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
+            tunnelId = existing.TunnelId;
             var protocolMatches = string.Equals(existing.Protocol, portOptions.Protocol ?? "auto", StringComparison.OrdinalIgnoreCase);
             var descriptionMatches = string.IsNullOrEmpty(portOptions.Description) || string.Equals(existing.Description, portOptions.Description, StringComparison.Ordinal);
             var labelsMatch = existing.Labels.ToHashSet(StringComparer.Ordinal).SetEquals(portOptions.Labels ?? []);
@@ -258,29 +269,12 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
 
             if (exitCode == 0 && port is not null)
             {
-                if (portOptions.AllowAnonymous.HasValue)
-                {
-                    // AllowAnonymous=true: anonymous=true, deny=false
-                    // AllowAnonymous=false: anonymous=true, deny=true
-                    var anonymous = true;
-                    var deny = !portOptions.AllowAnonymous.Value;
-                    if (deny)
-                    {
-                        logger?.LogTrace("Denying anonymous access for port '{PortNumber}' on dev tunnel '{TunnelId}'.", portNumber, tunnelId);
-                    }
-                    else
-                    {
-                        logger?.LogTrace("Allowing anonymous access for port '{PortNumber}' on dev tunnel '{TunnelId}'.", portNumber, tunnelId);
-                    }
-                    (var result, exitCode, error) = await CallCliAsJsonAsync<DevTunnelAccessStatus>(
-                        (stdout, stderr, log, ct) => _cli.CreateAccessAsync(tunnelId, portNumber, anonymous, deny, stdout, stderr, log, ct),
-                        logger, cancellationToken).ConfigureAwait(false);
-                }
-                if (exitCode == 0)
-                {
-                    logger?.LogTrace("Port '{PortNumber}' on dev tunnel '{TunnelId}' created successfully.", portNumber, tunnelId);
-                    return port;
-                }
+                ValidatePortIdentity(tunnelId, portNumber, port);
+                // Creation alone does not establish the requested policy. A missing or failed
+                // access result must retry reconciliation of this port, not recreate it or report success.
+                await EnsureAccessAsync(port.TunnelId, portNumber, portOptions.AllowAnonymous, port.AccessControl ?? [], logger, cancellationToken).ConfigureAwait(false);
+                logger?.LogTrace("Port '{PortNumber}' on dev tunnel '{TunnelId}' created successfully.", portNumber, port.TunnelId);
+                return port;
             }
             else if (exitCode == DevTunnelCli.ResourceConflictsWithExistingExitCode)
             {
@@ -329,6 +323,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         Func<TextWriter, TextWriter, ILogger?, CancellationToken, Task<int>> query,
         string propertyName,
         string description,
+        Action<T> validate,
         ILogger? logger,
         CancellationToken cancellationToken) where T : class
     {
@@ -338,7 +333,12 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         {
             var response = await CallCliAsJsonAsync<T>(query, propertyName, logger, cancellationToken).ConfigureAwait(false);
             (var result, exitCode, error) = response;
-            if (result is not null || exitCode == DevTunnelCli.ResourceNotFoundExitCode)
+            if (result is not null)
+            {
+                validate(result);
+                return result;
+            }
+            if (exitCode == DevTunnelCli.ResourceNotFoundExitCode)
             {
                 return result;
             }
@@ -349,6 +349,36 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
             }
         }
         throw new DistributedApplicationException($"Failed to inspect {description}. Exit code {exitCode}: {error}");
+    }
+
+    private static void ValidateTunnelIdentity(string requestedId, string returnedId)
+    {
+        if (string.Equals(requestedId, returnedId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // A bare ID such as "mytunnel" may resolve to "mytunnel.usw2". A qualified request
+        // must remain in that exact cluster; a shared prefix or another region is not a match.
+        if (!requestedId.Contains('.')
+            && returnedId.StartsWith(requestedId + ".", StringComparison.OrdinalIgnoreCase)
+            && returnedId.Length > requestedId.Length + 1
+            && returnedId.AsSpan(requestedId.Length + 1).IndexOf('.') < 0
+            && returnedId.Skip(requestedId.Length + 1).All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+        {
+            return;
+        }
+
+        throw new DistributedApplicationException($"The devtunnel CLI returned tunnel '{returnedId}' when '{requestedId}' was requested.");
+    }
+
+    private static void ValidatePortIdentity(string tunnelId, int portNumber, DevTunnelPortStatus port)
+    {
+        ValidateTunnelIdentity(tunnelId, port.TunnelId);
+        if (port.PortNumber != portNumber)
+        {
+            throw new DistributedApplicationException($"The devtunnel CLI returned port '{port.PortNumber}' when port '{portNumber}' on tunnel '{tunnelId}' was requested.");
+        }
     }
 
     private async Task EnsureAccessAsync(
