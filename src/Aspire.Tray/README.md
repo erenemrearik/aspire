@@ -218,8 +218,9 @@ The official pipeline submits a ZIP containing the complete `.app` directory
 directly to MicroBuild for hardened Developer ID signing and Apple notarization,
 then restores the app and staples its notarization ticket. This avoids Arcade's
 extra wrapping of macOS signing inputs. The signed app is copied into the
-payload and embedded without republishing. That official signing path still
-requires release-pipeline validation; this remains a draft feedback POC.
+payload and embedded without republishing. Signing-service changes must be
+validated in the official native pipeline; local and GitHub builds cannot
+validate that integration because they use ad-hoc signatures.
 
 ## Recent history configuration
 

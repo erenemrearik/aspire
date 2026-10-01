@@ -10,16 +10,18 @@ public class MacTrayPayloadTests(ITestOutputHelper output)
     public static bool SupportsMac => OperatingSystem.IsMacOS();
 
     [Theory(Skip = "Payload verification requires macOS signing and Mach-O tools.", SkipUnless = nameof(SupportsMac))]
-    [InlineData("osx-arm64", "arm64", "valid", 0)]
-    [InlineData("osx-x64", "x86_64", "valid", 0)]
-    [InlineData("osx-arm64", "x86_64", "wrong-architecture", 1)]
-    [InlineData("osx-x64", "arm64", "wrong-architecture", 1)]
-    [InlineData("osx-arm64", "universal", "valid", 0)]
-    [InlineData("osx-x64", "universal", "valid", 0)]
-    [InlineData("osx-arm64", "arm64", "invalid-signature", 1)]
-    [InlineData("osx-x64", "x86_64", "invalid-signature", 1)]
-    [InlineData("osx-arm64", "arm64", "not-mach-o", 1)]
-    public async Task VerifierChecksArchitectureAndSignatureOfActualArchive(string rid, string architecture, string scenario, int expectedExitCode)
+    [InlineData("osx-arm64", "arm64", "valid", false, 0)]
+    [InlineData("osx-x64", "x86_64", "valid", false, 0)]
+    [InlineData("osx-arm64", "x86_64", "wrong-architecture", false, 1)]
+    [InlineData("osx-x64", "arm64", "wrong-architecture", false, 1)]
+    [InlineData("osx-arm64", "universal", "valid", false, 0)]
+    [InlineData("osx-x64", "universal", "valid", false, 0)]
+    [InlineData("osx-arm64", "arm64", "invalid-signature", false, 1)]
+    [InlineData("osx-x64", "x86_64", "invalid-signature", false, 1)]
+    [InlineData("osx-arm64", "arm64", "not-mach-o", false, 1)]
+    [InlineData("osx-arm64", "arm64", "adhoc-signature", true, 3)]
+    [InlineData("osx-x64", "x86_64", "adhoc-signature", true, 3)]
+    public async Task VerifierChecksArchitectureAndSignatureOfActualArchive(string rid, string architecture, string scenario, bool requireSignature, int expectedExitCode)
     {
         var workspace = Directory.CreateTempSubdirectory("tray-payload-");
         try
@@ -64,7 +66,7 @@ public class MacTrayPayloadTests(ITestOutputHelper output)
 
             var archive = Path.Combine(workspace.FullName, "payload.tar.gz");
             await RunSuccessfullyAsync("/usr/bin/tar", "-czf", archive, "-C", workspace.FullName, rid);
-            var result = await TestNativeCommand.RunAsync("/bin/bash", script, archive, rid);
+            var result = await TestNativeCommand.RunAsync("/bin/bash", script, archive, rid, requireSignature.ToString());
             output.WriteLine(result.Output);
             output.WriteLine(result.Error);
 
@@ -77,6 +79,10 @@ public class MacTrayPayloadTests(ITestOutputHelper output)
             else if (scenario == "invalid-signature")
             {
                 Assert.Contains("a sealed resource is missing or invalid", result.Error);
+            }
+            else if (scenario == "adhoc-signature")
+            {
+                Assert.Contains("code failed to satisfy specified code requirement(s)", result.Error);
             }
             else
             {
