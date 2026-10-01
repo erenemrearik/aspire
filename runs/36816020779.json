@@ -1,0 +1,65 @@
+{
+  "run_id": 36816020779,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/36816020779",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-01T05:25:21Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20603,
+    "title": "Update Testcontainers to resolve SSH.NET vulnerabilities",
+    "author": "mitchdenny",
+    "state": "closed",
+    "head_branch": "mitchdenny-ssh-net-vulnerability",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20603",
+    "merged_at": "2026-10-01T04:37:58Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "d49cc4d5031b8731e22151f8f61b9d463fe2aa2d",
+    "failed_sha": "b206f89c53ec371bfa83d9596b12f222e922b49e",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "b206f89c53ec371bfa83d9596b12f222e922b49e",
+        "message": "Update Testcontainers to resolve SSH.NET vulnerabilities (#20603) ## Description Repository restores report high-severity SSH.NET vulnerabilities through the test dependency chain `Testcontainers.RabbitMq 4.8.1 -> Testcontainers 4.8.1 -> SSH.NET 2024.2.0`. Other Testcontainers-based suites share this dependency; the production RabbitMQ packages do not reference SSH.NET. Upgrade the Testcontainers family to 4.15.0, which resolves SSH.NET 2026.0.0 and addresses: - [GHSA-mggc-4xg6-vcxf](https://git",
+        "html_url": "https://github.com/microsoft/aspire/commit/b206f89c53ec371bfa83d9596b12f222e922b49e",
+        "pull_request": {
+          "number": 20603,
+          "title": "Update Testcontainers to resolve SSH.NET vulnerabilities",
+          "url": "https://github.com/microsoft/aspire/pull/20603",
+          "merged_at": "2026-10-01T04:37:58Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "id": 110221700969,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/36816020779/job/110221700969",
+      "classification": "flaky-test",
+      "reason": "Only failure is a 30s timeout in NuGetPackagePrefetcherTests.PrefetchingCancellationDueToShutdownLogsCleanMessage, a previously observed flaky test with the same error pattern and line number, unrelated to the Testcontainers dependency bump in this merge.",
+      "failed_steps": [
+        "Run tests (Linux/macOS)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Cli.Tests.NuGet.NuGetPackagePrefetcherTests.PrefetchingCancellationDueToShutdownLogsCleanMessage",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "error": "System.TimeoutException : The operation at /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/NuGet/NuGetPackagePrefetcherTests.cs:175 timed out after reaching the limit of 30000ms.",
+      "stack_trace": "at Microsoft.AspNetCore.InternalTesting.AsyncTestHelpers.TimeoutAfter(Task task, TimeSpan timeout, String filePath, Int32 lineNumber) in /home/runner/work/aspire/aspire/tests/Shared/AsyncTestHelpers.cs:line 194\n   at Aspire.Cli.Tests.NuGet.NuGetPackagePrefetcherTests.PrefetchingCancellationDueToShutdownLogsCleanMessage() in /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/NuGet/NuGetPackagePrefetcherTests.cs:line 175\n--- End of stack trace from previous location ---",
+      "standard_output": "",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Matches a known recurring flaky test (prior cause cli-nuget-prefetcher-shutdown-timeout) that intermittently times out waiting for a shutdown operation to complete within 30s; unrelated to the merged Testcontainers dependency change."
+    }
+  ],
+  "causes": [
+    "cli-nuget-prefetcher-shutdown-timeout"
+  ]
+}
