@@ -446,7 +446,7 @@ public partial class Resources : ComponentBase, IComponentWithTelemetry, IAsyncD
         // Get filtered and ordered resources.
         var filteredResources = GetFilteredResources()
             .Select(r => new ResourceGridViewModel { Resource = r });
-        filteredResources = request.SortByColumn is null
+        filteredResources = request.SortColumns.Count == 0
             ? filteredResources
                 .OrderBy(p => p.Resource.ResourceType)
                 .ThenBy(p => p.Resource, ResourceViewModelNameComparer.Instance)

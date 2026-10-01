@@ -3,6 +3,7 @@
 
 using Aspire.Dashboard.Components.Layout;
 using Microsoft.AspNetCore.Components;
+using Microsoft.JSInterop;
 
 namespace Aspire.Dashboard.Components.Pages;
 
@@ -79,8 +80,19 @@ public static class PageExtensions
             var serializableViewModel = page.ConvertViewModelToSerializable();
             var pathWithParameters = page.GetUrlFromSerializableViewModel(serializableViewModel);
 
+            try
+            {
+                // Persist before navigating so the JS interop call also verifies that the circuit is still
+                // connected. A queued UI callback can otherwise ask RemoteNavigationManager to navigate
+                // after the browser has disconnected, which it reports as an unhandled navigation failure.
+                await page.SessionStorage.SetAsync(page.SessionStorageKey, serializableViewModel);
+            }
+            catch (JSDisconnectedException)
+            {
+                return;
+            }
+
             page.NavigationManager.NavigateTo(pathWithParameters);
-            await page.SessionStorage.SetAsync(page.SessionStorageKey, serializableViewModel).ConfigureAwait(false);
         }
     }
 
