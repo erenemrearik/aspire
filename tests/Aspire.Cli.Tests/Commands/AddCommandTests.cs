@@ -2986,7 +2986,8 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
         var packagePattern = Assert.Single(localSourceMapping.Elements("package"));
         Assert.Equal("Aspire*", packagePattern.Attribute("pattern")?.Value);
 
-        var higherPrecedenceConfigPath = Path.Combine(projectDirectory.FullName, "NuGet.Config");
+        var projectWithMappingDisabled = projectDirectory.CreateSubdirectory("MappingDisabled");
+        var higherPrecedenceConfigPath = Path.Combine(projectWithMappingDisabled.FullName, "nuget.config");
         File.WriteAllText(
             higherPrecedenceConfigPath,
             """
@@ -2998,7 +2999,7 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
             """);
 
         Assert.False(settingsProvider.IsPackageSourceMappingEnabled(
-            projectDirectory,
+            projectWithMappingDisabled,
             CancellationToken.None));
 
         var projectWithoutInheritedMapping = workspace.CreateDirectory("AppHostWithoutInheritedMapping");
@@ -3092,6 +3093,9 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
         var cliVersion = VersionHelper.GetDefaultSdkVersion();
 
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var appHostDirectory = workspace.CreateDirectory("AppHost");
+        var appHostFile = new FileInfo(Path.Combine(appHostDirectory.FullName, "AppHost.csproj"));
+        File.WriteAllText(appHostFile.FullName, "<Project />");
         var identityPackagesDir = workspace.CreateDirectory("identity-packages");
         // Aspire.Hosting drives GetLocalHivePinnedVersion; Aspire.Hosting.Redis is the integration we add.
         File.WriteAllText(Path.Combine(identityPackagesDir.FullName, $"Aspire.Hosting.{cliVersion}.nupkg"), string.Empty);
@@ -3121,7 +3125,10 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
                 return prompter;
             };
 
-            options.ProjectLocatorFactory = _ => new TestProjectLocator();
+            options.ProjectLocatorFactory = _ => new TestProjectLocator
+            {
+                UseOrFindAppHostProjectFileAsyncCallback = (_, _, _) => Task.FromResult<FileInfo?>(appHostFile)
+            };
 
             options.DotNetCliRunnerFactory = (sp) =>
             {
@@ -3166,6 +3173,9 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         configureHives(workspace);
+        var appHostDirectory = workspace.CreateDirectory("AppHost");
+        var appHostFile = new FileInfo(Path.Combine(appHostDirectory.FullName, "AppHost.csproj"));
+        File.WriteAllText(appHostFile.FullName, "<Project />");
 
         var selectedPackageVersion = string.Empty;
         var promptedForVersion = false;
@@ -3184,7 +3194,10 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
                 return prompter;
             };
 
-            options.ProjectLocatorFactory = _ => new TestProjectLocator();
+            options.ProjectLocatorFactory = _ => new TestProjectLocator
+            {
+                UseOrFindAppHostProjectFileAsyncCallback = (_, _, _) => Task.FromResult<FileInfo?>(appHostFile)
+            };
 
             options.DotNetCliRunnerFactory = (sp) =>
             {
