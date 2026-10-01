@@ -1602,7 +1602,10 @@ public class AtsTypeScriptCodeGeneratorTests
 #pragma warning restore ASPIREAZURE003
 
         var files = _generator.GenerateDistributedApplication(result.ToAtsContext());
-        var lines = files["aspire.mts"].Split('\n')
+        // Exercise Windows line endings even when this test runs on Linux.
+        var generatedCode = files["aspire.mts"].ReplaceLineEndings("\r\n");
+        // Split without retaining CR characters: a final CR becomes an extra newline in Verify on Windows.
+        var lines = generatedCode.ReplaceLineEndings("\n").Split('\n')
             .Where(line => line.Contains("withInternalLoadBalancer", StringComparison.Ordinal) ||
                 line.Contains("withNetworkInternalLoadBalancer", StringComparison.Ordinal));
 

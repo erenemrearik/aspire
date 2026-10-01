@@ -71,7 +71,7 @@ apim.AddApi("catalog-api", catalog, "catalog")
     .WithOpenApiDocument("../Catalog/openapi.json");
 ```
 
-JSON and YAML OpenAPI documents are inferred from the file extension. Pass `AzureApiManagementOpenApiFormat.SwaggerJson` explicitly for Swagger 2.0 documents. Imported operations replace the generated catch-all proxy operations; operations added with `AddOperation` are still provisioned in addition to the imported operations.
+JSON and YAML OpenAPI documents are inferred from the file extension. Pass `AzureApiManagementOpenApiFormat.SwaggerJson` explicitly for Swagger 2.0 documents. The file is read during infrastructure generation for publish/deploy, not during `aspire run`, so deploy-only artifacts do not need to exist for local development. Imported operations replace the generated root and catch-all proxy operations; operations added with `AddOperation` are still provisioned in addition to the imported operations.
 
 ## Existing API Management services
 
@@ -309,7 +309,7 @@ The default diagnostic uses W3C correlation, always logs errors, emits metrics, 
 
 ## Custom domains and certificates
 
-Bind a custom APIM endpoint to a PFX certificate stored as a Key Vault secret:
+Bind a custom APIM endpoint to a PFX certificate stored as a Key Vault secret. The hostname must be a multi-label DNS name, such as `api.contoso.com`; single-label hosts and IP addresses are rejected:
 
 ```csharp
 var certificateVault = builder.AddAzureKeyVault("certificates")

@@ -204,9 +204,12 @@ public static class AzureApiManagementExtensions
     /// <param name="documentPath">The document path, relative to the AppHost directory when not absolute.</param>
     /// <param name="format">The document format. The file extension is used when omitted.</param>
     /// <returns>The API Management API resource builder.</returns>
+    /// <remarks>
+    /// The document is read when generating infrastructure for publish or deploy, never during run mode.
+    /// It must exist and contain non-whitespace content by the time infrastructure is generated.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> is null.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="documentPath"/> is empty, contains no content, or its extension cannot determine the format.</exception>
-    /// <exception cref="FileNotFoundException">Thrown when the document does not exist.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="documentPath"/> is empty or its extension cannot determine the format.</exception>
     [AspireExport]
     public static IResourceBuilder<AzureApiManagementApiResource> WithOpenApiDocument(
         this IResourceBuilder<AzureApiManagementApiResource> builder,
@@ -217,19 +220,8 @@ public static class AzureApiManagementExtensions
         ArgumentException.ThrowIfNullOrEmpty(documentPath);
 
         var fullPath = Path.GetFullPath(documentPath, builder.ApplicationBuilder.AppHostDirectory);
-        if (!File.Exists(fullPath))
-        {
-            throw new FileNotFoundException($"The OpenAPI document '{fullPath}' does not exist.", fullPath);
-        }
-
-        var content = File.ReadAllText(fullPath);
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            throw new ArgumentException($"The OpenAPI document '{fullPath}' is empty.", nameof(documentPath));
-        }
-
-        builder.Resource.OpenApiSource = new AzureApiManagementOpenApiContent(
-            content,
+        builder.Resource.OpenApiSource = new AzureApiManagementOpenApiFile(
+            fullPath,
             format ?? InferOpenApiFormat(documentPath));
         return builder;
     }
@@ -744,7 +736,8 @@ public static class AzureApiManagementExtensions
         ArgumentException.ThrowIfNullOrEmpty(hostname);
         ArgumentNullException.ThrowIfNull(certificate);
 
-        if (Uri.CheckHostName(hostname) != UriHostNameType.Dns)
+        if (Uri.CheckHostName(hostname) != UriHostNameType.Dns ||
+            !hostname.TrimEnd('.').Contains('.'))
         {
             throw new ArgumentException("The custom hostname must be a fully qualified DNS name.", nameof(hostname));
         }
@@ -2213,10 +2206,17 @@ public static class AzureApiManagementExtensions
             },
         };
 
-        if (apiResource.OpenApiSource is AzureApiManagementOpenApiContent content)
+        if (apiResource.OpenApiSource is AzureApiManagementOpenApiFile document)
         {
-            api.Format = GetOpenApiImportFormat(content.Format, isLink: false);
-            api.Value = content.Content;
+            var content = File.ReadAllText(document.Path);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                throw new InvalidOperationException(
+                    $"The OpenAPI document '{document.Path}' for API '{apiResource.Name}' is empty.");
+            }
+
+            api.Format = GetOpenApiImportFormat(document.Format, isLink: false);
+            api.Value = content;
         }
         else if (apiResource.OpenApiSource is AzureApiManagementOpenApiEndpoint endpointSource)
         {

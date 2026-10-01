@@ -915,6 +915,83 @@ public class AzureApiManagementTests(ITestOutputHelper output)
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void RunModeDoesNotReadOpenApiDocument(bool emptyFile)
+    {
+        using var workspace = TemporaryWorkspace.Create(output);
+        var documentPath = Path.Combine(workspace.Path, "deploy-only.json");
+        if (emptyFile)
+        {
+            File.WriteAllText(documentPath, " ");
+        }
+
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Run);
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+        var api = apim.AddApi("catalog-api", "catalog").WithOpenApiDocument(documentPath);
+        api.AddOperation("root", "GET", "/");
+
+        var source = Assert.IsType<AzureApiManagementOpenApiFile>(api.Resource.OpenApiSource);
+        Assert.Equal(documentPath, source.Path);
+        Assert.Equal(AzureApiManagementOpenApiFormat.OpenApiJson, source.Format);
+        Assert.Empty(builder.Resources.OfType<AzureApiManagementResource>());
+        using var app = builder.Build();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublishRejectsMissingOrEmptyOpenApiDocument(bool emptyFile)
+    {
+        using var workspace = TemporaryWorkspace.Create(output);
+        var documentPath = Path.Combine(workspace.Path, "deploy-only.json");
+        if (emptyFile)
+        {
+            File.WriteAllText(documentPath, " ");
+        }
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+        var backend = apim.AddBackend("backend", ReferenceExpression.Create($"https://example.com"));
+        apim.AddApi("catalog-api", "catalog").WithBackend(backend).WithOpenApiDocument(documentPath);
+
+        using var app = builder.Build();
+        if (emptyFile)
+        {
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => ExecuteBeforeStartHooksAsync(app, default));
+            Assert.Contains("is empty", exception.Message);
+        }
+        else
+        {
+            var exception = await Assert.ThrowsAsync<FileNotFoundException>(() => ExecuteBeforeStartHooksAsync(app, default));
+            Assert.Equal(documentPath, exception.FileName);
+        }
+    }
+
+    [Fact]
+    public async Task OpenApiDocumentCanBeCreatedAfterModelConfiguration()
+    {
+        using var workspace = TemporaryWorkspace.Create(output);
+        var documentPath = Path.Combine(workspace.Path, "generated.json");
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+        var backend = apim.AddBackend("backend", ReferenceExpression.Create($"https://example.com"));
+        apim.AddApi("catalog-api", "catalog").WithBackend(backend).WithOpenApiDocument(documentPath);
+        const string document = """{"openapi":"3.0.1","info":{"title":"Catalog","version":"v1"},"paths":{}}""";
+        File.WriteAllText(documentPath, document);
+        string? importedDocument = null;
+        apim.ConfigureInfrastructure(infrastructure =>
+        {
+            importedDocument = infrastructure.GetProvisionableResources()
+                .OfType<ApiManagementApiProvisioningResource>().Single().Value.Value;
+        });
+
+        using var app = builder.Build();
+        await ExecuteBeforeStartHooksAsync(app, default);
+
+        Assert.Equal(document, importedDocument);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task ApiPolicyWaitsForOperationConfiguration(bool importOpenApi)
     {
         using var temporaryWorkspace = TemporaryWorkspace.Create(output);
@@ -1248,6 +1325,42 @@ public class AzureApiManagementTests(ITestOutputHelper output)
             () => apim.AddNamedValue("second-value", "value", displayName: "SHARED-NAME"));
 
         Assert.Contains("display name 'SHARED-NAME'", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("gateway")]
+    [InlineData("gateway.")]
+    [InlineData("localhost")]
+    [InlineData("127.0.0.1")]
+    [InlineData("::1")]
+    [InlineData("https://api.example.com")]
+    [InlineData("api..example.com")]
+    public void CustomDomainsRejectUnqualifiedOrInvalidHostnames(string hostname)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var vault = builder.AddAzureKeyVault("vault");
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+
+        var exception = Assert.Throws<ArgumentException>(() => apim.WithCustomDomain(hostname, vault.GetSecret("certificate")));
+
+        Assert.Equal("hostname", exception.ParamName);
+        Assert.Empty(apim.Resource.CustomDomains);
+    }
+
+    [Theory]
+    [InlineData("api.example.com")]
+    [InlineData("API.EXAMPLE.COM")]
+    [InlineData("api.example.com.")]
+    [InlineData("api.example")]
+    public void CustomDomainsAcceptQualifiedDnsNames(string hostname)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var vault = builder.AddAzureKeyVault("vault");
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+
+        apim.WithCustomDomain(hostname, vault.GetSecret("certificate"));
+
+        Assert.Equal(hostname, Assert.Single(apim.Resource.CustomDomains).Hostname);
     }
 
     [Fact]

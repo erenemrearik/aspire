@@ -122,8 +122,8 @@ public class AzureApiManagementApiResource : Resource, IResourceWithParent<Azure
 
 internal abstract record AzureApiManagementOpenApiSource(AzureApiManagementOpenApiFormat Format);
 
-internal sealed record AzureApiManagementOpenApiContent(
-    string Content,
+internal sealed record AzureApiManagementOpenApiFile(
+    string Path,
     AzureApiManagementOpenApiFormat Format)
     : AzureApiManagementOpenApiSource(Format);
 
