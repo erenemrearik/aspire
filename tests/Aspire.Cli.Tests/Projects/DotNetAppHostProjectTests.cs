@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Aspire.Cli.Commands;
+using Aspire.Cli.Configuration;
 using Aspire.Cli.Layout;
 using Aspire.Cli.Projects;
 using Aspire.Cli.Tests.TestServices;
@@ -1002,6 +1003,8 @@ public class DotNetAppHostProjectTests(ITestOutputHelper outputHelper) : IDispos
     [Fact]
     public async Task RunAsync_ProjectAppHostUsesDirectCommandLaunchAndAppliesLaunchSettings()
     {
+        const string image = "example.com/aspire-tunnel:configured";
+
         var appHostFile = CreateProjectAppHost();
         var targetPath = CreateBuiltAppHostAssembly("AppHost.dll");
         var appHostCommand = CreateBuiltAppHostCommand("AppHost");
@@ -1057,7 +1060,13 @@ public class DotNetAppHostProjectTests(ITestOutputHelper outputHelper) : IDispos
             },
             RunAsyncCallback = (_, _, _, _, _, _, _, _, _) => throw new InvalidOperationException("dotnet run should not be used when the built target is known.")
         };
-        var project = CreateDotNetAppHostProject(runner);
+        var project = CreateDotNetAppHostProject(runner, configureServices: options =>
+        {
+            options.ConfigurationCallback += configuration =>
+            {
+                configuration[AspireConfigContainerTunnel.BaseImageConfigPath] = image;
+            };
+        });
 
         runner.RunAppHostCommandAsyncCallback = (projectFile, command, workingDirectory, args, env, _, options, _) =>
         {
@@ -1082,6 +1091,7 @@ public class DotNetAppHostProjectTests(ITestOutputHelper outputHelper) : IDispos
             Assert.Equal("http://localhost:15000", env[KnownAspNetCoreConfigNames.Urls]);
             Assert.Equal("Development", env[KnownAspNetCoreConfigNames.DotNetEnvironment]);
             Assert.Equal("context-value", env["CUSTOM_ENV"]);
+            Assert.Equal(image, env[KnownConfigNames.ContainerTunnelBaseImage]);
             return Task.FromResult(123);
         };
 

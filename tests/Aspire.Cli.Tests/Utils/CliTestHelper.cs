@@ -267,6 +267,7 @@ internal static class CliTestHelper
 
         services.AddSingleton<CommonCommandServices>();
         services.AddSingleton<ResourceWaitService>();
+        services.AddSingleton<AppHostConfigurationProjector>();
         services.AddTransient<AppHostConnectionResolver>();
         services.AddTransient<RootCommand>();
         services.AddTransient<NewCommand>();

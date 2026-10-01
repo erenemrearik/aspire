@@ -54,6 +54,7 @@ internal sealed partial class DotNetAppHostProject : IAppHostProject
     private readonly IProcessTreeGracefulShutdownSignaler _gracefulShutdownSignaler;
     private readonly CliExecutionContext _executionContext;
     private readonly IEnvironment _environment;
+    private readonly AppHostConfigurationProjector _appHostConfigurationProjector;
 
     private static readonly string[] s_detectionPatterns = ["*.csproj", "*.fsproj", "*.vbproj", "apphost.cs"];
     private const string DirectLaunchDisabledConfigKey = "dotnetAppHostDirectLaunchDisabled";
@@ -85,6 +86,7 @@ internal sealed partial class DotNetAppHostProject : IAppHostProject
         IDotNetSdkInstaller sdkInstaller,
         IBundleService bundleService,
         IEnvironment environment,
+        AppHostConfigurationProjector appHostConfigurationProjector,
         ILogger<DotNetAppHostProject> logger,
         Diagnostics.FileLoggerProvider fileLoggerProvider,
         Program.CliLoggingOptions loggingOptions,
@@ -105,6 +107,7 @@ internal sealed partial class DotNetAppHostProject : IAppHostProject
         _sdkInstaller = sdkInstaller;
         _bundleService = bundleService;
         _environment = environment;
+        _appHostConfigurationProjector = appHostConfigurationProjector;
         _logger = logger;
         _fileLoggerProvider = fileLoggerProvider;
         _loggingOptions = loggingOptions;
@@ -1458,6 +1461,7 @@ internal sealed partial class DotNetAppHostProject : IAppHostProject
         var isSingleFileAppHost = !IsProjectFile(effectiveAppHostFile);
 
         var env = new Dictionary<string, string>(context.EnvironmentVariables);
+        _appHostConfigurationProjector.ApplyEnvironmentVariables(env);
 
         // Handle isolated mode - randomize ports and isolate user secrets
         string? isolatedUserSecretsId = null;

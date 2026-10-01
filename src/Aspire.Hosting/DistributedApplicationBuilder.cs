@@ -842,6 +842,7 @@ public class DistributedApplicationBuilder : IDistributedApplicationBuilder
             // DCP Publisher options, we should only process these in run mode
             { "--dcp-cli-path", "DcpPublisher:CliPath" },
             { "--dcp-container-runtime", "DcpPublisher:ContainerRuntime" },
+            { "--dcp-container-tunnel-base-image", "DcpPublisher:ContainerTunnelBaseImage" },
             { "--dcp-dependency-check-timeout", "DcpPublisher:DependencyCheckTimeout" },
             { "--dcp-dashboard-path", "DcpPublisher:DashboardPath" }
         };
