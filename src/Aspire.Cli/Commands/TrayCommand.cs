@@ -12,9 +12,13 @@ internal sealed class TrayCommand : ParentCommand
 {
     internal override HelpGroup HelpGroup => HelpGroup.Monitoring;
 
-    public TrayCommand(TrayStartCommand startCommand, TrayStopCommand stopCommand, CommonCommandServices services)
+    public TrayCommand(TrayStartCommand startCommand, TrayStopCommand stopCommand, IEnvironment environment, CommonCommandServices services)
         : base("tray", TrayCommandStrings.Description, services)
     {
+        // The tray companion only ships for macOS and Windows, so keep it out of help elsewhere.
+        // TrayLifecycleService still rejects unsupported platforms because hidden commands remain invocable.
+        Hidden = !environment.IsMacOS() && !environment.IsWindows();
+
         Subcommands.Add(startCommand);
         Subcommands.Add(stopCommand);
     }

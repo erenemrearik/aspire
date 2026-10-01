@@ -196,6 +196,25 @@ public class TrayCommandTests(ITestOutputHelper outputHelper)
     }
 
     [Theory]
+    [InlineData("linux", true)]
+    [InlineData("macos", false)]
+    [InlineData("windows", false)]
+    public void TrayCommandIsHiddenOnUnsupportedPlatforms(string platform, bool expectedHidden)
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var (services, _, _, _, _) = CreateServices(workspace);
+        services.AddSingleton<IEnvironment>(platform switch
+        {
+            "linux" => TestEnvironment.CreateLinux(),
+            "macos" => TestEnvironment.CreateMacOS(),
+            _ => TestEnvironment.CreateWindows()
+        });
+        using var provider = services.BuildServiceProvider();
+
+        Assert.Equal(expectedHidden, provider.GetRequiredService<TrayCommand>().Hidden);
+    }
+
+    [Theory]
     [InlineData("start")]
     [InlineData("stop")]
     public async Task UnsupportedPlatformDoesNotAcquireBundleOrLaunchHelper(string action)
