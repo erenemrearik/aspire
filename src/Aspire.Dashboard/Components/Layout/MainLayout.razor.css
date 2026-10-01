@@ -98,8 +98,8 @@
 }
 
 ::deep.layout > header .notification-counter-badge-overflow {
-    width: 20px;
-    min-width: 20px;
+    width: 22px;
+    min-width: 22px;
 }
 
 ::deep.layout > .messagebar-container > .top-messagebar {
