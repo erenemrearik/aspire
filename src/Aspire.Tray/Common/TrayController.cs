@@ -655,7 +655,7 @@ internal sealed class TrayController : IAsyncDisposable
         var starting = start?.IsPending == true;
         var error = GetStartError(start);
         var subtitle = error ?? (starting ? "Starting AppHost; waiting for discovery..."
-            : saved.IsPinned || File.Exists(saved.AppHostPath) ? "Stopped" : "AppHost source file not found");
+            : saved.IsPinned ? "Stopped" : GetUnpinnedSourceStatus(saved.AppHostPath));
         return new(host.Id, AppHostPresentation.GetTitle(host), subtitle, AppHostPresentation.GetDisplayName(host),
             false, false, false, error)
         {
@@ -665,6 +665,20 @@ internal sealed class TrayController : IAsyncDisposable
             IsRunning = false,
             Health = AppHostHealth.Unknown
         };
+    }
+
+    private static string GetUnpinnedSourceStatus(string path)
+    {
+        // File.Exists reports false for access and I/O failures too; only claim the source
+        // was deleted when the probe positively observes it missing.
+        try
+        {
+            return TrayAppHostPath.IsMissing(path) ? "AppHost source file not found" : "Stopped";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return "AppHost source path unavailable";
+        }
     }
 
     private static string? GetStartError(StartOperation? operation) => operation?.Discovered == true

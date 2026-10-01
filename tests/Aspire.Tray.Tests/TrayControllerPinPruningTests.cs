@@ -227,6 +227,38 @@ public class TrayControllerPinPruningTests
         Assert.False(controller.State.ShowStatus);
     }
 
+    [Fact(Skip = "Requires a non-root Unix user.", SkipUnless = nameof(SupportsRestrictedUnixDirectory))]
+    public async Task InaccessibleRecentAppHostIsNotReportedAsDeleted()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var directory = new TestTrayStateDirectory();
+        var restricted = directory.CreateAppHost("restricted/apphost.cs");
+        var deleted = directory.CreateAppHost("deleted/apphost.cs");
+        var sourceDirectory = Path.GetDirectoryName(restricted)!;
+        var originalMode = File.GetUnixFileMode(sourceDirectory);
+        var store = new FileTraySavedStateStore(directory.StatePath);
+        store.Save(TraySavedState.Empty.Remember(restricted).Remember(deleted));
+        File.Delete(deleted);
+        try
+        {
+            File.SetUnixFileMode(sourceDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            var controller = new TrayController(new TestAppHostClient(), store);
+            await using var lifetime = controller.ConfigureAwait(true);
+
+            Assert.Equal("AppHost source path unavailable",
+                Assert.Single(controller.State.RecentAppHosts, host => host.Id == new AppHostInfo(restricted, 0, null).Id).Subtitle);
+            Assert.Equal("AppHost source file not found",
+                Assert.Single(controller.State.RecentAppHosts, host => host.Id == new AppHostInfo(deleted, 0, null).Id).Subtitle);
+        }
+        finally
+        {
+            File.SetUnixFileMode(sourceDirectory, originalMode);
+        }
+    }
+
     [Fact]
     public async Task PruningDoesNotOverwriteCorruptExternalEditsOrClaimThePinWasRemoved()
     {
