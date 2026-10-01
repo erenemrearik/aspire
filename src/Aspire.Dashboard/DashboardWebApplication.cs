@@ -604,7 +604,10 @@ public sealed class DashboardWebApplication : IAsyncDisposable
             await next(context).ConfigureAwait(false);
         });
 
-        _app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+        _app.MapRazorComponents<App>().AddInteractiveServerRenderMode(options =>
+        {
+            options.DisableWebSocketCompression = dashboardOptions.Frontend.DisableWebSocketCompression;
+        });
 
         // Terminal WebSocket proxy
         _app.MapTerminalWebSocket();
