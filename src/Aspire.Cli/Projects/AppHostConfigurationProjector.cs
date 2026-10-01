@@ -3,14 +3,13 @@
 
 using Aspire.Cli.Configuration;
 using Aspire.Hosting;
-using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Cli.Projects;
 
 /// <summary>
 /// Projects Aspire CLI configuration into the environment of a launched AppHost.
 /// </summary>
-internal sealed class AppHostConfigurationProjector(IConfiguration configuration, IEnvironment environment)
+internal sealed class AppHostConfigurationProjector(IConfigurationService configurationService, IEnvironment environment)
 {
     private static readonly EnvironmentVariableProjection[] s_environmentVariableProjections =
     [
@@ -20,7 +19,10 @@ internal sealed class AppHostConfigurationProjector(IConfiguration configuration
     /// <summary>
     /// Applies configured AppHost environment variables without replacing explicit launch or ambient values.
     /// </summary>
-    public void ApplyEnvironmentVariables(IDictionary<string, string> environmentVariables)
+    public async Task ApplyEnvironmentVariablesAsync(
+        IDictionary<string, string> environmentVariables,
+        DirectoryInfo appHostDirectory,
+        CancellationToken cancellationToken = default)
     {
         foreach (var projection in s_environmentVariableProjections)
         {
@@ -30,7 +32,12 @@ internal sealed class AppHostConfigurationProjector(IConfiguration configuration
                 continue;
             }
 
-            if (configuration[projection.ConfigurationPath] is { Length: > 0 } value)
+            var value = await configurationService.GetConfigurationFromDirectoryAsync(
+                projection.ConfigurationPath,
+                appHostDirectory,
+                cancellationToken: cancellationToken);
+
+            if (!string.IsNullOrEmpty(value))
             {
                 environmentVariables[projection.EnvironmentVariableName] = value;
             }

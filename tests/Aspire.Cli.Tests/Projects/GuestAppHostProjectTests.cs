@@ -1869,7 +1869,12 @@ public class GuestAppHostProjectTests : IDisposable
             languageDiscovery: new TestLanguageDiscovery(),
             executionContext: executionContext,
             environment: effectiveEnvironment,
-            appHostConfigurationProjector: new AppHostConfigurationProjector(effectiveConfiguration, effectiveEnvironment),
+            appHostConfigurationProjector: new AppHostConfigurationProjector(
+                new TestConfigurationService
+                {
+                    OnGetConfigurationFromDirectory = (key, _) => effectiveConfiguration[key.Replace('.', ':')]
+                },
+                effectiveEnvironment),
             logger: NullLogger<GuestAppHostProject>.Instance,
             fileLoggerProvider: new FileLoggerProvider(logFilePath, new TestStartupErrorWriter()),
             profilingTelemetry: _profilingTelemetry,

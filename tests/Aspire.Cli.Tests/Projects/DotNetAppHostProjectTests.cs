@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Aspire.Cli.Commands;
-using Aspire.Cli.Configuration;
 using Aspire.Cli.Layout;
 using Aspire.Cli.Projects;
 using Aspire.Cli.Tests.TestServices;
@@ -1013,6 +1012,13 @@ public class DotNetAppHostProjectTests(ITestOutputHelper outputHelper) : IDispos
         var appHostCommandJson = JsonSerializer.Serialize(appHostCommand.FullName);
         var targetPathJson = JsonSerializer.Serialize(targetPath.FullName);
         var runWorkingDirectoryJson = JsonSerializer.Serialize(runWorkingDirectory.FullName);
+        WriteAspireConfigJson(appHostFile.DirectoryName!, $$"""
+            {
+              "containerTunnel": {
+                "baseImage": "{{configuredImage}}"
+              }
+            }
+            """);
         Directory.CreateDirectory(Path.Combine(appHostFile.DirectoryName!, "Properties"));
         File.WriteAllText(Path.Combine(appHostFile.DirectoryName!, "Properties", "launchSettings.json"), """
             {
@@ -1062,13 +1068,7 @@ public class DotNetAppHostProjectTests(ITestOutputHelper outputHelper) : IDispos
             },
             RunAsyncCallback = (_, _, _, _, _, _, _, _, _) => throw new InvalidOperationException("dotnet run should not be used when the built target is known.")
         };
-        var project = CreateDotNetAppHostProject(runner, configureServices: options =>
-        {
-            options.ConfigurationCallback += configuration =>
-            {
-                configuration[AspireConfigContainerTunnel.BaseImageConfigPath] = configuredImage;
-            };
-        });
+        var project = CreateDotNetAppHostProject(runner);
 
         runner.RunAppHostCommandAsyncCallback = (projectFile, command, workingDirectory, args, env, _, options, _) =>
         {

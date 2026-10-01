@@ -3,9 +3,9 @@
 
 using Aspire.Cli.Configuration;
 using Aspire.Cli.Projects;
+using Aspire.Cli.Tests.TestServices;
 using Aspire.Cli.Tests.Utils;
 using Aspire.Hosting;
-using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Cli.Tests.Projects;
 
@@ -14,70 +14,76 @@ public class AppHostConfigurationProjectorTests
     private const string ConfiguredImage = "example.com/aspire-tunnel:configured";
 
     [Fact]
-    public void ApplyEnvironmentVariables_ProjectsConfiguredValue()
+    public async Task ApplyEnvironmentVariablesAsync_ProjectsConfiguredValue()
     {
-        var configuration = new ConfigurationManager
+        var appHostDirectory = new DirectoryInfo("/app");
+        var configurationService = new TestConfigurationService
         {
-            [AspireConfigContainerTunnel.BaseImageConfigPath] = ConfiguredImage
+            OnGetConfigurationFromDirectory = (key, directory) =>
+            {
+                Assert.Equal(AspireConfigContainerTunnel.BaseImageConfigPath, key);
+                Assert.Equal(appHostDirectory, directory);
+                return ConfiguredImage;
+            }
         };
         var environmentVariables = new Dictionary<string, string>();
-        var projector = new AppHostConfigurationProjector(configuration, new TestEnvironment());
+        var projector = new AppHostConfigurationProjector(configurationService, new TestEnvironment());
 
-        projector.ApplyEnvironmentVariables(environmentVariables);
+        await projector.ApplyEnvironmentVariablesAsync(environmentVariables, appHostDirectory);
 
         Assert.Equal(ConfiguredImage, environmentVariables[KnownConfigNames.ContainerTunnelBaseImage]);
     }
 
     [Fact]
-    public void ApplyEnvironmentVariables_DoesNotReplaceExplicitLaunchValue()
+    public async Task ApplyEnvironmentVariablesAsync_DoesNotReplaceExplicitLaunchValue()
     {
         const string launchImage = "example.com/aspire-tunnel:launch";
-        var configuration = new ConfigurationManager
+        var configurationService = new TestConfigurationService
         {
-            [AspireConfigContainerTunnel.BaseImageConfigPath] = ConfiguredImage
+            OnGetConfiguration = _ => ConfiguredImage
         };
         var environmentVariables = new Dictionary<string, string>
         {
             [KnownConfigNames.ContainerTunnelBaseImage] = launchImage
         };
-        var projector = new AppHostConfigurationProjector(configuration, new TestEnvironment());
+        var projector = new AppHostConfigurationProjector(configurationService, new TestEnvironment());
 
-        projector.ApplyEnvironmentVariables(environmentVariables);
+        await projector.ApplyEnvironmentVariablesAsync(environmentVariables, new DirectoryInfo("/app"));
 
         Assert.Equal(launchImage, environmentVariables[KnownConfigNames.ContainerTunnelBaseImage]);
     }
 
     [Fact]
-    public void ApplyEnvironmentVariables_DoesNotReplaceAmbientValue()
+    public async Task ApplyEnvironmentVariablesAsync_DoesNotReplaceAmbientValue()
     {
         const string ambientImage = "example.com/aspire-tunnel:ambient";
-        var configuration = new ConfigurationManager
+        var configurationService = new TestConfigurationService
         {
-            [AspireConfigContainerTunnel.BaseImageConfigPath] = ConfiguredImage
+            OnGetConfiguration = _ => ConfiguredImage
         };
         var environment = new TestEnvironment(new Dictionary<string, string?>
         {
             [KnownConfigNames.ContainerTunnelBaseImage] = ambientImage
         });
         var environmentVariables = new Dictionary<string, string>();
-        var projector = new AppHostConfigurationProjector(configuration, environment);
+        var projector = new AppHostConfigurationProjector(configurationService, environment);
 
-        projector.ApplyEnvironmentVariables(environmentVariables);
+        await projector.ApplyEnvironmentVariablesAsync(environmentVariables, new DirectoryInfo("/app"));
 
         Assert.False(environmentVariables.ContainsKey(KnownConfigNames.ContainerTunnelBaseImage));
     }
 
     [Fact]
-    public void ApplyEnvironmentVariables_IgnoresEmptyConfiguredValue()
+    public async Task ApplyEnvironmentVariablesAsync_IgnoresEmptyConfiguredValue()
     {
-        var configuration = new ConfigurationManager
+        var configurationService = new TestConfigurationService
         {
-            [AspireConfigContainerTunnel.BaseImageConfigPath] = string.Empty
+            OnGetConfiguration = _ => string.Empty
         };
         var environmentVariables = new Dictionary<string, string>();
-        var projector = new AppHostConfigurationProjector(configuration, new TestEnvironment());
+        var projector = new AppHostConfigurationProjector(configurationService, new TestEnvironment());
 
-        projector.ApplyEnvironmentVariables(environmentVariables);
+        await projector.ApplyEnvironmentVariablesAsync(environmentVariables, new DirectoryInfo("/app"));
 
         Assert.False(environmentVariables.ContainsKey(KnownConfigNames.ContainerTunnelBaseImage));
     }
