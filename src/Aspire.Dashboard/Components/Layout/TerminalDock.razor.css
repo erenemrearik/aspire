@@ -42,6 +42,7 @@
     border-top: 1px solid var(--colorNeutralStroke1);
     border-bottom: 1px solid var(--colorNeutralStroke1);
     flex: 0 0 auto;
+    height: 36px;
 }
 
 .terminal-dock-tabs {
@@ -116,10 +117,12 @@
     position: relative;
     display: flex;
     align-items: center;
+    font-size: var(--fontSizeBase200);
     /* Include the close button's inset around its 12px icon in the tab's trailing spacing. */
     padding-inline-end: calc(12px - (var(--aspire-control-height) - 12px) / 2);
     max-width: 220px;
     flex: 0 0 auto;
+    height: auto;
 }
 
 .terminal-dock-tab-select {
@@ -144,6 +147,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.terminal-dock-tab ::deep .terminal-dock-tab-close {
+    --aspire-control-height: 24px;
 }
 
 .terminal-dock-filler {
