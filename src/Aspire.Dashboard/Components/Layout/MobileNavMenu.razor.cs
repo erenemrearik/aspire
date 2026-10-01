@@ -23,6 +23,9 @@ public partial class MobileNavMenu : ComponentBase, IAsyncDisposable
     [Parameter, EditorRequired]
     public required bool IsNavMenuOpen { get; set; }
 
+    [Parameter]
+    public bool HasResourceTerminals { get; set; }
+
     [Parameter, EditorRequired]
     public required Action CloseNavMenu { get; set; }
 
@@ -155,6 +158,17 @@ public partial class MobileNavMenu : ComponentBase, IAsyncDisposable
                 ActiveIcon: DesktopNavMenu.ConsoleLogsIcon(active: true),
                 LinkMatchRegex: GetNonIndexPageRegex(DashboardUrls.ConsoleLogsUrl())
             );
+
+            if (HasResourceTerminals)
+            {
+                yield return new MobileNavMenuEntry(
+                    Loc[nameof(Resources.Layout.NavMenuTerminalsTab)],
+                    () => NavigateToAsync(DashboardUrls.TerminalsUrl()),
+                    DesktopNavMenu.TerminalsIcon(),
+                    ActiveIcon: DesktopNavMenu.TerminalsIcon(active: true),
+                    LinkMatchRegex: GetNonIndexPageRegex(DashboardUrls.TerminalsUrl())
+                );
+            }
         }
 
         yield return new MobileNavMenuEntry(

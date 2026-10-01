@@ -90,7 +90,7 @@ public sealed partial class TerminalView : ComponentBase, IAsyncDisposable
     public bool Chromeless { get; set; }
 
     /// <summary>Gets or sets whether the resource terminal titlebar offers an independent window.</summary>
-    /// <remarks>Only the active resource Terminal view enables this. Chromeless surfaces never render this action.</remarks>
+    /// <remarks>The Terminals page enables this. Chromeless surfaces never render this action.</remarks>
     [Parameter]
     public bool ShowOpenInWindow { get; set; }
 

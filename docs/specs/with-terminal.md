@@ -388,29 +388,31 @@ See the
 [renderer PR](https://github.com/mitchdenny/hex1b/pull/491), and
 [hyperlink replay fix](https://github.com/mitchdenny/hex1b/pull/493).
 
-### Console / Terminal view toggle
+### Terminals page
 
-For a terminal-enabled resource the dashboard `ConsoleLogs` page mounts
-**both** `LogViewer` (the resource's standard log stream) and
-`TerminalView` (the interactive Hex1b web terminal) at the same time and
-flips between them via a pair of **Console logs** / **Terminal** items
-rendered inside the toolbar's options (⋯) `AspireMenuButton`:
+Resource terminals are displayed on the **Terminals** page at `/terminals`,
+immediately after Console logs in desktop and mobile navigation. Its resource
+selector contains only terminal-enabled resources with replica metadata, with
+individual replicas selectable and no All option. The page restores the last
+selected resource from browser session storage, otherwise selecting the first
+visible terminal resource. An explicit `/terminals/resource/{resourceName}`
+URL takes precedence.
 
-- The page defaults to **Console** on resource selection so any pre-PTY
-  hosting messages — `WaitFor` notifications, startup failures, image
-  pull progress — are visible immediately.
-- The view is purely user-controlled: the page never auto-switches
-  between Console and Terminal. The user picks the view from the ⋯
-  menu and the page stays on that view until they pick the other one,
-  or a different resource is selected (which resets to Console).
-- Both views stay mounted across flips (visibility is toggled with
-  `display:none` on a wrapper `<div>`); the log subscription and the
-  Hex1b/HMP1 consumer session are kept alive so neither view loses
-  scrollback or has to re-handshake on toggle. After a `display:none →
-  visible` transition the page calls `refreshLayout` on the JS terminal
-  to fit the terminal to the new available space.
+The selector follows Console logs for ordering, state labels and the shared
+Show hidden resources setting. Waiting and stopped terminal resources remain
+selectable. Hidden terminal resources count toward navigation availability;
+when all terminals are hidden, View options offers Show hidden resources.
+When no terminal resources remain, the navigation entry disappears and page
+visits redirect to `/`. Terminals are unavailable without the resource service
+or when viewing a historical, read-only run.
 
-The resource Terminal view offers an icon-only **Open in new window** button
+Console logs always displays the standard log stream, including pre-PTY hosting
+messages and post-PTY exit output. Its options menu no longer switches views.
+Navigating away from Terminals disposes the inline consumer, not the producer;
+returning attaches a new viewer and synchronizes producer-backed history.
+The AppHost terminal dock and interaction terminals remain separate surfaces.
+
+The resource terminal offers an icon-only **Open in new window** button
 at the right of its title bar, not in the page's Options menu or Console view.
 The dock keeps its detach button in the tab strip; dialogs and detached windows
 do not offer another launch button. Launch buttons stay disabled until their
@@ -532,7 +534,7 @@ text down to fit.
 
 The console log stream is now subscribed to for terminal-enabled
 resources too (previously it was suppressed), which is what makes the
-Console view non-empty for a `WithTerminal()` resource.
+Console logs page non-empty for a `WithTerminal()` resource.
 
 ## CLI
 
@@ -635,7 +637,7 @@ container before attaching, so one-time startup output, including terminal capab
 queries, can be lost. See the [DCP startup ordering](https://github.com/microsoft/dcp/blob/v0.25.13/controllers/container_controller.go#L1843-L1855).
 
 The `notcurses` resource in `playground/Terminals` installs Ubuntu's `notcurses-bin`
-package and starts an interactive Bash shell. Open its dashboard Terminal view, then
+package and starts an interactive Bash shell. Open its dashboard Terminals page, then
 run `notcurses-demo` to exercise graphics, color and Unicode rendering. Starting the
 demo from the attached shell avoids losing its initial capability queries. Press
 `q` to return to the shell; run the command again to repeat the stress workload.

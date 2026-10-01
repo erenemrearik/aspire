@@ -16,6 +16,13 @@
             IconRest="ConsoleLogsIcon()"
             IconActive="ConsoleLogsIcon(active: true)"
             Text="@Loc[nameof(Layout.NavMenuConsoleLogsTab)]" />
+        @if (HasResourceTerminals)
+        {
+            <FluentAppBarItem Href="@DashboardUrls.TerminalsUrl()"
+                IconRest="TerminalsIcon()"
+                IconActive="TerminalsIcon(active: true)"
+                Text="@Loc[nameof(Layout.NavMenuTerminalsTab)]" />
+        }
     }
     <FluentAppBarItem Href="@DashboardUrls.StructuredLogsUrl()"
         IconRest="StructuredLogsIcon()"

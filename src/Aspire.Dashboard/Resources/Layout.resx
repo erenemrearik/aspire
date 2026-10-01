@@ -150,6 +150,9 @@
   <data name="NavMenuConsoleLogsTab" xml:space="preserve">
     <value>Console</value>
   </data>
+  <data name="NavMenuTerminalsTab" xml:space="preserve">
+    <value>Terminals</value>
+  </data>
   <data name="NavMenuStructuredLogsTab" xml:space="preserve">
     <value>Structured</value>
   </data>

@@ -121,6 +121,37 @@ namespace Aspire.Dashboard.Resources {
             get {
                 return ResourceManager.GetString("TerminalTitle", resourceCulture);
             }
+
+        }
+
+        public static string TerminalsPageTitle {
+            get {
+                return ResourceManager.GetString("TerminalsPageTitle", resourceCulture);
+            }
+        }
+
+        public static string TerminalsHeader {
+            get {
+                return ResourceManager.GetString("TerminalsHeader", resourceCulture);
+            }
+        }
+
+        public static string TerminalsSelectResourceToolbar {
+            get {
+                return ResourceManager.GetString("TerminalsSelectResourceToolbar", resourceCulture);
+            }
+        }
+
+        public static string TerminalsSettings {
+            get {
+                return ResourceManager.GetString("TerminalsSettings", resourceCulture);
+            }
+        }
+
+        public static string TerminalsNoVisibleResources {
+            get {
+                return ResourceManager.GetString("TerminalsNoVisibleResources", resourceCulture);
+            }
         }
 
         public static string TerminalToolbarDecreaseFontSize {

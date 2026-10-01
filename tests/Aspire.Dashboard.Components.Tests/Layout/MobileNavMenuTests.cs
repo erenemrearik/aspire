@@ -16,6 +16,30 @@ namespace Aspire.Dashboard.Components.Tests.Layout;
 [UseCulture("en-US")]
 public class MobileNavMenuTests : DashboardTestContext
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TerminalsNavigation_IsConditionalAndFollowsConsoleLogs(bool hasTerminals)
+    {
+        var cut = RenderMobileNavMenu("/terminals/resource/shell", hasResourceTerminals: hasTerminals);
+        var titles = cut.FindAll("fluent-menu-item").Select(i => i.GetAttribute("title")).Take(hasTerminals ? 6 : 5);
+        var expected = new List<string>
+        {
+            Resources.Layout.NavMenuResourcesTab,
+            Resources.Layout.NavMenuConsoleLogsTab
+        };
+        if (hasTerminals)
+        {
+            expected.Add(Resources.Layout.NavMenuTerminalsTab);
+        }
+        expected.AddRange([Resources.StructuredLogs.StructuredLogsHeader, Resources.Layout.NavMenuTracesTab, Resources.Layout.NavMenuMetricsTab]);
+        Assert.Equal(expected, titles);
+        if (hasTerminals)
+        {
+            AssertMenuItemIsActive(cut, Resources.Layout.NavMenuTerminalsTab);
+        }
+    }
+
     [Fact]
     public void Render_OpenMenu_CurrentPageHasSemanticAndVisualSelectedState()
     {
@@ -103,7 +127,7 @@ public class MobileNavMenuTests : DashboardTestContext
         Assert.Equal(MainLayout.NavigationButtonId, argument);
     }
 
-    private IRenderedComponent<MobileNavMenu> RenderMobileNavMenu(string currentUrl, Action? closeNavMenu = null, bool isNavMenuOpen = true)
+    private IRenderedComponent<MobileNavMenu> RenderMobileNavMenu(string currentUrl, Action? closeNavMenu = null, bool isNavMenuOpen = true, bool hasResourceTerminals = false)
     {
         FluentUISetupHelpers.AddCommonDashboardServices(this);
         Services.AddSingleton<IDashboardClient>(new TestDashboardClient(isEnabled: true));
@@ -119,6 +143,7 @@ public class MobileNavMenuTests : DashboardTestContext
         return Render<MobileNavMenu>(builder =>
         {
             builder.Add(p => p.IsNavMenuOpen, isNavMenuOpen);
+            builder.Add(p => p.HasResourceTerminals, hasResourceTerminals);
             builder.Add(p => p.CloseNavMenu, closeNavMenu ?? (() => { }));
             builder.Add(p => p.LaunchHelpAsync, () => Task.CompletedTask);
             builder.Add(p => p.LaunchAIAgentsAsync, () => Task.CompletedTask);

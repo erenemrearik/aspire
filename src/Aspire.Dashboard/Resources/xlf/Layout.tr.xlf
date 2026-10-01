@@ -137,6 +137,11 @@
         <target state="translated">Yapılandırılmış</target>
         <note />
       </trans-unit>
+      <trans-unit id="NavMenuTerminalsTab">
+        <source>Terminals</source>
+        <target state="new">Terminals</target>
+        <note />
+      </trans-unit>
       <trans-unit id="NavMenuToggleCollapse">
         <source>Collapse navigation to icons</source>
         <target state="new">Collapse navigation to icons</target>

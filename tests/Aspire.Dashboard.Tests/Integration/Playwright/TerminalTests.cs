@@ -449,7 +449,7 @@ public sealed class TerminalTests(TerminalTests.TerminalDashboardServerFixture f
     private async Task<TestTerminalConnection> OpenTerminalAsync(IPage page)
     {
         await fixture.TerminalResolver.DiscardPendingConnectionsAsync();
-        await page.GotoAsync($"/consolelogs/resource/{ResourceName}").DefaultTimeout();
+        await page.GotoAsync($"/terminals/resource/{ResourceName}").DefaultTimeout();
         var connection = await fixture.TerminalResolver.AcceptConnectionAsync(CancellationToken.None).DefaultTimeout();
         await connection.WaitForPeerHandshakesAsync(CancellationToken.None).DefaultTimeout();
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Decrease font size", Exact = true })).ToBeEnabledAsync();

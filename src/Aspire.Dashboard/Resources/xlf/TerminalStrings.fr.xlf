@@ -252,6 +252,31 @@
         <target state="new">Unable to recover the terminal window state. Check browser storage permissions, reload, or explicitly return the terminal to the panel.</target>
         <note />
       </trans-unit>
+      <trans-unit id="TerminalsHeader">
+        <source>Terminals</source>
+        <target state="new">Terminals</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="TerminalsNoVisibleResources">
+        <source>No terminal resources are visible. Enable Show hidden resources in View options to display hidden terminals.</source>
+        <target state="new">No terminal resources are visible. Enable Show hidden resources in View options to display hidden terminals.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="TerminalsPageTitle">
+        <source>Terminals</source>
+        <target state="new">Terminals</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="TerminalsSelectResourceToolbar">
+        <source>Select resource</source>
+        <target state="new">Select resource</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="TerminalsSettings">
+        <source>View options</source>
+        <target state="new">View options</target>
+        <note />
+      </trans-unit>
     </body>
   </file>
 </xliff>
