@@ -372,6 +372,58 @@ public class TrayWatchStreamTests
         }
     }
 
+    [Fact]
+    public async Task DashboardLookupThatTimesOutIsRetriedAndPublishedWithoutDiscoveryChanges()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var time = new FakeTimeProvider();
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pending = new TaskCompletionSource<DashboardUrlsState?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var messages = Channel.CreateUnbounded<TrayWatchMessage>();
+        var calls = 0;
+        var connection = Connection("/project/a.cs", 10);
+        connection.GetDashboardUrlsHandler = token =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                // The AppHost answers only after its dashboard is healthy, which can outlast the lookup deadline.
+                firstStarted.SetResult();
+                return pending.Task.WaitAsync(token);
+            }
+            return Task.FromResult<DashboardUrlsState?>(new() { BaseUrlWithLoginToken = "http://localhost:1234/login?t=abc" });
+        };
+        var monitor = new TestAuxiliaryBackchannelMonitor();
+        monitor.AddConnection(connection.SocketPath, connection);
+        var run = CreateStream(monitor, time).RunAsync((json, _) =>
+        {
+            messages.Writer.TryWrite(Deserialize(json));
+            return Task.CompletedTask;
+        }, cancellation.Token);
+
+        try
+        {
+            await firstStarted.Task.DefaultTimeout();
+            time.Advance(TrayWatchStream.DashboardLookupTimeout);
+            var initial = await messages.Reader.ReadAsync().AsTask().DefaultTimeout();
+            Assert.Equal("snapshot", initial.Type);
+            Assert.Null(Assert.Single(initial.AppHosts!).DashboardUrl);
+
+            time.Advance(TrayWatchStream.DashboardRetryInterval);
+            var retried = await messages.Reader.ReadAsync().AsTask().DefaultTimeout();
+            Assert.Equal("snapshot", retried.Type);
+            var host = Assert.Single(retried.AppHosts!);
+            Assert.Equal(10, host.AppHostPid);
+            Assert.Equal("http://localhost:1234/login?t=abc", host.DashboardUrl);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            pending.TrySetResult(null);
+        }
+        Assert.Equal(CliExitCodes.Success, await run.DefaultTimeout());
+        Assert.Equal(2, calls);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -826,14 +878,11 @@ public class TrayWatchStreamTests
         var dashboardCalls = 0;
         replacement.GetDashboardUrlsHandler = _ =>
         {
-            if (Interlocked.Increment(ref dashboardCalls) == 4)
-            {
-                repeatedDiscovery.TrySetResult();
-            }
+            Interlocked.Increment(ref dashboardCalls);
             return Task.FromResult<DashboardUrlsState?>(null);
         };
         var closeOutput = 0;
-        var monitor = new TestAuxiliaryBackchannelMonitor { WatchConnectionsHandler = token => snapshots.Reader.ReadAllAsync(token) };
+        var monitor = new TestAuxiliaryBackchannelMonitor { WatchConnectionsHandler = Discover };
         snapshots.Writer.TryWrite([initial]);
         var run = CreateStream(monitor, time).RunAsync((json, _) =>
         {
@@ -879,6 +928,7 @@ public class TrayWatchStreamTests
             Assert.Equal(0, Volatile.Read(ref stoppedCalls));
             Assert.Equal(1, initial.GetResourceSnapshotsCallCount);
             Assert.Equal(1, replacement.GetResourceSnapshotsCallCount);
+            Assert.Equal(1, Volatile.Read(ref dashboardCalls));
             Assert.Equal(0, initial.DisposeCallCount);
             Assert.Equal(0, replacement.DisposeCallCount);
         }
@@ -889,6 +939,20 @@ public class TrayWatchStreamTests
             await run.DefaultTimeout();
         }
         await watchesStopped.Task.DefaultTimeout();
+
+        async IAsyncEnumerable<IReadOnlyList<IAppHostAuxiliaryBackchannel>> Discover([EnumeratorCancellation] CancellationToken token)
+        {
+            var replacementDiscoveries = 0;
+            await foreach (var connections in snapshots.Reader.ReadAllAsync(token))
+            {
+                yield return connections;
+                // Resuming here means the consumer finished reconciling the yielded set.
+                if (connections.Contains(replacement) && ++replacementDiscoveries == 4)
+                {
+                    repeatedDiscovery.TrySetResult();
+                }
+            }
+        }
 
         async IAsyncEnumerable<ResourceSnapshot> Watch([EnumeratorCancellation] CancellationToken token)
         {

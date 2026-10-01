@@ -20,9 +20,16 @@ internal sealed class TrayWatchStream(
 {
     internal static TimeSpan DashboardLookupTimeout { get; } = TimeSpan.FromSeconds(2);
     internal static TimeSpan DashboardSnapshotTimeout { get; } = TimeSpan.FromSeconds(5);
+    internal static TimeSpan DashboardRetryInterval { get; } = TimeSpan.FromSeconds(5);
     internal const int MaximumConcurrentDashboardLookups = 8;
 
+    private static readonly Task s_never = new TaskCompletionSource().Task;
+
     private readonly HashSet<IAppHostAuxiliaryBackchannel> _pendingDashboardLookups = new(ReferenceEqualityComparer.Instance);
+
+    // Completed lookups per live connection, including AppHosts that reported no dashboard.
+    // Only the snapshot producer reads or writes this, so it needs no synchronization.
+    private readonly Dictionary<IAppHostAuxiliaryBackchannel, string?> _dashboardUrls = new(ReferenceEqualityComparer.Instance);
 
     public async Task<int> RunAsync(Func<string, CancellationToken, Task> writeLineAsync, CancellationToken cancellationToken)
     {
@@ -48,6 +55,7 @@ internal sealed class TrayWatchStream(
         Task<bool>? pendingHealthRead = null;
         Task<bool>? pendingRead = null;
         Task<bool>? pendingHeartbeat = null;
+        Task? pendingDashboardRetry = null;
         var terminalError = false;
         try
         {
@@ -132,7 +140,10 @@ internal sealed class TrayWatchStream(
             }
             try
             {
-                await Task.WhenAll(pendingConnectionsRead ?? Task.CompletedTask, pendingHealthRead ?? Task.CompletedTask).ConfigureAwait(false);
+                await Task.WhenAll(
+                    pendingConnectionsRead ?? Task.CompletedTask,
+                    pendingHealthRead ?? Task.CompletedTask,
+                    pendingDashboardRetry ?? Task.CompletedTask).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -174,9 +185,10 @@ internal sealed class TrayWatchStream(
                 pendingConnectionsRead ??= connections.MoveNextAsync().AsTask();
                 if (pendingHealthRead is not null)
                 {
-                    await Task.WhenAny(pendingConnectionsRead, pendingHealthRead).ConfigureAwait(false);
+                    await Task.WhenAny(pendingConnectionsRead, pendingHealthRead, pendingDashboardRetry ?? s_never).ConfigureAwait(false);
                 }
 
+                var enrichDashboardUrls = false;
                 if (pendingHealthRead is null || pendingConnectionsRead.IsCompleted)
                 {
                     var connectionRead = pendingConnectionsRead;
@@ -229,9 +241,37 @@ internal sealed class TrayWatchStream(
                         }
                     }
 
-                    // Health-only publications reuse the last URL enrichment instead of issuing
-                    // optional dashboard RPCs for every resource transition.
+                    foreach (var connection in _dashboardUrls.Keys.ToArray())
+                    {
+                        if (!currentConnections.ContainsKey(connection))
+                        {
+                            _dashboardUrls.Remove(connection);
+                        }
+                    }
+                    enrichDashboardUrls = true;
+                }
+
+                if (pendingDashboardRetry is { IsCompleted: true })
+                {
+                    await pendingDashboardRetry.ConfigureAwait(false);
+                    pendingDashboardRetry = null;
+                    enrichDashboardUrls = true;
+                }
+
+                // Health-only publications reuse the last URL enrichment instead of issuing
+                // optional dashboard RPCs for every resource transition.
+                if (enrichDashboardUrls)
+                {
                     hosts = await EnrichDashboardUrlsAsync(candidates, token).ConfigureAwait(false);
+                }
+
+                // The AppHost answers dashboard lookups only once its dashboard is healthy, which
+                // can take longer than the lookup deadline for a freshly started AppHost. Discovery
+                // does not republish an unchanged connection set, so schedule a retry for lookups
+                // that timed out or were skipped; otherwise the URL would never appear.
+                if (pendingDashboardRetry is null && candidates.Any(candidate => !_dashboardUrls.ContainsKey(candidate.Connection)))
+                {
+                    pendingDashboardRetry = Task.Delay(DashboardRetryInterval, timeProvider, token);
                 }
 
                 if (pendingHealthRead is not null && pendingHealthRead.IsCompleted)
@@ -272,7 +312,15 @@ internal sealed class TrayWatchStream(
         List<(IAppHostAuxiliaryBackchannel Connection, TrayAppHost Host)> candidates,
         CancellationToken cancellationToken)
     {
-        var hosts = candidates.Select(candidate => candidate.Host).ToArray();
+        var hosts = new TrayAppHost[candidates.Count];
+        var resolved = new bool[candidates.Count];
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var (connection, host) = candidates[i];
+            resolved[i] = _dashboardUrls.TryGetValue(connection, out var cachedUrl);
+            hosts[i] = resolved[i] ? host with { DashboardUrl = cachedUrl } : host;
+        }
+
         // Per-call deadlines alone still scale with the number of unresponsive peers.
         // Keep the entire optional enrichment well below the protocol's 30-second liveness
         // budget, including the initial snapshot, without issuing unbounded concurrent RPCs.
@@ -284,7 +332,7 @@ internal sealed class TrayWatchStream(
         }, async (index, token) =>
         {
             var connection = candidates[index].Connection;
-            if (snapshotTimeout.IsCancellationRequested || !TryBeginDashboardLookup(connection))
+            if (resolved[index] || snapshotTimeout.IsCancellationRequested || !TryBeginDashboardLookup(connection))
             {
                 return;
             }
@@ -299,6 +347,7 @@ internal sealed class TrayWatchStream(
                 var urls = await pendingLookup.WaitAsync(lookupCancellation.Token).ConfigureAwait(false);
                 // Each worker owns one array element; only completed results reach serialization.
                 hosts[index] = hosts[index] with { DashboardUrl = urls?.BaseUrlWithLoginToken };
+                resolved[index] = true;
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
             {
@@ -306,7 +355,10 @@ internal sealed class TrayWatchStream(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                // A faulted RPC is not a dashboard that is still starting; retrying it on every
+                // interval would only repeat the failure, so record the URL as unavailable.
                 logger.LogDebug(ex, "Dashboard URL unavailable for AppHost PID {Pid}.", hosts[index].AppHostPid);
+                resolved[index] = true;
             }
             finally
             {
@@ -335,6 +387,13 @@ internal sealed class TrayWatchStream(
         if (snapshotTimeout.IsCancellationRequested)
         {
             logger.LogDebug("Dashboard URL snapshot lookup budget expired; unavailable URLs were omitted.");
+        }
+        for (var i = 0; i < hosts.Length; i++)
+        {
+            if (resolved[i])
+            {
+                _dashboardUrls[candidates[i].Connection] = hosts[i].DashboardUrl;
+            }
         }
         return hosts;
     }
