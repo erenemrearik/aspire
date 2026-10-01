@@ -735,6 +735,9 @@ public class DevTunnelResourceBuilderExtensionsTests
                 : ["-c", $"printf '%s\\n' 'Hosting port: {targetPort}' 'Connect via browser: {tunnelUrl}' 'Ready to accept connections for tunnel: mytunnel'; sleep 180"]
             : arguments);
 
+        var dependent = builder.AddExecutable("dependent", command, Environment.CurrentDirectory, arguments)
+            .WithExplicitStart()
+            .WaitFor(builder.CreateResourceBuilder(tunnelPort));
         using var app = builder.Build();
 
         var startTask = app.StartAsync(cts.Token);
@@ -750,6 +753,15 @@ public class DevTunnelResourceBuilderExtensionsTests
         Assert.Equal("n4skq32k-3000.use.devtunnels.ms", tunnelPort.TunnelEndpointAnnotation.AllocatedEndpoint?.Address);
         Assert.Contains(resourceEvent.Snapshot.Urls, u => u.Url == tunnelUrl && !u.IsInactive);
         Assert.Contains(resourceEvent.Snapshot.Urls, u => u.Url == inspectUrl && !u.IsInactive);
+
+        await app.ResourceNotifications.WaitForResourceHealthyAsync(tunnelPort.Name, cts.Token);
+        Assert.Single(tunnelPort.Annotations.OfType<HealthCheckAnnotation>());
+        var monitor = app.Services.GetRequiredKeyedService<DevTunnelMonitor>(tunnel.Resource);
+        await monitor.ProcessLogAsync("Connection to host tunnel relay closed.", cts.Token);
+        var waitForDependency = app.ResourceNotifications.WaitForDependenciesAsync(dependent.Resource, cts.Token);
+        Assert.False(waitForDependency.IsCompleted);
+        await monitor.ProcessLogAsync("Connection to host tunnel relay restored.", cts.Token);
+        await waitForDependency.DefaultTimeout();
 
         await app.StopAsync(cts.Token);
     }

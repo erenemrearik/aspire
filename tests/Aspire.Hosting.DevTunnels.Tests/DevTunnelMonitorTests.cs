@@ -96,6 +96,69 @@ public class DevTunnelMonitorTests
     }
 
     [Fact]
+    public async Task MissingTunnelInvalidatesLogDerivedReadiness()
+    {
+        using var test = new TestDevTunnelMonitor();
+        await test.StartAsync();
+        await test.ReadyAsync();
+        await test.App.ResourceNotifications.PublishUpdateAsync(test.Port, s => s with
+        {
+            Urls = [new("tunnel", test.Port.LastKnownStatus!.PortUri!.AbsoluteUri, false)]
+        });
+        test.Client.GetTunnelCallback = (_, _) => throw new DevTunnelNotFoundException("mytunnel.usw2", "Tunnel not found.");
+
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+
+        Assert.Equal(HealthStatus.Unhealthy, test.Snapshot(test.Port).HealthStatus);
+        Assert.Equal(HealthStatus.Unhealthy, Assert.Single(test.Snapshot(test.Tunnel).HealthReports, r => r.Name == "tunnel-connection").Status);
+        Assert.True(Assert.Single(test.Snapshot(test.Port).Urls).IsInactive);
+        Assert.Null(test.Port.LastKnownStatus);
+        Assert.Null(test.Tunnel.LastKnownStatus);
+    }
+
+    [Fact]
+    public async Task CustomizedUrlsSurviveReadinessReconciliationAndReconnect()
+    {
+        using var test = new TestDevTunnelMonitor();
+        test.App.Services.GetRequiredService<IDistributedApplicationEventing>().Subscribe<ResourceEndpointsAllocatedEvent>(test.Port,
+            async (_, _) => await test.App.ResourceNotifications.PublishUpdateAsync(test.Port, s => s with
+            {
+                Urls = [
+                    new("tunnel", "https://original-3000.usw2.devtunnels.ms/swagger?x=1#operations", false),
+                    new("tunnel", "https://original-3000.usw2.devtunnels.ms/health?next=%2F", false),
+                    new("tunnel", "https://docs.example/guide?x=1", false),
+                    new(null, "https://original-3000-inspect.usw2.devtunnels.ms/requests?id=1", true) { DisplayProperties = new("Inspect") }
+                ]
+            }));
+        await test.StartAsync();
+        await test.ReadyAsync();
+        var originalUrls = test.Snapshot(test.Port).Urls.Select(u => u.Url).ToArray();
+        Assert.Equal([
+            "https://original-3000.usw2.devtunnels.ms/swagger?x=1#operations",
+            "https://original-3000.usw2.devtunnels.ms/health?next=%2F",
+            "https://docs.example/guide?x=1",
+            "https://original-3000-inspect.usw2.devtunnels.ms/requests?id=1"
+        ], originalUrls);
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        await test.LogAsync("Connection to host tunnel relay closed.");
+        await test.LogAsync("Connection to host tunnel relay restored.");
+        Assert.Equal(originalUrls, test.Snapshot(test.Port).Urls.Select(u => u.Url));
+
+        test.Client.TunnelStatus = test.Client.TunnelStatus with
+        {
+            Ports = [new(3000, "http") { PortUri = new("https://replacement-3000.usw2.devtunnels.ms") }]
+        };
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Equal([
+            "https://replacement-3000.usw2.devtunnels.ms/swagger?x=1#operations",
+            "https://replacement-3000.usw2.devtunnels.ms/health?next=%2F",
+            "https://docs.example/guide?x=1",
+            "https://replacement-3000-inspect.usw2.devtunnels.ms/requests?id=1"
+        ], test.Snapshot(test.Port).Urls.Select(u => u.Url));
+        Assert.All(test.Snapshot(test.Port).Urls, u => Assert.False(u.IsInactive));
+    }
+
+    [Fact]
     public async Task ServiceHostCountCannotOverrideLocalDisconnect()
     {
         using var test = new TestDevTunnelMonitor();

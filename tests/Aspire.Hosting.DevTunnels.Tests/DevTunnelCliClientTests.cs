@@ -71,6 +71,93 @@ public class DevTunnelCliClientTests
     }
 
     [Fact]
+    public async Task MissingTunnelStatusHasAnAuthoritativeFailureType()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(DevTunnelCli.ResourceNotFoundExitCode, error: "Tunnel not found.");
+        await Assert.ThrowsAsync<DevTunnelNotFoundException>(() => CreateClient(cli).GetTunnelAsync("mytunnel.usw2"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MetadataUpdateRetriesAfterRecheckingRemoteState(bool firstUpdateWasApplied)
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(0, TunnelJson(description: "old"));
+        cli.EnqueueUpdateResult(1, error: "Transient service error.");
+        cli.EnqueueShowResult(0, TunnelJson(description: firstUpdateWasApplied ? "new" : "old"));
+        if (!firstUpdateWasApplied)
+        {
+            cli.EnqueueUpdateResult(0, TunnelJson(description: "new"));
+        }
+        var result = await CreateClient(cli).CreateTunnelAsync("mytunnel", new() { Description = "new" });
+        Assert.Equal("new", result.Description);
+        Assert.Equal(firstUpdateWasApplied
+            ? new[] { nameof(DevTunnelCli.ShowTunnelAsync), nameof(DevTunnelCli.UpdateTunnelAsync), nameof(DevTunnelCli.ShowTunnelAsync) }
+            : [nameof(DevTunnelCli.ShowTunnelAsync), nameof(DevTunnelCli.UpdateTunnelAsync), nameof(DevTunnelCli.ShowTunnelAsync), nameof(DevTunnelCli.UpdateTunnelAsync)],
+            cli.Calls.Select(c => c.Method));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AccessMutationRetriesWithoutRepeatingCompletedResets(bool port)
+    {
+        var cli = new TestDevTunnelCli();
+        if (port)
+        {
+            cli.EnqueueShowPortResult(0, PortJson(access: [AnonymousAccess(deny: true)]));
+            cli.EnqueueShowPortResult(0, PortJson());
+        }
+        else
+        {
+            cli.EnqueueShowResult(0, TunnelJson(access: [AnonymousAccess(deny: true)]));
+            cli.EnqueueShowResult(0, TunnelJson());
+        }
+        cli.EnqueueResetAccessResult(0, """{"accessControlEntries":[]}""");
+        cli.EnqueueCreateAccessResult(1, error: "Transient service error after reset.");
+        cli.EnqueueCreateAccessResult(0, """{"accessControlEntries":[]}""");
+        var client = CreateClient(cli);
+        if (port)
+        {
+            await client.CreatePortAsync("mytunnel.usw2", 3000, new() { Protocol = "http", Labels = ["label"], AllowAnonymous = true });
+        }
+        else
+        {
+            await client.CreateTunnelAsync("mytunnel", new() { AllowAnonymous = true });
+        }
+        var show = port ? nameof(DevTunnelCli.ShowPortAsync) : nameof(DevTunnelCli.ShowTunnelAsync);
+        Assert.Equal([show, nameof(DevTunnelCli.ResetAccessAsync), nameof(DevTunnelCli.CreateAccessAsync), show, nameof(DevTunnelCli.CreateAccessAsync)],
+            cli.Calls.Select(c => c.Method));
+    }
+
+    [Fact]
+    public async Task CompletedAccessMutationIsNotRepeatedAfterLostResponse()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(0, TunnelJson());
+        cli.EnqueueCreateAccessResult(1, error: "Response lost after successful mutation.");
+        cli.EnqueueShowResult(0, TunnelJson(access: [AnonymousAccess(deny: false)]));
+        await CreateClient(cli).CreateTunnelAsync("mytunnel", new() { AllowAnonymous = true });
+        Assert.Equal([nameof(DevTunnelCli.ShowTunnelAsync), nameof(DevTunnelCli.CreateAccessAsync), nameof(DevTunnelCli.ShowTunnelAsync)],
+            cli.Calls.Select(c => c.Method));
+    }
+
+    [Fact]
+    public async Task ProvisioningMutationRetriesAreBounded()
+    {
+        var cli = new TestDevTunnelCli();
+        for (var i = 0; i < 3; i++)
+        {
+            cli.EnqueueShowResult(0, TunnelJson(description: "old"));
+            cli.EnqueueUpdateResult(1, error: "Persistent service error.");
+        }
+        await Assert.ThrowsAnyAsync<DistributedApplicationException>(() => CreateClient(cli).CreateTunnelAsync("mytunnel", new() { Description = "new" }));
+        Assert.Equal(6, cli.Calls.Count);
+    }
+
+    [Fact]
     public async Task MissingTunnelIsCreated()
     {
         var cli = new TestDevTunnelCli();

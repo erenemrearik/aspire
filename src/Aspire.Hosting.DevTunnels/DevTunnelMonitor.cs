@@ -259,7 +259,13 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
                     if (IsCurrent(run) && revision == run.Revision)
                     {
                         run.Error = ex.Message;
-                        if (!run.HasReadyMessage)
+                        if (ex is DevTunnelNotFoundException)
+                        {
+                            _resource.LastKnownStatus = null;
+                            run.Connected = false;
+                            run.Ports.Clear();
+                        }
+                        else if (!run.HasReadyMessage)
                         {
                             run.Connected = false;
                         }
@@ -466,7 +472,7 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
                     case DevTunnelOutputParser.OutputKind.Connected:
                         // "Restored" is emitted before the initial port block, but on reconnect
                         // previously observed ports can be reused.
-                        run.Connected = run.HasReadyMessage;
+                        run.Connected = run.HasReadyMessage || run.Ready.Task.IsCompletedSuccessfully;
                         run.LocallyDisconnected = false;
                         changed = true;
                         break;

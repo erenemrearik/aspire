@@ -618,12 +618,19 @@ public static partial class DevTunnelsResourceBuilderExtensions
         // Add the tunnel endpoint annotation
         portResource.Annotations.Add(portResource.TunnelEndpointAnnotation);
 
+        // WaitFor only observes health when the dependency has a health-check annotation.
+        // The monitor owns live connection health; this stateless registration must not publish
+        // sampled unhealthy results that could overwrite a more recent reconnect observation.
+        var readinessCheckKey = $"{portName}-ready";
+        tunnelBuilder.ApplicationBuilder.Services.AddHealthChecks().AddCheck(readinessCheckKey, static () => HealthCheckResult.Healthy());
+
         var portBuilder = tunnelBuilder.ApplicationBuilder.AddResource(portResource)
             // visual grouping beneath the tunnel
             .WithParentRelationship(tunnelBuilder)
             // indicate the target resource relationship
             .WithReferenceRelationship(targetResource)
             .ExcludeFromManifest() // Dev tunnels do not get deployed
+            .WithHealthCheck(readinessCheckKey)
             .WithCommand(
                 DevTunnelPortResource.ShowTunnelUrlsCommandName,
                 MessageStrings.ShowTunnelUrlsCommandDisplayName,
@@ -742,9 +749,7 @@ public static partial class DevTunnelsResourceBuilderExtensions
                 Properties = [.. snapshot.Properties.Where(p => !IsDevTunnelUrlProperty(p.Name)), .. GetUrlProperties(portResource)],
                 Urls = [.. snapshot.Urls.Select(u => u with
                 {
-                    Url = string.Equals(u.Name, DevTunnelPortResource.TunnelEndpointName, StringComparisons.EndpointAnnotationName)
-                        ? NormalizeUrl(portUri)
-                        : u.DisplayProperties.DisplayName == "Inspect" ? GetInspectUrl(portUri) ?? u.Url : u.Url,
+                    Url = UpdatePortUrl(u, previousAddress, portUri),
                     IsInactive = false
                 })]
             }, portResource.Name, true, description)).ConfigureAwait(false);
@@ -755,6 +760,41 @@ public static partial class DevTunnelsResourceBuilderExtensions
                 .LogInformation("Forwarding from {PortUrl} to {TargetUrl} ({TargetResourceName}/{TargetEndpointName})",
                     NormalizeUrl(portUri), portResource.TargetEndpoint.Url, portResource.TargetEndpoint.Resource.Name, portResource.TargetEndpoint.EndpointName);
         }
+    }
+
+    private static string UpdatePortUrl(UrlSnapshot url, string? previousAddress, Uri portUri)
+    {
+        if (previousAddress is null
+            || string.Equals(previousAddress, portUri.Host, StringComparison.OrdinalIgnoreCase)
+            || !Uri.TryCreate(url.Url, UriKind.Absolute, out var currentUri))
+        {
+            return url.Url;
+        }
+
+        string? replacementHost = null;
+        if (string.Equals(url.Name, DevTunnelPortResource.TunnelEndpointName, StringComparisons.EndpointAnnotationName)
+            && string.Equals(currentUri.Host, previousAddress, StringComparison.OrdinalIgnoreCase))
+        {
+            replacementHost = portUri.Host;
+        }
+        else if (url.DisplayProperties.DisplayName == "Inspect"
+            && GetInspectUrl(new UriBuilder(portUri) { Host = previousAddress }.Uri) is { } previousInspectUrl
+            && string.Equals(currentUri.Host, new Uri(previousInspectUrl).Host, StringComparison.OrdinalIgnoreCase)
+            && GetInspectUrl(portUri) is { } inspectUrl)
+        {
+            replacementHost = new Uri(inspectUrl).Host;
+        }
+        if (replacementHost is null)
+        {
+            return url.Url;
+        }
+
+        // URL callbacks may add paths, queries, fragments, and multiple links for one endpoint.
+        // Only migrate the endpoint-derived host; leave customized links and their suffixes intact.
+        var updated = new UriBuilder(currentUri) { Host = replacementHost }.Uri;
+        return currentUri.PathAndQuery == "/" && currentUri.Fragment.Length == 0 && !url.Url.EndsWith('/')
+            ? updated.GetLeftPart(UriPartial.Authority)
+            : updated.AbsoluteUri;
     }
 
     internal static async Task UpdatePortAccessAsync(DevTunnelPortResource portResource, IServiceProvider services)

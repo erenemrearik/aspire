@@ -64,7 +64,10 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         throw new DistributedApplicationException($"Failed to get devtunnel CLI version. Output: '{output}'. Error: '{error}'");
     }
 
-    public async Task<DevTunnelStatus> CreateTunnelAsync(string tunnelId, DevTunnelOptions options, ILogger? logger = default, CancellationToken cancellationToken = default)
+    public Task<DevTunnelStatus> CreateTunnelAsync(string tunnelId, DevTunnelOptions options, ILogger? logger = default, CancellationToken cancellationToken = default)
+        => RetryProvisioningAsync(() => CreateTunnelCoreAsync(tunnelId, options, logger, cancellationToken), logger, cancellationToken);
+
+    private async Task<DevTunnelStatus> CreateTunnelCoreAsync(string tunnelId, DevTunnelOptions options, ILogger? logger, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tunnelId);
         var resolvedId = options.Region is not null ? $"{tunnelId}.{options.RegionCode}" : tunnelId;
@@ -87,7 +90,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
                 var (updated, updateExitCode, updateError) = await CallCliAsJsonAsync<DevTunnelStatus>(
                     (stdout, stderr, log, ct) => _cli.UpdateTunnelAsync(existing.TunnelId, options, stdout, stderr, log, ct),
                     "tunnel", logger, cancellationToken).ConfigureAwait(false);
-                existing = updated ?? throw new DistributedApplicationException($"Failed to update dev tunnel '{existing.TunnelId}'. Exit code {updateExitCode}: {updateError}");
+                existing = updated ?? throw new RetryableProvisioningException($"Failed to update dev tunnel '{existing.TunnelId}'. Exit code {updateExitCode}: {updateError}");
             }
 
             await EnsureAccessAsync(existing.TunnelId, portNumber: null, options.AllowAnonymous ? true : null, access, logger, cancellationToken).ConfigureAwait(false);
@@ -190,6 +193,10 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
             (stdout, stderr, log, ct) => _cli.ShowTunnelAsync(tunnelId, stdout, stderr, log, ct),
             "tunnel",
             logger, cancellationToken).ConfigureAwait(false);
+        if (exitCode == DevTunnelCli.ResourceNotFoundExitCode)
+        {
+            throw new DevTunnelNotFoundException(tunnelId, error);
+        }
         return tunnel ?? throw new DistributedApplicationException($"Failed to get dev tunnel '{tunnelId}'. Exit code {exitCode}: {error}");
     }
 
@@ -202,7 +209,10 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         return ports ?? throw new DistributedApplicationException($"Failed to get port list for dev tunnel '{tunnelId}'. Exit code {exitCode}: {error}");
     }
 
-    public async Task<DevTunnelPortStatus> CreatePortAsync(string tunnelId, int portNumber, DevTunnelPortOptions portOptions, ILogger? logger = default, CancellationToken cancellationToken = default)
+    public Task<DevTunnelPortStatus> CreatePortAsync(string tunnelId, int portNumber, DevTunnelPortOptions portOptions, ILogger? logger = default, CancellationToken cancellationToken = default)
+        => RetryProvisioningAsync(() => CreatePortCoreAsync(tunnelId, portNumber, portOptions, logger, cancellationToken), logger, cancellationToken);
+
+    private async Task<DevTunnelPortStatus> CreatePortCoreAsync(string tunnelId, int portNumber, DevTunnelPortOptions portOptions, ILogger? logger, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tunnelId);
         var existing = await FindExistingAsync<DevTunnelPortStatus>(
@@ -296,6 +306,25 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         throw new DistributedApplicationException($"Failed to create port '{portNumber}' for tunnel '{tunnelId}' after {attempts} attempts. Exit code {exitCode}: {error}");
     }
 
+    private async Task<T> RetryProvisioningAsync<T>(Func<Task<T>> operation, ILogger? logger, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return await operation().ConfigureAwait(false);
+            }
+            catch (RetryableProvisioningException ex) when (attempt < _maxCliAttempts)
+            {
+                // A failed mutation may still have reached the service. Inspect again on retry
+                // instead of blindly repeating resets or adding duplicate access policies.
+                logger?.LogWarning(ex, "Dev tunnel provisioning failed (attempt {Attempt} of {MaxAttempts}); reconciling again.", attempt, _maxCliAttempts);
+                await Task.Delay(_cliRetryOnErrorDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
     private async Task<T?> FindExistingAsync<T>(
         Func<TextWriter, TextWriter, ILogger?, CancellationToken, Task<int>> query,
         string propertyName,
@@ -353,7 +382,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
                 logger, cancellationToken).ConfigureAwait(false);
             if (reset is null)
             {
-                throw new DistributedApplicationException($"Failed to reset access for dev tunnel '{tunnelId}', port '{portNumber}'. Exit code {exitCode}: {error}");
+                throw new RetryableProvisioningException($"Failed to reset access for dev tunnel '{tunnelId}', port '{portNumber}'. Exit code {exitCode}: {error}");
             }
         }
         if (allowAnonymous is { } allow)
@@ -363,7 +392,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
                 logger, cancellationToken).ConfigureAwait(false);
             if (created is null)
             {
-                throw new DistributedApplicationException($"Failed to set access for dev tunnel '{tunnelId}', port '{portNumber}'. Exit code {createExitCode}: {createError}");
+                throw new RetryableProvisioningException($"Failed to set access for dev tunnel '{tunnelId}', port '{portNumber}'. Exit code {createExitCode}: {createError}");
             }
         }
     }
@@ -410,7 +439,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         var (result, exitCode, error) = await CallCliAsJsonAsync<DevTunnelPortDeleteResult>(
             (stdout, stderr, log, ct) => _cli.DeletePortAsync(tunnelId, portNumber, stdout, stderr, log, ct),
             logger, cancellationToken).ConfigureAwait(false);
-        return result ?? throw new DistributedApplicationException($"Failed to delete port '{portNumber}' on dev tunnel '{tunnelId}'. Exit code {exitCode}: {error}");
+        return result ?? throw new RetryableProvisioningException($"Failed to delete port '{portNumber}' on dev tunnel '{tunnelId}'. Exit code {exitCode}: {error}");
     }
 
     public async Task<DevTunnelAccessStatus> GetAccessAsync(string tunnelId, int? portNumber = null, ILogger? logger = default, CancellationToken cancellationToken = default)
@@ -419,7 +448,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         var (access, exitCode, error) = await CallCliAsJsonAsync<DevTunnelAccessStatus>(
             (stdout, stderr, log, ct) => _cli.ListAccessAsync(tunnelId, portNumber, stdout, stderr, log, ct),
             logger, cancellationToken).ConfigureAwait(false);
-        return access ?? throw new DistributedApplicationException($"Failed to get access details for '{tunnelId}'{(portNumber.HasValue ? $" port {portNumber}" : "")}. Exit code {exitCode}: {error}");
+        return access ?? throw new RetryableProvisioningException($"Failed to get access details for '{tunnelId}'{(portNumber.HasValue ? $" port {portNumber}" : "")}. Exit code {exitCode}: {error}");
     }
 
     public async Task<UserLoginStatus> GetUserLoginStatusAsync(ILogger? logger = default, CancellationToken cancellationToken = default)
@@ -521,4 +550,6 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
     }
 
     private record DevTunnelDeleteResult(string DeletedTunnel);
+
+    private sealed class RetryableProvisioningException(string message) : DistributedApplicationException(message);
 }
