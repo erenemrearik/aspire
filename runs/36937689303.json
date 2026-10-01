@@ -1,0 +1,131 @@
+{
+  "run_id": 36937689303,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/36937689303",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-01T23:55:55Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 17079,
+    "title": "Simplify Aspire.Cli process code using .NET 11 Process APIs",
+    "author": "eerhardt",
+    "state": "closed",
+    "head_branch": "eerhardt/simplify-cli-process-apis",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/17079",
+    "merged_at": "2026-10-01T22:53:00Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "08295f701d428866a582af9c09bd2880ddc5e1f0",
+    "failed_sha": "9122c27432302b779bc4d001eab19cbe1c60c4cf",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "cb7844ea62cb7b85fde46d43bf7961384e7f2601",
+        "message": "Prevent recursive MTP test runner invocation (#20573) ## Description `DistributedApplicationTestingBuilder.CreateAsync` assumes the supplied type belongs to an AppHost executable and reflectively invokes that assembly's entry point. When a Microsoft.Testing.Platform test project is itself built with `Aspire.AppHost.Sdk`, the generated `Projects.*` type can instead belong to the test application. Invoking that assembly's entry point recursively starts the test runner, reruns the entire suite with",
+        "html_url": "https://github.com/microsoft/aspire/commit/cb7844ea62cb7b85fde46d43bf7961384e7f2601",
+        "pull_request": {
+          "number": 20573,
+          "title": "Prevent recursive MTP test runner invocation",
+          "url": "https://github.com/microsoft/aspire/pull/20573",
+          "merged_at": "2026-10-01T15:24:10Z"
+        }
+      },
+      {
+        "sha": "04d79e672a9466011cace1cc69fdd0335b5373eb",
+        "message": "fix(ci): prevent command injection in privileged workflows (#20627) ## Description **Several privileged workflows treated untrusted dispatch values as shell source, granted broader token permissions than their jobs needed, or loaded cleanup logic from a mutable branch.** ### Zizmor findings and fixes | Area | Issue | Zizmor complaint | Why it happens | Fix | | --- | --- | --- | --- | --- | | Release GitHub tasks | Dispatch strings could become executable shell syntax in parameter logging, valida",
+        "html_url": "https://github.com/microsoft/aspire/commit/04d79e672a9466011cace1cc69fdd0335b5373eb",
+        "pull_request": {
+          "number": 20627,
+          "title": "fix(ci): prevent command injection in privileged workflows",
+          "url": "https://github.com/microsoft/aspire/pull/20627",
+          "merged_at": "2026-10-01T17:14:35Z"
+        }
+      },
+      {
+        "sha": "b428b7493ea6d8177c22f7015a9590835901bfce",
+        "message": "Make ResourceUrlAnnotation.DisplayOrder a non-obsolete property (#20637) ## Description `ResourceUrlAnnotation.DisplayOrder` was exposed as an obsolete field with a promise to replace it with a property. This change makes it a nullable read/write property and removes the obsolete attribute, so consumers can configure URL ordering without obsolete warnings. Higher values still sort URLs higher in the dashboard. - Remove the obsolete remarks and warning suppressions from hosting, integration, and ",
+        "html_url": "https://github.com/microsoft/aspire/commit/b428b7493ea6d8177c22f7015a9590835901bfce",
+        "pull_request": {
+          "number": 20637,
+          "title": "Make ResourceUrlAnnotation.DisplayOrder a non-obsolete property",
+          "url": "https://github.com/microsoft/aspire/pull/20637",
+          "merged_at": "2026-10-01T18:28:04Z"
+        }
+      },
+      {
+        "sha": "961f0c25ae14749296dcb76df43f5d6e4253aa70",
+        "message": "Add CLI installation source to main telemetry (#20590) ## Description CLI usage telemetry currently identifies the effective release channel but cannot distinguish how the CLI was installed. Add `aspire.cli.install.source` to the `aspire/cli/main` event so usage can be broken down by installation mechanism, independently of `aspire.cli.identity.channel`. The property reports `script`, `winget`, `npm`, `dotnet-tool`, `brew`, `mise`, `nix`, `pr`, `localhive`, or `unknown`. Bash and PowerShell inst",
+        "html_url": "https://github.com/microsoft/aspire/commit/961f0c25ae14749296dcb76df43f5d6e4253aa70",
+        "pull_request": {
+          "number": 20590,
+          "title": "Add CLI installation source to main telemetry",
+          "url": "https://github.com/microsoft/aspire/pull/20590",
+          "merged_at": "2026-10-01T19:19:32Z"
+        }
+      },
+      {
+        "sha": "8eec461e839a1e04b7b790c12e01ead5e4f48cbf",
+        "message": "Add experimental native tray companion for macOS and Windows (#20096) ## Description Managing several AppHosts should not require repeatedly running `aspire ps`. This PR adds a native **macOS menu-bar and Windows notification-area companion**, backed by the invoking Aspire CLI rather than a separate/private CLI installation. The companion is C# NativeAOT using AppKit and Win32 directly. There is no Swift build, WebView, macOS .NET workload, Windows Forms, or third-party UI framework. The CLI sup",
+        "html_url": "https://github.com/microsoft/aspire/commit/8eec461e839a1e04b7b790c12e01ead5e4f48cbf",
+        "pull_request": {
+          "number": 20096,
+          "title": "Add experimental native tray companion for macOS and Windows",
+          "url": "https://github.com/microsoft/aspire/pull/20096",
+          "merged_at": "2026-10-01T21:21:14Z"
+        }
+      },
+      {
+        "sha": "4ede1f3bdb8ea7c75b9782e55dc76c2860c73016",
+        "message": "Move source indexing to a daily internal pipeline (#20638) ## Description Source indexing currently runs alongside official package publishing, so indexing or upload failures affect the package pipeline’s result. Move indexing to a separate pipeline scheduled daily on `main`, with manual runs available. - **Dedicated pipeline:** Retains the full repository build, index generation, and source.dot.net upload. - **Official pipeline:** Removes the source-index stage so package build and publishing h",
+        "html_url": "https://github.com/microsoft/aspire/commit/4ede1f3bdb8ea7c75b9782e55dc76c2860c73016",
+        "pull_request": {
+          "number": 20638,
+          "title": "Move source indexing to a daily internal pipeline",
+          "url": "https://github.com/microsoft/aspire/pull/20638",
+          "merged_at": "2026-10-01T22:02:02Z"
+        }
+      },
+      {
+        "sha": "9122c27432302b779bc4d001eab19cbe1c60c4cf",
+        "message": "Simplify Aspire.Cli process code using .NET 11 Process APIs (#17079) ## Description .NET 11 adds `System.Diagnostics.Process` APIs that cover most of the process plumbing Aspire.Cli used to write by hand (see https://devblogs.microsoft.com/dotnet/process-api-improvements-in-dotnet-11/). This PR moves the CLI onto those APIs and deletes the custom code they replace. Net change vs `main`: 48 files, +803 / -3,924 lines. ### `ProcessExecution` uses `Process.Start` directly; `IsolatedProcess` is gone",
+        "html_url": "https://github.com/microsoft/aspire/commit/9122c27432302b779bc4d001eab19cbe1c60c4cf",
+        "pull_request": {
+          "number": 17079,
+          "title": "Simplify Aspire.Cli process code using .NET 11 Process APIs",
+          "url": "https://github.com/microsoft/aspire/pull/17079",
+          "merged_at": "2026-10-01T22:53:00Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "id": 110622794158,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/36937689303/job/110622794158",
+      "classification": "flaky-test",
+      "reason": "Single test failure (RpcCancellationReachesServer) timed out after 30s during 'Run tests (Linux/macOS)' step; all other 6622 tests passed. Matches a prior recurring flaky-test cause with identical error and stack trace.",
+      "failed_steps": [
+        "Run tests (Linux/macOS)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Cli.Tests.Backchannel.BackchannelJsonSerializerContextTests.RpcCancellationReachesServer",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "error": "System.TimeoutException : The operation at /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Backchannel/BackchannelJsonSerializerContextTests.cs:115 timed out after reaching the limit of 30000ms.",
+      "stack_trace": "at Microsoft.AspNetCore.InternalTesting.AsyncTestHelpers.TimeoutAfter(Task task, TimeSpan timeout, String filePath, Int32 lineNumber) in /home/runner/work/aspire/aspire/tests/Shared/AsyncTestHelpers.cs:line 194\n   at Aspire.Cli.Tests.Backchannel.BackchannelJsonSerializerContextTests.RpcCancellationReachesServer() in /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Backchannel/BackchannelJsonSerializerContextTests.cs:line 115\n--- End of stack trace from previous location ---",
+      "standard_output": "",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Timing-sensitive RPC cancellation test exceeded 30s limit while all other 6622 tests in the run passed; matches a previously tracked recurring flaky-test cause (occurred twice before) with an identical error message and stack trace."
+    }
+  ],
+  "causes": [
+    "aspire-cli-tests-backchannel-rpccancellationreachesserver-timeout"
+  ]
+}
