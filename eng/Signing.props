@@ -83,9 +83,6 @@
     <FileSignInfo Condition="$([System.OperatingSystem]::IsLinux())" Include="Aspire.Dashboard" CertificateName="Microsoft400" />
     <FileSignInfo Condition="$([System.OperatingSystem]::IsMacOS())" Include="aspire" CertificateName="MacDeveloperHardenWithNotarization" />
     <FileSignInfo Condition="$([System.OperatingSystem]::IsMacOS())" Include="aspire-managed" CertificateName="MacDeveloperHardenWithNotarization" />
-    <!-- Sign the sealed app, not just its executable: Info.plist and resources
-         must remain covered by the signature after the CLI extracts the bundle. -->
-    <FileSignInfo Condition="$([System.OperatingSystem]::IsMacOS())" Include="AspireTray.app" CertificateName="MacDeveloperHardenWithNotarization" />
     <FileSignInfo Condition="$([System.OperatingSystem]::IsMacOS())" Include="Aspire.Dashboard" CertificateName="MacDeveloperHardenWithNotarization" />
     <FileSignInfo Condition="$([System.OperatingSystem]::IsWindows())" Include="get-aspire-cli.ps1" CertificateName="Microsoft400" />
 
@@ -123,8 +120,8 @@
     <ItemsToSign Condition="$([System.OperatingSystem]::IsWindows())" Include="$(ArtifactsBinDir)Aspire.Tray.Windows\**\publish\aspire-tray.exe" />
     <ItemsToSign Condition="$([System.OperatingSystem]::IsLinux())" Include="$(ArtifactsBinDir)Aspire.Managed/**/publish/aspire-managed" />
     <ItemsToSign Condition="$([System.OperatingSystem]::IsMacOS())" Include="$(ArtifactsBinDir)Aspire.Managed/**/publish/aspire-managed" />
-    <!-- .app signing inputs are ZIP files in Arcade/MicroBuild's app transport format. -->
-    <ItemsToSign Condition="$([System.OperatingSystem]::IsMacOS())" Include="$(ArtifactsBinDir)Aspire.Tray.Mac/**/signing/AspireTray.app" />
+    <!-- The whole macOS tray app is signed/notarized separately by
+         eng/pipelines/SignTray.proj, without Arcade's extra ZIP wrapping. -->
     <!-- Select only Hex1b's unsigned helper, preserving the upstream signatures on ConPTY and OpenConsole. -->
     <ItemsToSign Condition="$([System.OperatingSystem]::IsWindows())" Include="$(ArtifactsBinDir)Aspire.Managed\**\publish\hex1bpty.exe" />
     <ItemsToSign Condition="$([System.OperatingSystem]::IsWindows())" Include="$(ArtifactsBinDir)Aspire.Dashboard\**\publish\Aspire.Dashboard.exe" />

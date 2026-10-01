@@ -214,8 +214,11 @@ enforced even when the directory already exists.
 
 The publish target creates an accessory `.app` with `LSUIElement`, so it has no
 Dock icon. Local and GitHub builds use an ad-hoc hardened-runtime signature.
-The official pipeline signs/notarizes the whole app before copying it into the
-payload and embeds it without republishing. That official signing path still
+The official pipeline submits a ZIP containing the complete `.app` directory
+directly to MicroBuild for hardened Developer ID signing and Apple notarization,
+then restores the app and staples its notarization ticket. This avoids Arcade's
+extra wrapping of macOS signing inputs. The signed app is copied into the
+payload and embedded without republishing. That official signing path still
 requires release-pipeline validation; this remains a draft feedback POC.
 
 ## Recent history configuration

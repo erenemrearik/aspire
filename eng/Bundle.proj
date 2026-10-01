@@ -51,6 +51,7 @@
     <WindowsTrayProjectPath>$(RepoRoot)src\Aspire.Tray\Windows\Aspire.Tray.Windows.csproj</WindowsTrayProjectPath>
     <WindowsTrayPath Condition="'$(WindowsTrayPath)' == ''">$(ArtifactsDir)bin\Aspire.Tray.Windows\$(Configuration)\net10.0\$(TargetRid)\publish</WindowsTrayPath>
     <RequireWindowsTraySignature Condition="'$(RequireWindowsTraySignature)' == ''">false</RequireWindowsTraySignature>
+    <RequireMacTraySignature Condition="'$(RequireMacTraySignature)' == ''">false</RequireMacTraySignature>
 
     <!-- Bundle version: use VersionSuffix from CI if provided, else dev version for local builds -->
     <!-- In GitHub Actions CI: VersionSuffix is set via /p:VersionSuffix=pr.XXXX.gSHA -->
@@ -179,7 +180,7 @@
   <!-- Verify the actual tar payload, not the source app. This also runs in the
        official layout-only path, after signing and before native CLI embedding. -->
   <Target Name="_VerifyNativeTrayArchive" AfterTargets="_RunCreateLayout" Condition="$(TargetRid.StartsWith('osx-'))">
-    <Exec Command="bash &quot;$(RepoRoot)tools/CreateLayout/verify-tray-payload.sh&quot; &quot;$(ArtifactsDir)bundle/aspire-$(BundleVersion)-$(TargetRid).tar.gz&quot; &quot;$(TargetRid)&quot;" />
+    <Exec Command="bash &quot;$(RepoRoot)tools/CreateLayout/verify-tray-payload.sh&quot; &quot;$(ArtifactsDir)bundle/aspire-$(BundleVersion)-$(TargetRid).tar.gz&quot; &quot;$(TargetRid)&quot; &quot;$(RequireMacTraySignature)&quot;" />
   </Target>
 
   <Target Name="_VerifyWindowsTrayArchive" AfterTargets="_RunCreateLayout" Condition="$(TargetRid.StartsWith('win-'))">

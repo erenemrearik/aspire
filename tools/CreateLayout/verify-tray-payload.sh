@@ -5,13 +5,18 @@ if [[ "$(uname -s)" != Darwin ]]; then
     echo "macOS tray payload verification requires macOS codesign." >&2
     exit 1
 fi
-if [[ $# -ne 2 ]]; then
-    echo "Usage: bash tools/CreateLayout/verify-tray-payload.sh <payload.tar.gz> <osx-arm64|osx-x64>" >&2
+if [[ $# -ne 3 ]]; then
+    echo "Usage: bash tools/CreateLayout/verify-tray-payload.sh <payload.tar.gz> <osx-arm64|osx-x64> <require-official-signature:true|false>" >&2
     exit 1
 fi
 
 archive="$1"
 rid="$2"
+case "$3" in
+    true|True) require_signature=true ;;
+    false|False) require_signature=false ;;
+    *) echo "Invalid official signature requirement: $3" >&2; exit 1 ;;
+esac
 case "$rid" in
     osx-arm64) expected_arch=arm64 ;;
     osx-x64) expected_arch=x86_64 ;;
@@ -56,5 +61,13 @@ if [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/I
     exit 1
 fi
 plutil -lint "$app/Contents/Info.plist"
-codesign --verify --strict "$app"
+if [[ "$require_signature" == true ]]; then
+    # Verify trust and the stapled ticket after copy/archive extraction, not
+    # just on the signing input. Local and GitHub builds remain ad-hoc signed.
+    codesign --verify --strict -R="anchor apple generic" "$app"
+    xcrun stapler validate "$app"
+    spctl --assess --type execute --verbose "$app"
+else
+    codesign --verify --strict "$app"
+fi
 echo "Verified tray payload: $archive ($app_entry, executable mode $mode)"

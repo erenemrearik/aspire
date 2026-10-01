@@ -276,12 +276,25 @@ jobs:
                 ${{ parameters.extraBuildArgs }}
                 -projects "$(Build.SourcesDirectory)/src/Aspire.Managed/Aspire.Managed.csproj"
                 /bl:$(Build.Arcade.LogsPath)SignManaged.binlog
-              # eng/Signing.props includes the macOS .app transport and Windows tray publish output.
+              # eng/Signing.props includes the Windows tray publish output.
               displayName: 🟣Sign bundle components
               env:
                 SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
           - ${{ if and(eq(parameters.codeSign, true), eq(parameters.agentOs, 'macos')) }}:
+            - script: >-
+                $(Build.SourcesDirectory)/$(dotnetScript)
+                msbuild
+                $(Build.SourcesDirectory)/eng/pipelines/SignTray.proj
+                -restore
+                /t:SignTray
+                /p:Configuration=$(_BuildConfig)
+                /p:RuntimeIdentifier=${{ targetRid }}
+                /p:SignType=real
+                /bl:$(Build.Arcade.LogsPath)SignTray.binlog
+              displayName: 🟣Sign and notarize whole tray app
+              env:
+                SYSTEM_ACCESSTOKEN: $(System.AccessToken)
             - script: >-
                 $(Build.SourcesDirectory)/$(dotnetScript)
                 msbuild
@@ -366,6 +379,7 @@ jobs:
               /p:BundleVersion=ci-bundlepayload
               /p:SkipTrayBuild=true
               /p:RequireWindowsTraySignature=${{ parameters.codeSign }}
+              /p:RequireMacTraySignature=${{ parameters.codeSign }}
               /p:ContinuousIntegrationBuild=true
               /bl:$(Build.Arcade.LogsPath)BundleLayout.binlog
             displayName: 🟣Create bundle layout

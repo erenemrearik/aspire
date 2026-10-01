@@ -137,7 +137,7 @@ public sealed class TrayBundleTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void SigningUsesWholeAppAndRestoresItWithoutPublishing()
+    public void WholeAppSigningBypassesArcadeAndRestoresWithoutPublishing()
     {
         var project = LoadProject("src/Aspire.Tray/Mac/Aspire.Tray.Mac.csproj");
         Assert.Equal("Publish", Target(project, "PackageTray").Attribute("AfterTargets")!.Value);
@@ -147,17 +147,74 @@ public sealed class TrayBundleTests(ITestOutputHelper output)
         Assert.Contains(restore.Elements("Exec"), exec => exec.Attribute("Command")!.Value.Contains("anchor apple generic", StringComparison.Ordinal));
 
         var signing = LoadProject("eng/Signing.props");
-        var rule = Assert.Single(signing.Descendants("FileSignInfo"), element => element.Attribute("Include")?.Value == "AspireTray.app");
-        Assert.Equal("MacDeveloperHardenWithNotarization", rule.Attribute("CertificateName")!.Value);
-        Assert.Contains(signing.Descendants("ItemsToSign"), element => element.Attribute("Include")?.Value == "$(ArtifactsBinDir)Aspire.Tray.Mac/**/signing/AspireTray.app");
+        Assert.Equal([@"$(ArtifactsBinDir)Aspire.Tray.Windows\**\publish\aspire-tray.exe"],
+            signing.Descendants("ItemsToSign")
+                .Select(element => element.Attribute("Include")!.Value)
+                .Where(include => include.Contains("Aspire.Tray.", StringComparison.Ordinal)));
+        var traySigning = LoadProject("eng/pipelines/SignTray.proj");
+        var input = Assert.Single(traySigning.Descendants("_TrayToSign"));
+        Assert.Equal("$(TraySigningArchive)", input.Attribute("Include")!.Value);
+        Assert.Equal("MacDeveloperHarden", input.Element("Authenticode")!.Value);
+        var notarization = Assert.Single(traySigning.Descendants("_TrayToNotarize"));
+        Assert.Equal(input.Attribute("Include")!.Value, notarization.Attribute("Include")!.Value);
+        Assert.Equal("8020", notarization.Element("Authenticode")!.Value);
+        Assert.Equal("dotnet", notarization.Element("MacAppName")!.Value);
+        var signTray = Target(traySigning, "SignTray");
+        Assert.Equal("ValidateTraySigning", signTray.Attribute("DependsOnTargets")!.Value);
+        Assert.Equal(["@(_TrayToSign)", "@(_TrayToNotarize)"],
+            signTray.Elements("SignFiles").Select(task => task.Attribute("Files")!.Value));
 
         var pipeline = File.ReadAllText(Path.Combine(RepoRoot.Path, "eng/pipelines/templates/build_sign_native.yml"));
         var prepare = pipeline.IndexOf("/t:PrepareTraySigning", StringComparison.Ordinal);
         var sign = pipeline.IndexOf("SignManaged.binlog", StringComparison.Ordinal);
+        var signApp = pipeline.IndexOf("/t:SignTray", StringComparison.Ordinal);
         var restoreApp = pipeline.IndexOf("/t:RestoreSignedTray", StringComparison.Ordinal);
         var layout = pipeline.IndexOf("/t:_RestoreDcpPackage;_RunCreateLayout", StringComparison.Ordinal);
-        Assert.True(prepare >= 0 && prepare < sign && sign < restoreApp && restoreApp < layout);
+        Assert.True(prepare >= 0 && prepare < sign && sign < signApp && signApp < restoreApp && restoreApp < layout);
         Assert.Contains("/p:SkipTrayBuild=true", pipeline);
+    }
+
+    [Fact]
+    [RequiresTools(["pwsh", "ditto"])]
+    [SupportedOSPlatform("macos")]
+    public async Task MacSigningTransportContainsAppDirectoryAndPreservesExecutableModes()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "macOS signing transport uses ditto.");
+        using var workspace = TemporaryWorkspace.Create(output);
+        var source = MacTrayTestPayload.Create(workspace.Path);
+        var archivePath = Path.Combine(workspace.Path, "signing", "AspireTray.zip");
+        var scriptPath = Path.Combine(workspace.Path, "prepare-signing.ps1");
+        File.WriteAllText(scriptPath, """
+            param([string]$RepositoryRoot, [string]$AppPath, [string]$ArchivePath)
+            & "$RepositoryRoot/dotnet.sh" msbuild "$RepositoryRoot/src/Aspire.Tray/Mac/Aspire.Tray.Mac.csproj" `
+                /t:PrepareTraySigning /p:RuntimeIdentifier=osx-arm64 `
+                "/p:TrayAppPath=$AppPath" "/p:TraySigningArchive=$ArchivePath" /nologo
+            exit $LASTEXITCODE
+            """);
+        using var command = new PowerShellCommand(scriptPath, output)
+            .WithWorkingDirectory(RepoRoot.Path)
+            .WithTimeout(TimeSpan.FromMinutes(2));
+
+        var result = await command.ExecuteAsync(
+            "-RepositoryRoot", $"\"{RepoRoot.Path}\"",
+            "-AppPath", $"\"{source}\"",
+            "-ArchivePath", $"\"{archivePath}\"");
+
+        result.EnsureSuccessful();
+        using var archive = ZipFile.OpenRead(archivePath);
+        var files = archive.Entries.Where(entry => entry.Name.Length > 0 && !entry.FullName.StartsWith("__MACOSX/", StringComparison.Ordinal)).ToArray();
+        var expectedFiles = Directory.GetFiles(source, "*", SearchOption.AllDirectories)
+            .Select(file => $"{Path.GetFileName(source)}/{Path.GetRelativePath(source, file)}").Order().ToArray();
+        Assert.Equal(expectedFiles, files.Select(entry => entry.FullName).Order());
+        foreach (var entry in files)
+        {
+            var file = Path.Combine(Path.GetDirectoryName(source)!, entry.FullName);
+            using var content = new MemoryStream();
+            using var entryStream = entry.Open();
+            await entryStream.CopyToAsync(content);
+            Assert.Equal(File.ReadAllBytes(file), content.ToArray());
+            Assert.Equal(File.GetUnixFileMode(file), (UnixFileMode)((entry.ExternalAttributes >> 16) & 0x1FF));
+        }
     }
 
     [Fact]
@@ -170,6 +227,7 @@ public sealed class TrayBundleTests(ITestOutputHelper output)
         var command = Assert.Single(verification.Elements("Exec")).Attribute("Command")!.Value;
         Assert.Contains("verify-tray-payload.sh", command);
         Assert.Contains("aspire-$(BundleVersion)-$(TargetRid).tar.gz", command);
+        Assert.Contains("\"$(RequireMacTraySignature)\"", command);
 
         const string testProjectPath = "tests/Aspire.Tray.Tests/Aspire.Tray.Tests.csproj";
         var solution = LoadProject("Aspire.slnx");

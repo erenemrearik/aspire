@@ -5,7 +5,7 @@
     <OptimizationPreference>Size</OptimizationPreference>
     <AssemblyName>aspire-tray</AssemblyName>
     <TrayAppPath Condition="'$(TrayAppPath)' == ''">$(BaseOutputPath)$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/app/Aspire Tray.app</TrayAppPath>
-    <TraySigningArchive>$(BaseOutputPath)$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/signing/AspireTray.app</TraySigningArchive>
+    <TraySigningArchive Condition="'$(TraySigningArchive)' == ''">$(BaseOutputPath)$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/signing/AspireTray.zip</TraySigningArchive>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="$(SharedDir)Aspire_icon_256.png" LogicalName="aspire.png" />
@@ -52,22 +52,28 @@
     <Message Importance="high" Text="Tray app: $(TrayAppPath)" />
   </Target>
 
-  <!-- Arcade/MicroBuild's .app input is a ZIP containing Contents/, not a directory.
-       Match Microsoft.DotNet.MacOsPkg.Core.AppBundle.Pack's ditto contract:
-       https://github.com/dotnet/arcade/blob/main/src/Microsoft.DotNet.MacOsPkg/Core/AppBundle.cs -->
+  <!-- Submit a ZIP containing the actual .app directory to MicroBuild. Arcade's
+       ZipMacFiles would wrap a ZIP named .app again, hiding its executable from
+       the signing service. Preserve the bundle directory in the ZIP.
+       https://github.com/dotnet/arcade/blob/main/src/Microsoft.DotNet.SignTool/src/SignTool.cs -->
   <Target Name="PrepareTraySigning">
     <Error Condition="!Exists('$(TrayAppPath)/Contents/MacOS/aspire-tray')" Text="Publish the tray app before preparing signing input." />
     <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(TraySigningArchive)'))" />
     <Delete Files="$(TraySigningArchive)" />
-    <Exec Command="ditto -c -k --sequesterRsrc &quot;$(TrayAppPath)&quot; &quot;$(TraySigningArchive)&quot;" />
+    <Exec Command="ditto -c -k --sequesterRsrc --keepParent &quot;$(TrayAppPath)&quot; &quot;$(TraySigningArchive)&quot;" />
   </Target>
 
   <Target Name="RestoreSignedTray">
     <Error Condition="!Exists('$(TraySigningArchive)')" Text="Signed tray app archive is missing: $(TraySigningArchive)" />
     <RemoveDir Directories="$(TrayAppPath)" />
-    <MakeDir Directories="$(TrayAppPath)" />
-    <Exec Command="ditto -xk &quot;$(TraySigningArchive)&quot; &quot;$(TrayAppPath)&quot;" />
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(TrayAppPath)'))" />
+    <Exec Command="ditto -xk &quot;$(TraySigningArchive)&quot; &quot;$([System.IO.Path]::GetDirectoryName('$(TrayAppPath)'))&quot;" />
     <Exec Command="chmod +x &quot;$(TrayAppPath)/Contents/MacOS/aspire-tray&quot;" />
+    <!-- Stapling attaches Apple's notarization ticket without invalidating the
+         bundle signature, allowing offline Gatekeeper verification.
+         https://developer.apple.com/documentation/security/customizing-the-notarization-workflow -->
+    <Exec Command="xcrun stapler staple &quot;$(TrayAppPath)&quot;" />
+    <Exec Command="xcrun stapler validate &quot;$(TrayAppPath)&quot;" />
     <!-- Reject ad-hoc input as well as broken resource seals. Never publish again
          between restoring this signed app and embedding its payload in the CLI. -->
     <Exec Command="codesign --verify --strict -R=&quot;anchor apple generic&quot; &quot;$(TrayAppPath)&quot;" />
