@@ -1045,7 +1045,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             $"globalPackagesFolder must not be under the policy overlay directory '{overlayDirectory}'. Got: {gpfValue}");
         // The cache subdirectory must be keyed by the resolved feed URL so two different staging
         // feeds (e.g. two darc builds or an overrideStagingFeed setting) get distinct caches.
-        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(result.OverlayCacheIdentity);
+        var sourcePolicyIdentity = IntegrationRestorePlanResolver.CreateGlobalPackagesFolderIdentity(
+            [channelSource],
+            mappings);
+        var expectedIdentity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+            sourcePolicyIdentity,
+            result.OverlayCacheIdentity!);
+        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(expectedIdentity);
         Assert.NotNull(expectedCacheKey);
         var expectedCachePath = Path.Combine(
             CliPathHelper.GetStagingNuGetPackagesDirectory(executionContext.AspireHomeDirectory),
@@ -1097,12 +1103,73 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             $"globalPackagesFolder must not be under the policy overlay directory '{overlayDirectory}'. Got: {gpfValue}");
         // The cache key is derived from the resolved staging feed URL so the same CLI talking to
         // a different overrideStagingFeed gets a different cache bucket.
-        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(result.OverlayCacheIdentity);
+        var sourcePolicyIdentity = IntegrationRestorePlanResolver.CreateGlobalPackagesFolderIdentity(
+            [overrideStagingFeed],
+            [new PackageMapping("Aspire*", overrideStagingFeed)]);
+        var expectedIdentity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+            sourcePolicyIdentity,
+            result.OverlayCacheIdentity!);
+        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(expectedIdentity);
         Assert.NotNull(expectedCacheKey);
         var expectedCachePath = Path.Combine(
             CliPathHelper.GetStagingNuGetPackagesDirectory(executionContext.AspireHomeDirectory),
             expectedCacheKey);
         Assert.Equal(expectedCachePath, gpfValue);
+    }
+
+    [Fact]
+    public async Task CreateRestoreOverlay_ReusedAmbientAliasWithDifferentSourceUrls_UsesDifferentGlobalPackagesFolders()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+
+        const string sourceAlias = "staging";
+        const string firstSource = "https://packages.example.com/first/v3/index.json";
+        const string secondSource = "https://packages.example.com/second/v3/index.json";
+        var executionContext = CreateContextWithIdentityChannel(PackageChannelNames.Local);
+        var settingsClient = new NuGetClient(
+            new TestFeatures(),
+            new TestEnvironment(),
+            NullLogger<NuGetClient>.Instance);
+
+        PrebuiltAppHostServer CreateServer(string source)
+        {
+            var channel = PackageChannel.CreateExplicitChannel(
+                name: PackageChannelNames.Staging,
+                quality: PackageChannelQuality.Both,
+                mappings: [new PackageMapping("Aspire*", source)],
+                nuGetPackageCache: new FakeNuGetPackageCache(),
+                features: new TestFeatures(),
+                NullLogger.Instance,
+                configureGlobalPackagesFolder: true);
+            var packagingService = new TestPackagingService
+            {
+                GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
+            };
+            var nuGetClient = new FakeNuGetClient
+            {
+                GetSettingsCallback = (_, sourceIdentityKey) => CreateNuGetSettingsInfo(
+                    sources: [(sourceAlias, source, true)],
+                    packageSourceMappings: [(sourceAlias, ["Aspire*"])],
+                    sourceIdentityKey: sourceIdentityKey),
+                WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
+            };
+
+            return CreatePrebuiltAppHostServer(
+                workspace,
+                packagingService: packagingService,
+                executionContext: executionContext,
+                nuGetClient: nuGetClient);
+        }
+
+        using var firstResult = await CreateRestoreOverlayAsync(
+            CreateServer(firstSource),
+            PackageChannelNames.Staging);
+        using var secondResult = await CreateRestoreOverlayAsync(
+            CreateServer(secondSource),
+            PackageChannelNames.Staging);
+
+        Assert.Equal(firstResult.OverlayCacheIdentity, secondResult.OverlayCacheIdentity);
+        Assert.NotEqual(firstResult.GlobalPackagesFolder, secondResult.GlobalPackagesFolder);
     }
 
     [Theory]
@@ -1456,9 +1523,18 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         Assert.False(
             gpfValue!.StartsWith(overlayDirectory, StringComparison.Ordinal),
             $"globalPackagesFolder must not be under the policy overlay directory '{overlayDirectory}'. Got: {gpfValue}");
-        // The cache key is derived from the --source override, not the channel's own mappings,
-        // so users running multiple overrides against the same CLI get distinct cache buckets.
-        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(result.OverlayCacheIdentity);
+        // The cache key includes both the --source override and the retained channel mappings,
+        // so any selected source-policy change gets a distinct cache bucket.
+        var sourcePolicyIdentity = IntegrationRestorePlanResolver.CreateGlobalPackagesFolderIdentity(
+            [packageSourceOverride, channelSource],
+            [
+                new PackageMapping("Aspire*", packageSourceOverride),
+                new PackageMapping("CommunityToolkit*", channelSource)
+            ]);
+        var expectedIdentity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+            sourcePolicyIdentity,
+            result.OverlayCacheIdentity!);
+        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(expectedIdentity);
         Assert.NotNull(expectedCacheKey);
         var expectedCachePath = Path.Combine(
             CliPathHelper.GetStagingNuGetPackagesDirectory(executionContext.AspireHomeDirectory),

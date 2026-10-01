@@ -284,6 +284,18 @@ internal sealed class IntegrationRestorePlanResolver(
         return builder.ToString();
     }
 
+    internal static string CombineGlobalPackagesFolderIdentity(
+        string sourcePolicyIdentity,
+        string overlayIdentity)
+    {
+        var builder = new StringBuilder();
+        AppendIdentityPart(builder, "SOURCE_POLICY");
+        AppendIdentityPart(builder, sourcePolicyIdentity);
+        AppendIdentityPart(builder, "OVERLAY");
+        AppendIdentityPart(builder, overlayIdentity);
+        return builder.ToString();
+    }
+
     private static void AppendIdentityPart(StringBuilder builder, string value)
     {
         builder.Append(value.Length);
@@ -686,11 +698,27 @@ internal sealed class IntegrationRestorePlan
     }
 
     private string? GetGlobalPackagesFolder(TemporaryNuGetConfig? restoreOverlay)
-        => _restoreSources.ConfigureGlobalPackagesFolder
-            ? CliPathHelper.GetStagingNuGetPackagesIdentityDirectory(
-                _aspireHomeDirectory,
-                restoreOverlay?.CacheIdentity ?? _restoreSources.GlobalPackagesFolderIdentity)
-            : null;
+    {
+        if (!_restoreSources.ConfigureGlobalPackagesFolder)
+        {
+            return null;
+        }
+
+        var identity = _restoreSources.GlobalPackagesFolderIdentity
+            ?? throw new InvalidOperationException("A global packages folder identity is required for an isolated restore cache.");
+        if (restoreOverlay is not null)
+        {
+            // Reused ambient aliases are not re-emitted with their source URLs, so the overlay
+            // identity must be paired with the selected source policy to distinguish those feeds.
+            identity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+                identity,
+                restoreOverlay.CacheIdentity);
+        }
+
+        return CliPathHelper.GetStagingNuGetPackagesIdentityDirectory(
+            _aspireHomeDirectory,
+            identity);
+    }
 
     private async Task<TemporaryNuGetConfig?> CreateRestoreOverlayAsync(
         CancellationToken cancellationToken)
