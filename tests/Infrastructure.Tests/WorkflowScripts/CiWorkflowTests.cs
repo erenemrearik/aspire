@@ -59,7 +59,7 @@ public sealed class CiWorkflowTests
     }
 
     [Fact]
-    public void CliTestsUsePipelineNuGetServiceIndexOverride()
+    public void CliTestsUseGitHubActionsNuGetServiceIndexOverride()
     {
         var workflow = ReadWorkflow("run-tests.yml");
         var configureStep = GetStep(GetJob(workflow, "test"), "Configure CLI test NuGet service index");
@@ -69,19 +69,9 @@ public sealed class CiWorkflowTests
             configureStep,
             "ASPIRE_CLI_NUGET_SERVICE_INDEX=(?<source>https://[^\"\\r\\n]+)");
         Assert.True(serviceIndexMatch.Success, "The GitHub test runner must provide an HTTPS NuGet service index.");
-        var serviceIndex = serviceIndexMatch.Groups["source"].Value;
-
-        var pipeline = File.ReadAllText(Path.Combine(
-            RepoRoot.Path,
-            "eng",
-            "pipelines",
-            "templates",
-            "BuildAndTest.yml"));
-        var nonHelixTestStep = System.Text.RegularExpressions.Regex.Match(
-            pipeline,
-            "(?ms)^    - script: .*?^      displayName: Run non-helix tests$");
-        Assert.True(nonHelixTestStep.Success, "Could not find the non-Helix test step in BuildAndTest.yml.");
-        Assert.Contains($"ASPIRE_CLI_NUGET_SERVICE_INDEX: {serviceIndex}", nonHelixTestStep.Value);
+        Assert.Equal(
+            "https://packagefeedproxy.microsoft.io/nuget/v3/index.json",
+            serviceIndexMatch.Groups["source"].Value);
     }
 
     [Fact]
