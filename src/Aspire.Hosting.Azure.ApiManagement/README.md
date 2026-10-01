@@ -47,7 +47,9 @@ const apim = await builder.addAzureApiManagement("apim", {
 await apim.addApi("catalog-api", catalog, "catalog");
 ```
 
-The compute-targeted `AddApi` overload creates an API, an APIM backend, and catch-all operations for supported HTTP methods that forward requests to the deployed endpoint of the target resource. APIs require an APIM subscription key by default. Set `subscriptionRequired: false` only when the API should be callable without one.
+The compute-targeted `AddApi` overload creates an API, an APIM backend, and root and catch-all operations for supported HTTP methods that forward requests to the deployed endpoint of the target resource. Both the API suffix itself (for example, `/catalog`) and its descendants are forwarded. APIs require an APIM subscription key by default. Set `subscriptionRequired: false` only when the API should be callable without one.
+
+Explicit operations must have unique HTTP method and URL-template combinations, including templates that differ only in parameter names. Routes reserved for generated root and catch-all operations are rejected. Configure an OpenAPI import before adding explicit operations if you do not want the generated proxy routes.
 
 API Management resources are automatically omitted during `aspire run`. Azure compute environments do not materialize their public endpoints in run mode, and a cloud-hosted APIM instance cannot reach a backend running on localhost. Use `aspire deploy` to provision APIM and exercise its routing; no execution-mode guard is required around the APIM resources.
 
@@ -79,12 +81,15 @@ Adopt an existing service while letting Aspire manage the APIs and other child r
 var apim = builder.AddAzureApiManagement("apim", new()
 {
     PublisherEmail = "api-owners@example.com",
+    Sku = AzureApiManagementSku.Premium,
 }).PublishAsExisting("shared-apim", resourceGroup: "shared-infrastructure");
 
 apim.AddApi("catalog-api", catalog, "catalog");
 ```
 
 Aspire treats the existing service itself as read-only. It can manage declared APIs, operations, backends, pools, policies, fragments, products, subscriptions, named values, and diagnostics, but it rejects service-level virtual-network, private-endpoint, custom-domain, and managed-identity mutations.
+
+Set `Sku` explicitly to the adopted service's actual pricing tier, even for Developer. Aspire requires this metadata to validate SKU-dependent children such as circuit breakers and OpenAI backends; it does not query or change the existing service's SKU. The Developer default applies only to new services.
 
 When managed backends authenticate with the existing service's system identity, confirm that the identity is already enabled:
 
@@ -362,6 +367,8 @@ apim.WithClassicVirtualNetwork(
     AzureApiManagementVirtualNetworkMode.Internal);
 ```
 
+Both v2 networking helpers add a TCP/443 allow rule for Azure Key Vault. On an existing NSG, the helper reserves a free priority ahead of outbound TCP/443 deny rules, conservatively treating service tags and address expressions as potentially overlapping. If no earlier priority is available, configuration fails rather than adding a shadowed rule. Later modeled NSG changes must preserve that allow rule and its ordering.
+
 Standard v2 and Premium v2 outbound integration automatically delegates a dedicated subnet to `Microsoft.Web/serverFarms`:
 
 ```csharp
@@ -412,7 +419,7 @@ apim.WithClassicVirtualNetwork(
 apim.AddApi("catalog-api", catalog, "catalog");
 ```
 
-`WithInternalLoadBalancer` gives the Container Apps environment a private VIP and creates a private DNS zone, wildcard A record, and virtual-network link for its generated default domain. Although `WithExternalHttpEndpoints` enables ingress outside the Container Apps environment, the environment itself has no public endpoint; APIM reaches the app over the virtual network and is the public gateway.
+The Network integration's `WithInternalLoadBalancer` gives the Container Apps environment a private VIP and creates a private DNS zone, wildcard A record, and virtual-network link for its generated default domain. Although `WithExternalHttpEndpoints` enables ingress outside the Container Apps environment, the environment itself has no public endpoint; APIM reaches the app over the virtual network and is the public gateway.
 
 Classic APIM VNet injection requires an NSG on the APIM subnet. Allow inbound TCP 3443 from the `ApiManagement` service tag, TCP 6390 from `AzureLoadBalancer`, and TCP 443 from `Internet` when the APIM gateway remains public.
 

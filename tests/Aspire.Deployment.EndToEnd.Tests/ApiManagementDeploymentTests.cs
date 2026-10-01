@@ -149,7 +149,9 @@ builder.Build().Run();
                 "if [ \"$STATUS\" = \"200\" ]; then " +
                 "if jq -e 'type == \"array\" and length == 5 and all(.[]; has(\"date\") and has(\"temperatureC\") and has(\"summary\"))' .aspire-apim-response.json; then OK=1; fi; break; fi; " +
                 "echo \"Attempt $i returned $STATUS; retrying in 10s\"; sleep 10; " +
-                "done; [ \"$OK\" = \"1\" ]; }");
+                "done; [ \"$OK\" = \"1\" ]; } && " +
+                "ROOT_RESPONSE=$(curl -fsS \"$GATEWAY/api\" --max-time 30) && " +
+                "[ \"$ROOT_RESPONSE\" = \"API service is running. Navigate to /weatherforecast to see sample data.\" ]");
             await auto.EnterAsync();
             await auto.WaitForSuccessPromptAsync(counter, TimeSpan.FromMinutes(12));
 

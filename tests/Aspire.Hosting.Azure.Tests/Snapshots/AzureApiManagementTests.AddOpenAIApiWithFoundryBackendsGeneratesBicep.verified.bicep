@@ -166,6 +166,16 @@ resource openai_api 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
 }
 
+resource _apim_proxyDELETERootOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-delete-root'
+  properties: {
+    displayName: 'Proxy DELETE root'
+    method: 'DELETE'
+    urlTemplate: '/'
+  }
+  parent: openai_api
+}
+
 resource _apim_proxyDELETEOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-delete'
   properties: {
@@ -179,6 +189,16 @@ resource _apim_proxyDELETEOperation_openai_api 'Microsoft.ApiManagement/service/
         required: true
       }
     ]
+  }
+  parent: openai_api
+}
+
+resource _apim_proxyGETRootOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-get-root'
+  properties: {
+    displayName: 'Proxy GET root'
+    method: 'GET'
+    urlTemplate: '/'
   }
   parent: openai_api
 }
@@ -200,6 +220,16 @@ resource _apim_proxyGETOperation_openai_api 'Microsoft.ApiManagement/service/api
   parent: openai_api
 }
 
+resource _apim_proxyHEADRootOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-head-root'
+  properties: {
+    displayName: 'Proxy HEAD root'
+    method: 'HEAD'
+    urlTemplate: '/'
+  }
+  parent: openai_api
+}
+
 resource _apim_proxyHEADOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-head'
   properties: {
@@ -213,6 +243,16 @@ resource _apim_proxyHEADOperation_openai_api 'Microsoft.ApiManagement/service/ap
         required: true
       }
     ]
+  }
+  parent: openai_api
+}
+
+resource _apim_proxyOPTIONSRootOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-options-root'
+  properties: {
+    displayName: 'Proxy OPTIONS root'
+    method: 'OPTIONS'
+    urlTemplate: '/'
   }
   parent: openai_api
 }
@@ -234,6 +274,16 @@ resource _apim_proxyOPTIONSOperation_openai_api 'Microsoft.ApiManagement/service
   parent: openai_api
 }
 
+resource _apim_proxyPATCHRootOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-patch-root'
+  properties: {
+    displayName: 'Proxy PATCH root'
+    method: 'PATCH'
+    urlTemplate: '/'
+  }
+  parent: openai_api
+}
+
 resource _apim_proxyPATCHOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-patch'
   properties: {
@@ -247,6 +297,16 @@ resource _apim_proxyPATCHOperation_openai_api 'Microsoft.ApiManagement/service/a
         required: true
       }
     ]
+  }
+  parent: openai_api
+}
+
+resource _apim_proxyPOSTRootOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-post-root'
+  properties: {
+    displayName: 'Proxy POST root'
+    method: 'POST'
+    urlTemplate: '/'
   }
   parent: openai_api
 }
@@ -268,6 +328,16 @@ resource _apim_proxyPOSTOperation_openai_api 'Microsoft.ApiManagement/service/ap
   parent: openai_api
 }
 
+resource _apim_proxyPUTRootOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-put-root'
+  properties: {
+    displayName: 'Proxy PUT root'
+    method: 'PUT'
+    urlTemplate: '/'
+  }
+  parent: openai_api
+}
+
 resource _apim_proxyPUTOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-put'
   properties: {
@@ -281,6 +351,16 @@ resource _apim_proxyPUTOperation_openai_api 'Microsoft.ApiManagement/service/api
         required: true
       }
     ]
+  }
+  parent: openai_api
+}
+
+resource _apim_proxyTRACERootOperation_openai_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-trace-root'
+  properties: {
+    displayName: 'Proxy TRACE root'
+    method: 'TRACE'
+    urlTemplate: '/'
   }
   parent: openai_api
 }
@@ -321,13 +401,21 @@ resource _apim_apiPolicy_openai_api 'Microsoft.ApiManagement/service/apis/polici
   parent: openai_api
   dependsOn: [
     openai_pool
+    _apim_proxyDELETERootOperation_openai_api
     _apim_proxyDELETEOperation_openai_api
+    _apim_proxyGETRootOperation_openai_api
     _apim_proxyGETOperation_openai_api
+    _apim_proxyHEADRootOperation_openai_api
     _apim_proxyHEADOperation_openai_api
+    _apim_proxyOPTIONSRootOperation_openai_api
     _apim_proxyOPTIONSOperation_openai_api
+    _apim_proxyPATCHRootOperation_openai_api
     _apim_proxyPATCHOperation_openai_api
+    _apim_proxyPOSTRootOperation_openai_api
     _apim_proxyPOSTOperation_openai_api
+    _apim_proxyPUTRootOperation_openai_api
     _apim_proxyPUTOperation_openai_api
+    _apim_proxyTRACERootOperation_openai_api
     _apim_proxyTRACEOperation_openai_api
     openai_api_chat_completions
   ]

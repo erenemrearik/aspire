@@ -11,6 +11,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Azure.ApiManagement.Provisioning;
 using Aspire.Hosting.Pipelines;
 using Aspire.Hosting.Utils;
+using Azure.Provisioning.Network;
 using Microsoft.Extensions.DependencyInjection;
 using static Aspire.Hosting.Utils.AzureManifestUtils;
 
@@ -303,6 +304,72 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         Assert.Single(api.Resource.Operations);
     }
 
+    [Theory]
+    [InlineData("/products/{id}", "/products/{productId}")]
+    [InlineData("/products/{id}", "/products/{id}")]
+    [InlineData("/products/{id}/{*path}", "/products/{key}/{*rest}")]
+    [InlineData("/products/{id}?expand={fields}&version={v}", "/products/{key}?version={ver}&expand={selection}")]
+    public void OperationRoutesRejectEquivalentSignatures(string first, string second)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+        var api = apim.AddApi("catalog-api", "catalog");
+        api.AddOperation("first", "GET", first);
+        var resourceCount = builder.Resources.Count;
+
+        var exception = Assert.Throws<InvalidOperationException>(() => api.AddOperation("second", "get", second));
+
+        Assert.Contains("HTTP method and URL template must be unique", exception.Message);
+        Assert.Single(api.Resource.Operations);
+        Assert.Equal(resourceCount, builder.Resources.Count);
+    }
+
+    [Theory]
+    [InlineData("GET", "/{*other}")]
+    [InlineData("post", "/{*path}")]
+    [InlineData("GET", "/")]
+    public void OperationRoutesRejectGeneratedProxyConflicts(string method, string template)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+        var api = apim.AddApi("catalog-api", "catalog");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => api.AddOperation("custom", method, template));
+
+        Assert.Contains("conflicts with a generated proxy", exception.Message);
+        Assert.Empty(api.Resource.Operations);
+    }
+
+    [Fact]
+    public void OperationRoutesAllowDifferentMethodsLiteralsAndApis()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+        var api = apim.AddApi("catalog-api", "catalog");
+        api.AddOperation("get-product", "GET", "/products/{id}");
+        api.AddOperation("post-product", "POST", "/products/{id}");
+        api.AddOperation("get-category", "GET", "/categories/{id}");
+        apim.AddApi("other-api", "other").AddOperation("other-product", "GET", "/products/{id}");
+
+        Assert.Equal(3, api.Resource.Operations.Count);
+        Assert.Single(apim.Resource.Apis[1].Operations);
+    }
+
+    [Fact]
+    public void ImportedApiAllowsExplicitRootAndWildcardRoutes()
+    {
+        using var temporaryWorkspace = TemporaryWorkspace.Create(output);
+        var documentPath = Path.Combine(temporaryWorkspace.Path, "catalog.json");
+        File.WriteAllText(documentPath, """{"openapi":"3.0.1","info":{"title":"Catalog","version":"v1"},"paths":{}}""");
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+        var api = apim.AddApi("catalog-api", "catalog").WithOpenApiDocument(documentPath);
+        api.AddOperation("root", "GET", "/");
+        api.AddOperation("wildcard", "GET", "/{*path}");
+
+        Assert.Equal(2, api.Resource.Operations.Count);
+    }
+
     [Fact]
     public void PolicyHelpersValidateAndPreserveScopeSemantics()
     {
@@ -522,6 +589,7 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         var apim = builder.AddAzureApiManagement("apim", new()
         {
             PublisherEmail = "api-owners@example.com",
+            Sku = AzureApiManagementSku.Developer,
         }).PublishAsExisting("existing-apim", resourceGroup: null);
         subnet.AddPrivateEndpoint(apim);
 
@@ -602,6 +670,118 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         Assert.Contains("destinationAddressPrefix: 'AzureKeyVault'", networkSecurityGroupBicep);
         Assert.Contains("destinationPortRange: '443'", networkSecurityGroupBicep);
         await Verify(apimBicep, "bicep");
+    }
+
+    [Theory]
+    [InlineData(AzureApiManagementSku.StandardV2, "microsoft.web/serverfarms")]
+    [InlineData(AzureApiManagementSku.PremiumV2, "MICROSOFT.WEB/HOSTINGENVIRONMENTS")]
+    public void V2VirtualNetworkAcceptsCaseInsensitiveDelegation(AzureApiManagementSku sku, string delegation)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var subnet = builder.AddAzureVirtualNetwork("vnet").AddSubnet("subnet", "10.0.0.0/24")
+            .WithServiceDelegation(delegation);
+        var apim = builder.AddAzureApiManagement("apim", new()
+        {
+            PublisherEmail = "api-owners@example.com",
+            Sku = sku,
+        });
+
+        if (sku == AzureApiManagementSku.StandardV2)
+        {
+            apim.WithVirtualNetworkIntegration(subnet);
+        }
+        else
+        {
+            apim.WithVirtualNetworkInjection(subnet);
+        }
+
+        Assert.Equal(delegation, subnet.Resource.Annotations.OfType<AzureSubnetServiceDelegationAnnotation>().Single().ServiceName);
+        Assert.NotNull(apim.Resource.VirtualNetworkConfiguration);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task V2KeyVaultAllowPrecedesExistingOutboundDeny(bool injection)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var subnet = builder.AddAzureVirtualNetwork("vnet").AddSubnet("subnet", "10.0.0.0/24")
+            .AllowInbound(port: "443", priority: 100)
+            .DenyOutbound(priority: 200);
+        var apim = builder.AddAzureApiManagement("apim", new()
+        {
+            PublisherEmail = "api-owners@example.com",
+            Sku = injection ? AzureApiManagementSku.PremiumV2 : AzureApiManagementSku.StandardV2,
+        });
+
+        if (injection)
+        {
+            apim.WithVirtualNetworkInjection(subnet).WithVirtualNetworkInjection(subnet);
+        }
+        else
+        {
+            apim.WithVirtualNetworkIntegration(subnet).WithVirtualNetworkIntegration(subnet);
+        }
+
+        var rules = subnet.Resource.NetworkSecurityGroup!.SecurityRules;
+        Assert.Equal(101, rules.Single(rule => rule.Name == "allow-apim-key-vault").Priority);
+        Assert.Equal(3, rules.Count);
+        using var app = builder.Build();
+        await ExecuteBeforeStartHooksAsync(app, default);
+        var (_, bicep) = await GetManifestWithBicep(subnet.Resource.NetworkSecurityGroup);
+        await Verify(bicep, "bicep").UseParameters(injection);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void V2KeyVaultAllowRejectsUnavoidableOutboundDeny(bool injection)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var subnet = builder.AddAzureVirtualNetwork("vnet").AddSubnet("subnet", "10.0.0.0/24")
+            .DenyOutbound(port: "400-500", priority: 100);
+        var apim = builder.AddAzureApiManagement("apim", new()
+        {
+            PublisherEmail = "api-owners@example.com",
+            Sku = injection ? AzureApiManagementSku.PremiumV2 : AzureApiManagementSku.StandardV2,
+        });
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+        {
+            if (injection)
+            {
+                apim.WithVirtualNetworkInjection(subnet);
+            }
+            else
+            {
+                apim.WithVirtualNetworkIntegration(subnet);
+            }
+        });
+
+        Assert.Contains("no free NSG priority", exception.Message);
+        Assert.Null(apim.Resource.VirtualNetworkConfiguration);
+        Assert.Single(subnet.Resource.NetworkSecurityGroup!.SecurityRules);
+    }
+
+    [Fact]
+    public async Task V2KeyVaultAllowRejectsLaterShadowingRule()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var subnet = builder.AddAzureVirtualNetwork("vnet").AddSubnet("subnet", "10.0.0.0/24")
+            .AllowInbound(port: "443", priority: 100);
+        builder.AddAzureApiManagement("apim", new()
+        {
+            PublisherEmail = "api-owners@example.com",
+            Sku = AzureApiManagementSku.StandardV2,
+        }).WithVirtualNetworkIntegration(subnet);
+        var firstRule = subnet.Resource.NetworkSecurityGroup!.SecurityRules[0];
+        firstRule.Direction = SecurityRuleDirection.Outbound;
+        firstRule.Access = SecurityRuleAccess.Deny;
+
+        using var app = builder.Build();
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => ExecuteBeforeStartHooksAsync(app, default));
+
+        Assert.Contains("must retain an effective", exception.Message);
     }
 
     [Fact]
@@ -781,7 +961,11 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         if (!importOpenApi)
         {
             expected.AddRange(new[] { "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT", "TRACE" }
-                .Select(method => $"_apim_proxy{method}Operation_catalog_api"));
+                .SelectMany(method => new[]
+                {
+                    $"_apim_proxy{method}RootOperation_catalog_api",
+                    $"_apim_proxy{method}Operation_catalog_api",
+                }));
         }
         expected.Add("get_product");
         expected.Add("_apim_operationPolicy_list_products");
@@ -1434,6 +1618,7 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         var apim = builder.AddAzureApiManagement("apim", new()
         {
             PublisherEmail = "api-owners@example.com",
+            Sku = AzureApiManagementSku.Developer,
         }).PublishAsExisting("shared-apim", resourceGroup: "gateway-resources")
             .WithExistingSystemAssignedIdentity();
         var backend = apim.AddAzureOpenAIBackend("openai-backend", deployment);
@@ -1676,6 +1861,49 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         Assert.Contains("resource _apim_", bicep);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExistingApiManagementRequiresExplicitSkuRegardlessOfCallOrder(bool adoptFirst)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var apim = builder.AddAzureApiManagement("apim", new() { PublisherEmail = "api-owners@example.com" });
+        if (adoptFirst)
+        {
+            apim.PublishAsExisting("shared-apim", resourceGroup: null);
+        }
+        apim.AddBackend("backend", ReferenceExpression.Create($"https://example.com"), new()
+        {
+            CircuitBreaker = new(),
+        });
+        if (!adoptFirst)
+        {
+            apim.PublishAsExisting("shared-apim", resourceGroup: null);
+        }
+
+        using var app = builder.Build();
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => ExecuteBeforeStartHooksAsync(app, default));
+
+        Assert.Contains("requires an explicit Sku matching the adopted service", exception.Message);
+    }
+
+    [Fact]
+    public void ExistingConsumptionRejectsCircuitBreakersAndOpenAIBackends()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var apim = builder.AddAzureApiManagement("apim", new()
+        {
+            PublisherEmail = "api-owners@example.com",
+            Sku = AzureApiManagementSku.Consumption,
+        }).PublishAsExisting("shared-apim", resourceGroup: null);
+        var deployment = builder.AddAzureOpenAI("openai").AddDeployment("chat", "gpt-5-mini", "2025-08-07");
+
+        Assert.Throws<InvalidOperationException>(() =>
+            apim.AddBackend("backend", ReferenceExpression.Create($"https://example.com"), new() { CircuitBreaker = new() }));
+        Assert.Throws<InvalidOperationException>(() => apim.AddAzureOpenAIBackend("openai-backend", deployment));
+        Assert.Empty(apim.Resource.Backends);
+    }
+
     [Fact]
     public async Task ExistingApiManagementResourceCanProvisionManagedChildren()
     {
@@ -1683,6 +1911,7 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         var apim = builder.AddAzureApiManagement("apim", new()
         {
             PublisherEmail = "api-owners@example.com",
+            Sku = AzureApiManagementSku.Developer,
         }).PublishAsExisting("existing-apim", resourceGroup: "shared-infrastructure");
         var backend = apim.AddBackend("catalog-backend", ReferenceExpression.Create($"https://example.com"));
         apim.AddApi("catalog-api", "catalog").WithBackend(backend);
@@ -1707,6 +1936,7 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         var apim = builder.AddAzureApiManagement("apim", new()
         {
             PublisherEmail = "api-owners@example.com",
+            Sku = AzureApiManagementSku.Developer,
         }).PublishAsExisting("existing-apim", resourceGroup: null);
         var backend = apim.AddBackend(
             "catalog-backend",
@@ -1730,6 +1960,7 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         var apim = builder.AddAzureApiManagement("apim", new()
         {
             PublisherEmail = "api-owners@example.com",
+            Sku = AzureApiManagementSku.Developer,
         }).PublishAsExisting("existing-apim", resourceGroup: null)
             .WithExistingSystemAssignedIdentity();
         var backend = apim.AddBackend(
@@ -1757,6 +1988,7 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         var apim = builder.AddAzureApiManagement("apim", new()
         {
             PublisherEmail = "api-owners@example.com",
+            Sku = AzureApiManagementSku.Developer,
         }).PublishAsExisting("existing-apim", resourceGroup: "shared-infrastructure")
             .WithApplicationInsights(insights);
 
@@ -1986,12 +2218,15 @@ public class AzureApiManagementTests(ITestOutputHelper output)
         var (_, environmentBicep) = await GetManifestWithBicep(environment.Resource);
         var (_, privateDnsBicep) = await GetManifestWithBicep(privateDns);
 
+        Assert.IsAssignableFrom<IAzureInternalLoadBalancerResource>(environment.Resource);
+        Assert.Same(vnet.Resource, environment.Resource.Annotations.OfType<InternalLoadBalancerAnnotation>().Single().VirtualNetwork);
         Assert.Contains("internal: true", environmentBicep);
         Assert.Contains("output AZURE_CONTAINER_APPS_ENVIRONMENT_STATIC_IP string", environmentBicep);
         Assert.Contains("Microsoft.Network/privateDnsZones@2024-06-01", privateDnsBicep);
         Assert.Contains("name: '*'", privateDnsBicep);
         Assert.Contains("ipv4Address:", privateDnsBicep);
         Assert.Contains("Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01", privateDnsBicep);
+        await Verify(privateDnsBicep, "bicep");
     }
 
     [Fact]

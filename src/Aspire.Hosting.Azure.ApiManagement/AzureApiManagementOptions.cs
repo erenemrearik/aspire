@@ -13,6 +13,7 @@ namespace Aspire.Hosting.Azure;
 public sealed class AzureApiManagementOptions
 {
     private int? _capacity;
+    private AzureApiManagementSku? _sku;
 
     /// <summary>
     /// Gets the publisher email address shown by API Management.
@@ -27,7 +28,17 @@ public sealed class AzureApiManagementOptions
     /// <summary>
     /// Gets the API Management pricing tier.
     /// </summary>
-    public AzureApiManagementSku Sku { get; init; } = AzureApiManagementSku.Developer;
+    /// <remarks>
+    /// Defaults to Developer for a new service. When adopting an existing service, explicitly set this
+    /// property to its actual SKU; Aspire uses this metadata to validate supported child resources.
+    /// </remarks>
+    public AzureApiManagementSku Sku
+    {
+        get => _sku ?? AzureApiManagementSku.Developer;
+        init => _sku = value;
+    }
+
+    internal bool HasExplicitSku => _sku.HasValue;
 
     /// <summary>
     /// Gets the number of capacity units.

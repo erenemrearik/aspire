@@ -1589,6 +1589,26 @@ public class AtsTypeScriptCodeGeneratorTests
         Assert.Contains("asExistingInTenant", aspireTs);
     }
 
+    [Fact]
+    public async Task GenerateDistributedApplication_InternalLoadBalancerUsesNetworkCapability()
+    {
+#pragma warning disable ASPIREAZURE003
+        var result = AtsCapabilityScanner.ScanAssemblies(
+            [.. LoadAzureAssemblies(), typeof(AzureInternalLoadBalancerExtensions).Assembly]);
+        var capability = Assert.Single(result.Capabilities,
+            c => c.CapabilityId == "Aspire.Hosting.Azure.Network/withNetworkInternalLoadBalancer");
+        Assert.Equal("withInternalLoadBalancer", capability.MethodName);
+        Assert.Equal(GetAtsTypeId(typeof(IAzureInternalLoadBalancerResource)), capability.TargetTypeId);
+#pragma warning restore ASPIREAZURE003
+
+        var files = _generator.GenerateDistributedApplication(result.ToAtsContext());
+        var lines = files["aspire.mts"].Split('\n')
+            .Where(line => line.Contains("withInternalLoadBalancer", StringComparison.Ordinal) ||
+                line.Contains("withNetworkInternalLoadBalancer", StringComparison.Ordinal));
+
+        await Verify(string.Join('\n', lines), "ts");
+    }
+
     private static List<AtsCapabilityInfo> ScanCapabilitiesFromTestAssembly()
     {
         var testAssembly = LoadTestAssembly();

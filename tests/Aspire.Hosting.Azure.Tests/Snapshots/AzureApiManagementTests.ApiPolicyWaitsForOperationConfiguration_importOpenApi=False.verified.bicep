@@ -52,6 +52,16 @@ resource catalog_api 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
 }
 
+resource _apim_proxyDELETERootOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-delete-root'
+  properties: {
+    displayName: 'Proxy DELETE root'
+    method: 'DELETE'
+    urlTemplate: '/'
+  }
+  parent: catalog_api
+}
+
 resource _apim_proxyDELETEOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-delete'
   properties: {
@@ -65,6 +75,16 @@ resource _apim_proxyDELETEOperation_catalog_api 'Microsoft.ApiManagement/service
         required: true
       }
     ]
+  }
+  parent: catalog_api
+}
+
+resource _apim_proxyGETRootOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-get-root'
+  properties: {
+    displayName: 'Proxy GET root'
+    method: 'GET'
+    urlTemplate: '/'
   }
   parent: catalog_api
 }
@@ -86,6 +106,16 @@ resource _apim_proxyGETOperation_catalog_api 'Microsoft.ApiManagement/service/ap
   parent: catalog_api
 }
 
+resource _apim_proxyHEADRootOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-head-root'
+  properties: {
+    displayName: 'Proxy HEAD root'
+    method: 'HEAD'
+    urlTemplate: '/'
+  }
+  parent: catalog_api
+}
+
 resource _apim_proxyHEADOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-head'
   properties: {
@@ -99,6 +129,16 @@ resource _apim_proxyHEADOperation_catalog_api 'Microsoft.ApiManagement/service/a
         required: true
       }
     ]
+  }
+  parent: catalog_api
+}
+
+resource _apim_proxyOPTIONSRootOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-options-root'
+  properties: {
+    displayName: 'Proxy OPTIONS root'
+    method: 'OPTIONS'
+    urlTemplate: '/'
   }
   parent: catalog_api
 }
@@ -120,6 +160,16 @@ resource _apim_proxyOPTIONSOperation_catalog_api 'Microsoft.ApiManagement/servic
   parent: catalog_api
 }
 
+resource _apim_proxyPATCHRootOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-patch-root'
+  properties: {
+    displayName: 'Proxy PATCH root'
+    method: 'PATCH'
+    urlTemplate: '/'
+  }
+  parent: catalog_api
+}
+
 resource _apim_proxyPATCHOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-patch'
   properties: {
@@ -133,6 +183,16 @@ resource _apim_proxyPATCHOperation_catalog_api 'Microsoft.ApiManagement/service/
         required: true
       }
     ]
+  }
+  parent: catalog_api
+}
+
+resource _apim_proxyPOSTRootOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-post-root'
+  properties: {
+    displayName: 'Proxy POST root'
+    method: 'POST'
+    urlTemplate: '/'
   }
   parent: catalog_api
 }
@@ -154,6 +214,16 @@ resource _apim_proxyPOSTOperation_catalog_api 'Microsoft.ApiManagement/service/a
   parent: catalog_api
 }
 
+resource _apim_proxyPUTRootOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-put-root'
+  properties: {
+    displayName: 'Proxy PUT root'
+    method: 'PUT'
+    urlTemplate: '/'
+  }
+  parent: catalog_api
+}
+
 resource _apim_proxyPUTOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-put'
   properties: {
@@ -167,6 +237,16 @@ resource _apim_proxyPUTOperation_catalog_api 'Microsoft.ApiManagement/service/ap
         required: true
       }
     ]
+  }
+  parent: catalog_api
+}
+
+resource _apim_proxyTRACERootOperation_catalog_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-trace-root'
+  properties: {
+    displayName: 'Proxy TRACE root'
+    method: 'TRACE'
+    urlTemplate: '/'
   }
   parent: catalog_api
 }
@@ -233,13 +313,21 @@ resource _apim_apiPolicy_catalog_api 'Microsoft.ApiManagement/service/apis/polic
   parent: catalog_api
   dependsOn: [
     catalog_backend
+    _apim_proxyDELETERootOperation_catalog_api
     _apim_proxyDELETEOperation_catalog_api
+    _apim_proxyGETRootOperation_catalog_api
     _apim_proxyGETOperation_catalog_api
+    _apim_proxyHEADRootOperation_catalog_api
     _apim_proxyHEADOperation_catalog_api
+    _apim_proxyOPTIONSRootOperation_catalog_api
     _apim_proxyOPTIONSOperation_catalog_api
+    _apim_proxyPATCHRootOperation_catalog_api
     _apim_proxyPATCHOperation_catalog_api
+    _apim_proxyPOSTRootOperation_catalog_api
     _apim_proxyPOSTOperation_catalog_api
+    _apim_proxyPUTRootOperation_catalog_api
     _apim_proxyPUTOperation_catalog_api
+    _apim_proxyTRACERootOperation_catalog_api
     _apim_proxyTRACEOperation_catalog_api
     get_product
     _apim_operationPolicy_list_products
@@ -260,6 +348,16 @@ resource other_api 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
 }
 
+resource _apim_proxyDELETERootOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-delete-root'
+  properties: {
+    displayName: 'Proxy DELETE root'
+    method: 'DELETE'
+    urlTemplate: '/'
+  }
+  parent: other_api
+}
+
 resource _apim_proxyDELETEOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-delete'
   properties: {
@@ -273,6 +371,16 @@ resource _apim_proxyDELETEOperation_other_api 'Microsoft.ApiManagement/service/a
         required: true
       }
     ]
+  }
+  parent: other_api
+}
+
+resource _apim_proxyGETRootOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-get-root'
+  properties: {
+    displayName: 'Proxy GET root'
+    method: 'GET'
+    urlTemplate: '/'
   }
   parent: other_api
 }
@@ -294,6 +402,16 @@ resource _apim_proxyGETOperation_other_api 'Microsoft.ApiManagement/service/apis
   parent: other_api
 }
 
+resource _apim_proxyHEADRootOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-head-root'
+  properties: {
+    displayName: 'Proxy HEAD root'
+    method: 'HEAD'
+    urlTemplate: '/'
+  }
+  parent: other_api
+}
+
 resource _apim_proxyHEADOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-head'
   properties: {
@@ -307,6 +425,16 @@ resource _apim_proxyHEADOperation_other_api 'Microsoft.ApiManagement/service/api
         required: true
       }
     ]
+  }
+  parent: other_api
+}
+
+resource _apim_proxyOPTIONSRootOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-options-root'
+  properties: {
+    displayName: 'Proxy OPTIONS root'
+    method: 'OPTIONS'
+    urlTemplate: '/'
   }
   parent: other_api
 }
@@ -328,6 +456,16 @@ resource _apim_proxyOPTIONSOperation_other_api 'Microsoft.ApiManagement/service/
   parent: other_api
 }
 
+resource _apim_proxyPATCHRootOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-patch-root'
+  properties: {
+    displayName: 'Proxy PATCH root'
+    method: 'PATCH'
+    urlTemplate: '/'
+  }
+  parent: other_api
+}
+
 resource _apim_proxyPATCHOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-patch'
   properties: {
@@ -341,6 +479,16 @@ resource _apim_proxyPATCHOperation_other_api 'Microsoft.ApiManagement/service/ap
         required: true
       }
     ]
+  }
+  parent: other_api
+}
+
+resource _apim_proxyPOSTRootOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-post-root'
+  properties: {
+    displayName: 'Proxy POST root'
+    method: 'POST'
+    urlTemplate: '/'
   }
   parent: other_api
 }
@@ -362,6 +510,16 @@ resource _apim_proxyPOSTOperation_other_api 'Microsoft.ApiManagement/service/api
   parent: other_api
 }
 
+resource _apim_proxyPUTRootOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-put-root'
+  properties: {
+    displayName: 'Proxy PUT root'
+    method: 'PUT'
+    urlTemplate: '/'
+  }
+  parent: other_api
+}
+
 resource _apim_proxyPUTOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   name: 'proxy-put'
   properties: {
@@ -375,6 +533,16 @@ resource _apim_proxyPUTOperation_other_api 'Microsoft.ApiManagement/service/apis
         required: true
       }
     ]
+  }
+  parent: other_api
+}
+
+resource _apim_proxyTRACERootOperation_other_api 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  name: 'proxy-trace-root'
+  properties: {
+    displayName: 'Proxy TRACE root'
+    method: 'TRACE'
+    urlTemplate: '/'
   }
   parent: other_api
 }
@@ -415,13 +583,21 @@ resource _apim_apiPolicy_other_api 'Microsoft.ApiManagement/service/apis/policie
   parent: other_api
   dependsOn: [
     catalog_backend
+    _apim_proxyDELETERootOperation_other_api
     _apim_proxyDELETEOperation_other_api
+    _apim_proxyGETRootOperation_other_api
     _apim_proxyGETOperation_other_api
+    _apim_proxyHEADRootOperation_other_api
     _apim_proxyHEADOperation_other_api
+    _apim_proxyOPTIONSRootOperation_other_api
     _apim_proxyOPTIONSOperation_other_api
+    _apim_proxyPATCHRootOperation_other_api
     _apim_proxyPATCHOperation_other_api
+    _apim_proxyPOSTRootOperation_other_api
     _apim_proxyPOSTOperation_other_api
+    _apim_proxyPUTRootOperation_other_api
     _apim_proxyPUTOperation_other_api
+    _apim_proxyTRACERootOperation_other_api
     _apim_proxyTRACEOperation_other_api
     other_operation
   ]

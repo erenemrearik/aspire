@@ -14,7 +14,6 @@ using System.Xml.Linq;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Azure;
 using Aspire.Hosting.Azure.ApiManagement.Provisioning;
-using Aspire.Hosting.Azure.AppContainers;
 using Aspire.Hosting.Foundry;
 using Aspire.Hosting.Pipelines;
 using Azure.Provisioning;
@@ -1186,6 +1185,7 @@ public static class AzureApiManagementExtensions
     /// <returns>A builder for the operation resource.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when a required string is empty.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the operation identifier or route duplicates another operation or conflicts with a generated proxy route.</exception>
     [AspireExport]
     public static IResourceBuilder<AzureApiManagementOperationResource> AddOperation(
         this IResourceBuilder<AzureApiManagementApiResource> builder,
@@ -1206,7 +1206,8 @@ public static class AzureApiManagementExtensions
 
         if (string.Equals(physicalOperationName, ProxyOperationName, StringComparison.OrdinalIgnoreCase) ||
             s_proxyOperationMethods.Any(proxyMethod =>
-                string.Equals(physicalOperationName, GetProxyOperationName(proxyMethod), StringComparison.OrdinalIgnoreCase)))
+                string.Equals(physicalOperationName, GetProxyOperationName(proxyMethod), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(physicalOperationName, GetRootOperationName(proxyMethod), StringComparison.OrdinalIgnoreCase)))
         {
             throw new ArgumentException(
                 $"The API Management operation identifier '{physicalOperationName}' is reserved for a generated catch-all operation.",
@@ -1225,6 +1226,24 @@ public static class AzureApiManagementExtensions
         {
             throw new InvalidOperationException(
                 $"API '{builder.Resource.Name}' already contains an operation with the physical identifier '{physicalOperationName}'.");
+        }
+
+        var signature = GetOperationSignature(method, urlTemplate);
+        if (builder.Resource.Operations.Any(operation =>
+            string.Equals(GetOperationSignature(operation.Method, operation.UrlTemplate), signature, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                $"API '{builder.Resource.Name}' already contains an operation with the route '{method.ToUpperInvariant()} {urlTemplate}'. " +
+                "HTTP method and URL template must be unique, regardless of parameter names.");
+        }
+
+        if (builder.Resource.OpenApiSource is null &&
+            s_proxyOperationMethods.Any(proxyMethod =>
+                string.Equals(signature, GetOperationSignature(proxyMethod, "/{*path}"), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(signature, GetOperationSignature(proxyMethod, "/"), StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                $"The route '{method.ToUpperInvariant()} {urlTemplate}' conflicts with a generated proxy operation.");
         }
 
         var resource = new AzureApiManagementOperationResource(
@@ -1430,7 +1449,8 @@ public static class AzureApiManagementExtensions
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the selected SKU does not support v2 virtual network integration, the subnet has a conflicting
-    /// delegation, or the subnet is already used by another API Management service.
+    /// delegation, the subnet is already used by another API Management service, or its NSG cannot
+    /// accommodate the required Key Vault allow rule ahead of outbound deny rules.
     /// </exception>
     [AspireExport]
     public static IResourceBuilder<AzureApiManagementResource> WithVirtualNetworkIntegration(
@@ -1448,6 +1468,10 @@ public static class AzureApiManagementExtensions
 
         ValidateV2SubnetSize(subnet.Resource);
         ValidateSubnetOwnership(builder.Resource, subnet.Resource);
+        if (builder.Resource.VirtualNetworkConfiguration is null)
+        {
+            _ = GetKeyVaultRulePriority(subnet.Resource);
+        }
         ConfigureV2SubnetDelegation(subnet, AzureSubnetServiceDelegations.AppServiceEnvironments);
         if (SetVirtualNetworkConfiguration(
                 builder.Resource,
@@ -1475,7 +1499,8 @@ public static class AzureApiManagementExtensions
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the selected SKU is not Premium v2, the subnet has a conflicting delegation, or the subnet is
-    /// already used by another API Management service.
+    /// already used by another API Management service, or its NSG cannot accommodate the required
+    /// Key Vault allow rule ahead of outbound deny rules.
     /// </exception>
     [AspireExport]
     public static IResourceBuilder<AzureApiManagementResource> WithVirtualNetworkInjection(
@@ -1493,6 +1518,10 @@ public static class AzureApiManagementExtensions
 
         ValidateV2SubnetSize(subnet.Resource);
         ValidateSubnetOwnership(builder.Resource, subnet.Resource);
+        if (builder.Resource.VirtualNetworkConfiguration is null)
+        {
+            _ = GetKeyVaultRulePriority(subnet.Resource);
+        }
         const string delegation = "Microsoft.Web/hostingEnvironments";
         ConfigureV2SubnetDelegation(subnet, delegation);
         if (SetVirtualNetworkConfiguration(
@@ -1514,7 +1543,35 @@ public static class AzureApiManagementExtensions
 
         ValidateBackendPhysicalNames(azureResource);
 
+        if (azureResource.VirtualNetworkConfiguration is
+            { Kind: AzureApiManagementVirtualNetworkKind.V2Integration or AzureApiManagementVirtualNetworkKind.PremiumV2Injection } network)
+        {
+            var rules = network.Subnet.NetworkSecurityGroup?.SecurityRules;
+            var allowRule = rules?.SingleOrDefault(rule => rule.Name == "allow-apim-key-vault");
+            if (rules is null || allowRule is null || allowRule.Access != SecurityRuleAccess.Allow ||
+                allowRule.Direction != SecurityRuleDirection.Outbound ||
+                allowRule.Protocol != SecurityRuleProtocol.Tcp ||
+                allowRule.DestinationPortRange != "443" ||
+                allowRule.SourcePortRange != "*" ||
+                allowRule.SourceAddressPrefix != AzureServiceTags.VirtualNetwork ||
+                allowRule.DestinationAddressPrefix != AzureServiceTags.AzureKeyVault ||
+                allowRule.SourceAddressPrefixReference is not null ||
+                allowRule.DestinationAddressPrefixReference is not null ||
+                rules.Any(rule => CouldDenyKeyVault(rule) && rule.Priority <= allowRule.Priority))
+            {
+                throw new InvalidOperationException(
+                    $"Subnet '{network.Subnet.Name}' must retain an effective 'allow-apim-key-vault' NSG rule ahead of outbound TCP/443 deny rules.");
+            }
+        }
+
         var isExisting = azureResource.IsExisting();
+        if (isExisting && !azureResource.Options.HasExplicitSku)
+        {
+            throw new InvalidOperationException(
+                $"Existing API Management resource '{azureResource.Name}' requires an explicit {nameof(AzureApiManagementOptions.Sku)} " +
+                "matching the adopted service. The default Developer SKU is only used for new services.");
+        }
+
         var hasExplicitExistingScope =
             azureResource.TryGetLastAnnotation<ExistingAzureResourceAnnotation>(out var existingAnnotation) &&
             (existingAnnotation.ResourceGroup is not null || existingAnnotation.Subscription is not null);
@@ -2192,6 +2249,19 @@ public static class AzureApiManagementExtensions
             // reliably dispatch it. Materialize the catch-all route for each supported method.
             foreach (var method in s_proxyOperationMethods)
             {
+                // The wildcard matches descendants but not the API suffix itself (for example /api).
+                var rootOperation = new ApiManagementOperationProvisioningResource(
+                    CreateGeneratedBicepIdentifier($"proxy{method}RootOperation", apiIdentifier))
+                {
+                    Parent = api,
+                    Name = GetRootOperationName(method),
+                    DisplayName = $"Proxy {method} root",
+                    Method = method,
+                    UriTemplate = "/",
+                };
+                infrastructure.Add(rootOperation);
+                operationDependencies.Add(rootOperation);
+
                 var catchAllOperation = new ApiManagementOperationProvisioningResource(
                     CreateGeneratedBicepIdentifier($"proxy{method}Operation", apiIdentifier))
                 {
@@ -2289,14 +2359,11 @@ public static class AzureApiManagementExtensions
                 "Configure an Azure deployment environment before adding it to API Management.");
         }
 
-        if (computeEnvironment is AzureContainerAppEnvironmentResource
-            {
-                InternalLoadBalancerVirtualNetwork: { } backendVirtualNetwork,
-            })
+        if (computeEnvironment.TryGetLastAnnotation<InternalLoadBalancerAnnotation>(out var internalLoadBalancer))
         {
             var apiManagementNetwork = apiResource.Parent.VirtualNetworkConfiguration;
             if (apiManagementNetwork is null ||
-                !ReferenceEquals(apiManagementNetwork.Subnet.Parent, backendVirtualNetwork))
+                !ReferenceEquals(apiManagementNetwork.Subnet.Parent, internalLoadBalancer.VirtualNetwork))
             {
                 throw new InvalidOperationException(
                     $"Resource '{apiResource.Target.Name}' is deployed to an internal Container Apps environment. " +
@@ -2370,10 +2437,7 @@ public static class AzureApiManagementExtensions
                 "Configure an Azure deployment environment before importing its OpenAPI endpoint.");
         }
 
-        if (computeEnvironment is AzureContainerAppEnvironmentResource
-            {
-                InternalLoadBalancerVirtualNetwork: not null,
-            })
+        if (computeEnvironment.HasAnnotationOfType<InternalLoadBalancerAnnotation>())
         {
             throw new InvalidOperationException(
                 $"Resource '{apiResource.Target.Name}' is deployed to an internal Container Apps environment. " +
@@ -2981,6 +3045,35 @@ public static class AzureApiManagementExtensions
     private static string GetProxyOperationName(string method) =>
         $"{ProxyOperationName}-{method.ToLowerInvariant()}";
 
+    private static string GetRootOperationName(string method) =>
+        $"{GetProxyOperationName(method)}-root";
+
+    private static string GetOperationSignature(string method, string urlTemplate)
+    {
+        // /products/{id}?expand={fields} and /products/{productId}?expand={selection}
+        // describe the same route. Keep literal segments and wildcard markers, not parameter names.
+        var template = new StringBuilder();
+        for (var index = 0; index < urlTemplate.Length; index++)
+        {
+            if (urlTemplate[index] == '{' && urlTemplate.IndexOf('}', index + 1) is var end && end > index)
+            {
+                template.Append(urlTemplate[index + 1] == '*' ? "{*}" : "{}");
+                index = end;
+            }
+            else
+            {
+                template.Append(urlTemplate[index]);
+            }
+        }
+
+        var parts = template.ToString().Split('?', 2);
+        var path = "/" + parts[0].TrimStart('/');
+        var query = parts.Length == 2
+            ? "?" + string.Join('&', parts[1].Split('&').Order(StringComparer.OrdinalIgnoreCase))
+            : string.Empty;
+        return $"{method.ToUpperInvariant()} {path}{query}";
+    }
+
     private static void ValidatePolicyFragment(string policyXml)
     {
         ArgumentException.ThrowIfNullOrEmpty(policyXml);
@@ -3154,7 +3247,7 @@ public static class AzureApiManagementExtensions
     {
         if (subnet.Resource.TryGetLastAnnotation<AzureSubnetServiceDelegationAnnotation>(out var existingDelegation))
         {
-            if (!string.Equals(existingDelegation.ServiceName, delegation, StringComparison.Ordinal))
+            if (!string.Equals(existingDelegation.ServiceName, delegation, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
                     $"Subnet '{subnet.Resource.Name}' is delegated to '{existingDelegation.ServiceName}', " +
@@ -3185,15 +3278,64 @@ public static class AzureApiManagementExtensions
     private static void ConfigureV2SubnetNetworkSecurityGroup(
         IResourceBuilder<AzureSubnetResource> subnet)
     {
-        // Both v2 networking modes require an NSG that permits APIM's Azure Key Vault dependency.
-        // The shorthand adds the rule to an explicit NSG or creates an implicit NSG when needed.
-        // See https://learn.microsoft.com/azure/api-management/integrate-vnet-outbound#network-security-group.
         subnet.AllowOutbound(
             port: "443",
             from: AzureServiceTags.VirtualNetwork,
             to: AzureServiceTags.AzureKeyVault,
             protocol: SecurityRuleProtocol.Tcp,
+            priority: GetKeyVaultRulePriority(subnet.Resource),
             name: "allow-apim-key-vault");
+    }
+
+    private static int GetKeyVaultRulePriority(AzureSubnetResource subnet)
+    {
+        // Both v2 networking modes require APIM's Azure Key Vault dependency. A late allow can be
+        // shadowed by an outbound deny; conservatively place it ahead of all TCP/443 denies because
+        // address prefixes may contain service tags or deploy-time expressions.
+        // See https://learn.microsoft.com/azure/api-management/integrate-vnet-outbound#network-security-group.
+        var rules = subnet.NetworkSecurityGroup?.SecurityRules;
+        if (rules?.Any(rule => rule.Name == "allow-apim-key-vault") == true)
+        {
+            throw new InvalidOperationException(
+                $"Subnet '{subnet.Name}' already contains the reserved NSG rule 'allow-apim-key-vault'.");
+        }
+        var firstDenyPriority = rules?
+            .Where(CouldDenyKeyVault)
+            .Select(rule => rule.Priority)
+            .DefaultIfEmpty(4097)
+            .Min() ?? 4097;
+        var priority = Enumerable.Range(100, Math.Clamp(firstDenyPriority - 100, 0, 3997))
+            .FirstOrDefault(candidate => rules?.Any(rule => rule.Priority == candidate) != true);
+        if (priority == 0)
+        {
+            throw new InvalidOperationException(
+                $"Subnet '{subnet.Name}' has no free NSG priority before its outbound deny rules. " +
+                "Reserve an earlier priority for the API Management Key Vault allow rule.");
+        }
+
+        return priority;
+    }
+
+    private static bool CouldDenyKeyVault(AzureSecurityRule rule)
+    {
+        if (rule.Direction != SecurityRuleDirection.Outbound ||
+            rule.Access != SecurityRuleAccess.Deny ||
+            (rule.Protocol != SecurityRuleProtocol.Tcp && rule.Protocol != SecurityRuleProtocol.Asterisk))
+        {
+            return false;
+        }
+
+        if (rule.DestinationPortRange is "*" or "443")
+        {
+            return true;
+        }
+
+        // NSG port ranges use "start-end", such as "400-500".
+        var ports = rule.DestinationPortRange.Split('-', 2);
+        return ports.Length == 2 &&
+            int.TryParse(ports[0], out var first) &&
+            int.TryParse(ports[1], out var last) &&
+            first <= 443 && last >= 443;
     }
 
     private static void ValidateV2SubnetSize(AzureSubnetResource subnet)
