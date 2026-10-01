@@ -1003,7 +1003,8 @@ public class DotNetAppHostProjectTests(ITestOutputHelper outputHelper) : IDispos
     [Fact]
     public async Task RunAsync_ProjectAppHostUsesDirectCommandLaunchAndAppliesLaunchSettings()
     {
-        const string image = "example.com/aspire-tunnel:configured";
+        const string configuredImage = "example.com/aspire-tunnel:configured";
+        const string launchProfileImage = "example.com/aspire-tunnel:launch-profile";
 
         var appHostFile = CreateProjectAppHost();
         var targetPath = CreateBuiltAppHostAssembly("AppHost.dll");
@@ -1026,7 +1027,8 @@ public class DotNetAppHostProjectTests(ITestOutputHelper outputHelper) : IDispos
                   "commandLineArgs": "--from-profile \"profile value\"",
                   "environmentVariables": {
                     "DOTNET_ENVIRONMENT": "Development",
-                    "CUSTOM_ENV": "custom-value"
+                    "CUSTOM_ENV": "custom-value",
+                    "ASPIRE_CONTAINER_TUNNEL_BASE_IMAGE": "example.com/aspire-tunnel:launch-profile"
                   }
                 },
                 "https": {
@@ -1064,7 +1066,7 @@ public class DotNetAppHostProjectTests(ITestOutputHelper outputHelper) : IDispos
         {
             options.ConfigurationCallback += configuration =>
             {
-                configuration[AspireConfigContainerTunnel.BaseImageConfigPath] = image;
+                configuration[AspireConfigContainerTunnel.BaseImageConfigPath] = configuredImage;
             };
         });
 
@@ -1091,7 +1093,7 @@ public class DotNetAppHostProjectTests(ITestOutputHelper outputHelper) : IDispos
             Assert.Equal("http://localhost:15000", env[KnownAspNetCoreConfigNames.Urls]);
             Assert.Equal("Development", env[KnownAspNetCoreConfigNames.DotNetEnvironment]);
             Assert.Equal("context-value", env["CUSTOM_ENV"]);
-            Assert.Equal(image, env[KnownConfigNames.ContainerTunnelBaseImage]);
+            Assert.Equal(launchProfileImage, env[KnownConfigNames.ContainerTunnelBaseImage]);
             return Task.FromResult(123);
         };
 

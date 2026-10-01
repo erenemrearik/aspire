@@ -1461,7 +1461,6 @@ internal sealed partial class DotNetAppHostProject : IAppHostProject
         var isSingleFileAppHost = !IsProjectFile(effectiveAppHostFile);
 
         var env = new Dictionary<string, string>(context.EnvironmentVariables);
-        _appHostConfigurationProjector.ApplyEnvironmentVariables(env);
 
         // Handle isolated mode - randomize ports and isolate user secrets
         string? isolatedUserSecretsId = null;
@@ -1618,6 +1617,8 @@ internal sealed partial class DotNetAppHostProject : IAppHostProject
             using var runDotnetActivity = _profilingTelemetry.StartAppHostRunDotnetLifetime(watch, noBuild, noRestore);
             if (directRun is not null)
             {
+                _appHostConfigurationProjector.ApplyEnvironmentVariables(directRun.Environment);
+
                 // The direct command line has no "--" separator, so the forwarded-argument boundary
                 // has to be carried alongside it for logging. Clone rather than mutate because the
                 // caller may reuse runOptions for other invocations.
@@ -1635,6 +1636,8 @@ internal sealed partial class DotNetAppHostProject : IAppHostProject
                     directRunOptions,
                     cancellationToken);
             }
+
+            _appHostConfigurationProjector.ApplyEnvironmentVariables(env);
 
             return await _runner.RunAsync(
                 effectiveAppHostFile,
