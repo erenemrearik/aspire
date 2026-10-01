@@ -6,18 +6,13 @@
     <PackageId>$(MSBuildProjectName)</PackageId>
     <IsPackable>true</IsPackable>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <GenerateDependencyFile>false</GenerateDependencyFile>
-    <IncludeSymbols>false</IncludeSymbols>
-    <NoWarn>$(NoWarn);NU5100;NU5128;NU5130;NU5131</NoWarn>
-    <DotNetOutputPath>$(RepoRoot)artifacts/bin/</DotNetOutputPath>
     <PackageTags>aspire apphost sdk</PackageTags>
     <Description>Aspire AppHost SDK. Must be referenced by Aspire AppHost projects.</Description>
     <TargetsForTfmSpecificContentInPackage>_PublishAndPackRIDTool;$(TargetsForTfmSpecificContentInPackage)</TargetsForTfmSpecificContentInPackage>
     <EnablePackageValidation>false</EnablePackageValidation>
   </PropertyGroup>
 
-  <Import Project="$(RepoRoot)eng/ReplaceText.targets" />
+  <Import Project="$(RepoRoot)eng/ContentPackage.targets" />
 
   <ItemGroup>
     <TextReplacementValue Include="DefaultTargetFramework" NewValue="$(DefaultTargetFramework)" />
@@ -36,12 +31,6 @@
                       ExcludeAssets="all"
                       Private="false" />
   </ItemGroup>
-
-  <Target Name="_SetVersionTextReplacementValue" BeforeTargets="GatherTextReplacementValues">
-    <ItemGroup>
-      <TextReplacementValue Include="VERSION" NewValue="$(PackageVersion)" />
-    </ItemGroup>
-  </Target>
 
   <Target Name="_PublishAndPackRIDTool">
     <MSBuild Projects="$(MSBuildThisFileDirectory)Aspire.RuntimeIdentifier.Tool\Aspire.RuntimeIdentifier.Tool.csproj"
