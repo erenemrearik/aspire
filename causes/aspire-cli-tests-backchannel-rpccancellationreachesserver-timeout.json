@@ -1,0 +1,16 @@
+{
+  "id": "aspire-cli-tests-backchannel-rpccancellationreachesserver-timeout",
+  "type": "flaky-test",
+  "title": "Flaky: BackchannelJsonSerializerContextTests.RpcCancellationReachesServer times out after 30s on Linux",
+  "test_name": "Aspire.Cli.Tests.Backchannel.BackchannelJsonSerializerContextTests.RpcCancellationReachesServer",
+  "error_pattern": "System.TimeoutException : The operation at BackchannelJsonSerializerContextTests.cs:115 timed out after reaching the limit of 30000ms.\n   at Microsoft.AspNetCore.InternalTesting.AsyncTestHelpers.TimeoutAfter(Task task, TimeSpan timeout, String filePath, Int32 lineNumber) in AsyncTestHelpers.cs:194\n   at Aspire.Cli.Tests.Backchannel.BackchannelJsonSerializerContextTests.RpcCancellationReachesServer()",
+  "occurrences": [
+    {
+      "run_id": 36928109877,
+      "run_url": "https://github.com/microsoft/aspire/actions/runs/36928109877",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "pr_number": 0,
+      "observed_at": "2026-10-01T22:15:42Z"
+    }
+  ]
+}

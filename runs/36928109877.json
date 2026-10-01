@@ -1,0 +1,131 @@
+{
+  "run_id": 36928109877,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/36928109877",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-01T22:15:42Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20096,
+    "title": "Add experimental native tray companion for macOS and Windows",
+    "author": "davidfowl",
+    "state": "closed",
+    "head_branch": "davidfowl-aspire-tray-companion",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20096",
+    "merged_at": "2026-10-01T21:21:14Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "08295f701d428866a582af9c09bd2880ddc5e1f0",
+    "failed_sha": "8eec461e839a1e04b7b790c12e01ead5e4f48cbf",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "cb7844ea62cb7b85fde46d43bf7961384e7f2601",
+        "message": "Prevent recursive MTP test runner invocation (#20573) ## Description `DistributedApplicationTestingBuilder.CreateAsync` assumes the supplied type belongs to an AppHost executable and reflectively invokes that assembly's entry point. When a Microsoft.Testing.Platform test project is itself built with `Aspire.AppHost.Sdk`, the generated `Projects.*` type can instead belong to the test application. Invoking that assembly's entry point recursively starts the test runner, reruns the entire suite with",
+        "html_url": "https://github.com/microsoft/aspire/commit/cb7844ea62cb7b85fde46d43bf7961384e7f2601",
+        "pull_request": {
+          "number": 20573,
+          "title": "Prevent recursive MTP test runner invocation",
+          "url": "https://github.com/microsoft/aspire/pull/20573",
+          "merged_at": "2026-10-01T15:24:10Z"
+        }
+      },
+      {
+        "sha": "04d79e672a9466011cace1cc69fdd0335b5373eb",
+        "message": "fix(ci): prevent command injection in privileged workflows (#20627) ## Description **Several privileged workflows treated untrusted dispatch values as shell source, granted broader token permissions than their jobs needed, or loaded cleanup logic from a mutable branch.** ### Zizmor findings and fixes | Area | Issue | Zizmor complaint | Why it happens | Fix | | --- | --- | --- | --- | --- | | Release GitHub tasks | Dispatch strings could become executable shell syntax in parameter logging, valida",
+        "html_url": "https://github.com/microsoft/aspire/commit/04d79e672a9466011cace1cc69fdd0335b5373eb",
+        "pull_request": {
+          "number": 20627,
+          "title": "fix(ci): prevent command injection in privileged workflows",
+          "url": "https://github.com/microsoft/aspire/pull/20627",
+          "merged_at": "2026-10-01T17:14:35Z"
+        }
+      },
+      {
+        "sha": "b428b7493ea6d8177c22f7015a9590835901bfce",
+        "message": "Make ResourceUrlAnnotation.DisplayOrder a non-obsolete property (#20637) ## Description `ResourceUrlAnnotation.DisplayOrder` was exposed as an obsolete field with a promise to replace it with a property. This change makes it a nullable read/write property and removes the obsolete attribute, so consumers can configure URL ordering without obsolete warnings. Higher values still sort URLs higher in the dashboard. - Remove the obsolete remarks and warning suppressions from hosting, integration, and ",
+        "html_url": "https://github.com/microsoft/aspire/commit/b428b7493ea6d8177c22f7015a9590835901bfce",
+        "pull_request": {
+          "number": 20637,
+          "title": "Make ResourceUrlAnnotation.DisplayOrder a non-obsolete property",
+          "url": "https://github.com/microsoft/aspire/pull/20637",
+          "merged_at": "2026-10-01T18:28:04Z"
+        }
+      },
+      {
+        "sha": "961f0c25ae14749296dcb76df43f5d6e4253aa70",
+        "message": "Add CLI installation source to main telemetry (#20590) ## Description CLI usage telemetry currently identifies the effective release channel but cannot distinguish how the CLI was installed. Add `aspire.cli.install.source` to the `aspire/cli/main` event so usage can be broken down by installation mechanism, independently of `aspire.cli.identity.channel`. The property reports `script`, `winget`, `npm`, `dotnet-tool`, `brew`, `mise`, `nix`, `pr`, `localhive`, or `unknown`. Bash and PowerShell inst",
+        "html_url": "https://github.com/microsoft/aspire/commit/961f0c25ae14749296dcb76df43f5d6e4253aa70",
+        "pull_request": {
+          "number": 20590,
+          "title": "Add CLI installation source to main telemetry",
+          "url": "https://github.com/microsoft/aspire/pull/20590",
+          "merged_at": "2026-10-01T19:19:32Z"
+        }
+      },
+      {
+        "sha": "8eec461e839a1e04b7b790c12e01ead5e4f48cbf",
+        "message": "Add experimental native tray companion for macOS and Windows (#20096) ## Description Managing several AppHosts should not require repeatedly running `aspire ps`. This PR adds a native **macOS menu-bar and Windows notification-area companion**, backed by the invoking Aspire CLI rather than a separate/private CLI installation. The companion is C# NativeAOT using AppKit and Win32 directly. There is no Swift build, WebView, macOS .NET workload, Windows Forms, or third-party UI framework. The CLI sup",
+        "html_url": "https://github.com/microsoft/aspire/commit/8eec461e839a1e04b7b790c12e01ead5e4f48cbf",
+        "pull_request": {
+          "number": 20096,
+          "title": "Add experimental native tray companion for macOS and Windows",
+          "url": "https://github.com/microsoft/aspire/pull/20096",
+          "merged_at": "2026-10-01T21:21:14Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "id": 110591941041,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/36928109877/job/110591941041",
+      "classification": "flaky-test",
+      "reason": "Run tests (Windows) step failed because ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput asserted a build-count value (expected 3, got 4), a known timing/ordering race in rebuild-command build-output counting on Windows.",
+      "failed_steps": [
+        "Run tests (Windows)"
+      ]
+    },
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "id": 110591948198,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/36928109877/job/110591948198",
+      "classification": "flaky-test",
+      "reason": "Run tests (Linux/macOS) step failed because BackchannelJsonSerializerContextTests.RpcCancellationReachesServer timed out after the 30s limit. NuGet restore showed many transient 'Connection reset by peer' errors but all packages were ultimately restored and the build succeeded, so the actual failure is the test's RPC-cancellation timing assertion, not restore infrastructure.",
+      "failed_steps": [
+        "Run tests (Linux/macOS)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput",
+      "job": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "error": "Assert.Equal() Failure: Values differ\nExpected: 3\nActual:   4",
+      "stack_trace": "at Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput() in D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.Tests\\ResourceCommandServiceTests.cs:line 1770\n--- End of stack trace from previous location ---",
+      "standard_output": "Temporary workspace created at: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\Aspire.Hosting.TestUtilities\\Workspace\\sdx4bk5w.ngt\n| [2026-10-01T21:32:57] Aspire.Hosting.DistributedApplication Information: Aspire AppHost version: 17.0.0-ci\n| [2026-10-01T21:32:57] Aspire.Hosting.DistributedApplication Information: Distributed application starting.\n| [2026-10-01T21:32:57] Aspire.Hosting.DistributedApplication Information: Application host directory is: D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.TestUtilities\n| [2026-10-01T21:32:57] Aspire.Hosting.Cli.CliOrphanDetector Debug: No CLI process ID configured. Orphan detection disabled.\n| [2026-10-01T21:32:57] Aspire.Hosting.Cli.BackchannelService Debug: Backchannel socket path was not specified.\n| [2026-10-01T21:32:57] Aspire.Hosting.Devcontainers.Codespaces.CodespacesResourceUrlRewriterService Trace: Not running in Codespaces, skipping URL rewriting.\n| [2026-10-01T21:32:57] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Starting auxiliary backchannel service on socket path: C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFAJSoejaMm.1428\n| [2026-10-01T21:32:57] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Auxiliary backchannel listening on C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFAJSoejaMm.1428\n| [2026-10-01T21:32:58] Aspire.Hosting.Dcp.DcpHost Warning: No trusted Aspire development certificate was found. See https://aka.ms/aspire/devcerts for more information.\n| [2026-10-01T21:32:58] Aspire.Hosting.FileSystemService Debug: Allocated temporary directory: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcpmejq0bgy.ml2\n| [2026-10-01T21:32:58] Aspire.Hosting.Dcp.DcpHost Information: Starting DCP with arguments: start-apiserver --monitor 1428 --detach --kubeconfig \"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcpmejq0bgy.ml2\\kubeconfig\"\n| [2026-10-01T21:32:58] Aspire.Hosting.Dcp.DcpHost Debug: A complete bundled ConPTY provider was not found; DCP will use the inbox Windows provider.\n| [2026-10-01T21:32:58] Aspire.Hosting.Dcp.DcpExecutor Debug: Preparing services. Ports randomized: True\n| [2026-10-01T21:32:58] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject/myProject-vbqtsvxp update published: ResourceType = Project, CreationTimeStamp = (null), State = { Text = (null), Style = (null) }, IsHidden = False, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = {  }, HealthReports = {  }, Commands = { start (Start) = Disabled stop (Stop) = Hidden restart (Restart) = Disabled rebuild (Rebuild) = Disabled }\n| [2026-10-01T21:32:58] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject-rebuilder/myProject-rebuilder-gggcxfdn update published: ResourceType = Executable, CreationTimeStamp = (null), State = { Text = NotStarted, Style = (null) }, IsHidden = True, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = { resource.parentName = myProject-vbqtsvxp }, HealthReports = {  }, Commands = {  }\n| [2026-10-01T21:32:58] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Endpoint resources.\n| [2026-10-01T21:32:58] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Service resources.\n| [2026-10-01T21:32:58] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP ContainerExec resources.\n| [2026-10-01T21:32:58] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Container resources.\n| [2026-10-01T21:32:58] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Executable resources.\n| [2026-10-01T21:32:58] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Converting relative endpoint URLs to absolute URLs for resource 'myProject-rebuilder'.\n| [2026-10-01T21:32:58] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Added total of 0 URLs to resource 'myProject-rebuilder'\n| [2026-10-01T21:32:58] Aspire.Hosting.ApplicationModel.Res",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Matches prior recurring cause (issue #20662) of build-count off-by-one race in rebuild-command output counting on Windows; expected/actual values shift between runs (2/3 previously, 3/4 now) indicating a timing race rather than a code regression."
+    },
+    {
+      "name": "Aspire.Cli.Tests.Backchannel.BackchannelJsonSerializerContextTests.RpcCancellationReachesServer",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "error": "System.TimeoutException : The operation at /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Backchannel/BackchannelJsonSerializerContextTests.cs:115 timed out after reaching the limit of 30000ms.",
+      "stack_trace": "at Microsoft.AspNetCore.InternalTesting.AsyncTestHelpers.TimeoutAfter(Task task, TimeSpan timeout, String filePath, Int32 lineNumber) in /home/runner/work/aspire/aspire/tests/Shared/AsyncTestHelpers.cs:line 194\n   at Aspire.Cli.Tests.Backchannel.BackchannelJsonSerializerContextTests.RpcCancellationReachesServer() in /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Backchannel/BackchannelJsonSerializerContextTests.cs:line 115\n--- End of stack trace from previous location ---",
+      "standard_output": "",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "A hard 30s timeout waiting for an RPC cancellation to reach the server is a timing-sensitive integration test; the job's surrounding NuGet restores showed heavy transient network noise (Connection reset by peer) indicating a loaded/degraded runner environment, consistent with the test simply running too slowly rather than a code defect."
+    }
+  ],
+  "causes": [
+    "aspire-hosting-resourcecommandservice-rebuild-buildcount-race",
+    "aspire-cli-tests-backchannel-rpccancellationreachesserver-timeout"
+  ]
+}
