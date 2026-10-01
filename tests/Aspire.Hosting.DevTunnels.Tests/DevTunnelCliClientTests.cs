@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Hosting.DevTunnels.Tests;
@@ -8,9 +9,213 @@ namespace Aspire.Hosting.DevTunnels.Tests;
 public class DevTunnelCliClientTests
 {
     [Fact]
+    public async Task CreatePortIncludesModeledDescription()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueCreatePortResult(0);
+        await cli.CreatePortAsync("mytunnel.usw2", 3000, new()
+        {
+            Protocol = "https",
+            Description = "target/https",
+            Labels = ["target", "https"]
+        });
+        await Verify(Assert.Single(cli.Calls).Arguments);
+    }
+
+    [Theory]
+    [InlineData(null, "30 days")]
+    [InlineData(720, "30 days")]
+    [InlineData(24, "24 hours")]
+    [InlineData(25, "1 days, 1 hours")]
+    public async Task ExistingTunnelWithMatchingConfigurationDoesNotWrite(int? expirationHours, string expiration)
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(0, TunnelJson(expiration: expiration));
+        var result = await CreateClient(cli).CreateTunnelAsync("mytunnel", new()
+        {
+            Description = "expected",
+            Labels = ["label"],
+            ExpirationHours = expirationHours
+        });
+        Assert.Equal("mytunnel.usw2", result.TunnelId);
+        Assert.Equal(nameof(DevTunnelCli.ShowTunnelAsync), Assert.Single(cli.Calls).Method);
+    }
+
+    [Fact]
+    public async Task EmptyDescriptionsDoNotRewriteRemoteMetadata()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(0, TunnelJson());
+        cli.EnqueueShowPortResult(0, PortJson());
+        var client = CreateClient(cli);
+        await client.CreateTunnelAsync("mytunnel", new() { Description = "" });
+        await client.CreatePortAsync("mytunnel.usw2", 3000, new() { Description = "", Protocol = "http", Labels = ["label"] });
+        Assert.Equal([nameof(DevTunnelCli.ShowTunnelAsync), nameof(DevTunnelCli.ShowPortAsync)], cli.Calls.Select(c => c.Method));
+    }
+
+    [Fact]
+    public async Task MetadataDriftUsesQualifiedIdentityAndUnwrapsUpdateResponse()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(0, TunnelJson(description: "old"));
+        cli.EnqueueUpdateResult(0, TunnelJson(description: "new"));
+        var result = await CreateClient(cli).CreateTunnelAsync("mytunnel", new() { Description = "new" });
+        Assert.Equal("mytunnel.usw2", result.TunnelId);
+        Assert.Collection(cli.Calls,
+            call => Assert.Equal(nameof(DevTunnelCli.ShowTunnelAsync), call.Method),
+            call =>
+            {
+                Assert.Equal(nameof(DevTunnelCli.UpdateTunnelAsync), call.Method);
+                Assert.Equal("mytunnel.usw2", call.TunnelId);
+            });
+    }
+
+    [Fact]
+    public async Task MissingTunnelIsCreated()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(DevTunnelCli.ResourceNotFoundExitCode);
+        cli.EnqueueCreateResult(0, TunnelJson());
+        var result = await CreateClient(cli).CreateTunnelAsync("mytunnel", new());
+        Assert.Equal("mytunnel.usw2", result.TunnelId);
+        Assert.Equal([nameof(DevTunnelCli.ShowTunnelAsync), nameof(DevTunnelCli.CreateTunnelAsync)], cli.Calls.Select(c => c.Method));
+    }
+
+    [Fact]
+    public async Task ExistingAnonymousTunnelDoesNotResetMatchingAccess()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(0, TunnelJson(access: [AnonymousAccess(deny: false)]));
+        await CreateClient(cli).CreateTunnelAsync("mytunnel", new() { AllowAnonymous = true });
+        Assert.Equal(nameof(DevTunnelCli.ShowTunnelAsync), Assert.Single(cli.Calls).Method);
+    }
+
+    [Fact]
+    public async Task PrivateTunnelClearsUnexpectedAnonymousAccess()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(0, TunnelJson(access: [AnonymousAccess(deny: false)]));
+        cli.EnqueueResetAccessResult(0, """{"accessControlEntries":[]}""");
+        await CreateClient(cli).CreateTunnelAsync("mytunnel", new());
+        Assert.Equal([nameof(DevTunnelCli.ShowTunnelAsync), nameof(DevTunnelCli.ResetAccessAsync)], cli.Calls.Select(c => c.Method));
+        Assert.All(cli.Calls.Skip(1), c => Assert.Equal("mytunnel.usw2", c.TunnelId));
+    }
+
+    [Theory]
+    [InlineData("""{"tunnel":{}}""")]
+    [InlineData("""{"unexpected":{"tunnelId":"mytunnel.usw2"}}""")]
+    public async Task MalformedTunnelIdentityCannotFallBackToDefaultTunnel(string json)
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(0, json);
+        await Assert.ThrowsAsync<DistributedApplicationException>(() => CreateClient(cli).CreateTunnelAsync("mytunnel", new()));
+        Assert.Single(cli.Calls);
+    }
+
+    [Fact]
+    public async Task MissingAccessMetadataIsFetchedAndMalformedAccessFailsClosed()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(0, """{"tunnel":{"tunnelId":"mytunnel.usw2"}}""");
+        cli.EnqueueListAccessResult(0, "{}");
+        await Assert.ThrowsAsync<DistributedApplicationException>(() => CreateClient(cli).CreateTunnelAsync("mytunnel", new()));
+        Assert.Equal([nameof(DevTunnelCli.ShowTunnelAsync), nameof(DevTunnelCli.ListAccessAsync)], cli.Calls.Select(c => c.Method));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MatchingPortIsNotDeletedOrRecreated(bool? anonymous)
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowPortResult(0, PortJson(access: anonymous.HasValue ? [AnonymousAccess(deny: !anonymous.Value)] : []));
+        var result = await CreateClient(cli).CreatePortAsync("mytunnel.usw2", 3000, new()
+        {
+            Protocol = "http",
+            Description = "expected",
+            Labels = ["label"],
+            AllowAnonymous = anonymous
+        });
+        Assert.Equal(3000, result.PortNumber);
+        Assert.Equal("mytunnel.usw2", result.TunnelId);
+        Assert.Equal(nameof(DevTunnelCli.ShowPortAsync), Assert.Single(cli.Calls).Method);
+    }
+
+    [Fact]
+    public async Task PortCanInheritAccessWithoutWritingAnExplicitPolicy()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowPortResult(0, PortJson(access: [AnonymousAccess(deny: false) with { IsInherited = true }]));
+        await CreateClient(cli).CreatePortAsync("mytunnel.usw2", 3000, new() { Protocol = "http", Labels = ["label"] });
+        Assert.Equal(nameof(DevTunnelCli.ShowPortAsync), Assert.Single(cli.Calls).Method);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PortAccessDriftIsRepairedWithoutRecreatingPort(bool? anonymous)
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowPortResult(0, PortJson(access: [new("Users", false, false, ["user"], ["connect"])]));
+        cli.EnqueueResetAccessResult(0, """{"accessControlEntries":[]}""");
+        cli.EnqueueCreateAccessResult(0, """{"accessControlEntries":[]}""");
+        await CreateClient(cli).CreatePortAsync("mytunnel.usw2", 3000, new()
+        {
+            Protocol = "http",
+            Labels = ["label"],
+            AllowAnonymous = anonymous
+        });
+        Assert.Equal(anonymous.HasValue
+            ? [nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.ResetAccessAsync), nameof(DevTunnelCli.CreateAccessAsync)]
+            : new[] { nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.ResetAccessAsync) },
+            cli.Calls.Select(c => c.Method));
+        Assert.All(cli.Calls, c => Assert.Equal("mytunnel.usw2", c.TunnelId));
+        if (anonymous.HasValue)
+        {
+            Assert.Equal(!anonymous.Value, cli.Calls.Last().Arguments.Contains("--deny"));
+        }
+    }
+
+    [Theory]
+    [InlineData("https", "expected", "label")]
+    [InlineData("http", "changed", "label")]
+    [InlineData("http", "expected", "different")]
+    public async Task ChangedPortConfigurationIsRecreated(string protocol, string description, string label)
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowPortResult(0, PortJson());
+        cli.EnqueueDeletePortResult(0, """{"deletedPort":"mytunnel:3000"}""");
+        cli.EnqueueCreatePortResult(0, PortJson(protocol, description, [label]));
+        var result = await CreateClient(cli).CreatePortAsync("mytunnel.usw2", 3000, new()
+        {
+            Protocol = protocol,
+            Description = description,
+            Labels = [label]
+        });
+        Assert.Equal(protocol, result.Protocol);
+        Assert.Equal([nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.DeletePortAsync), nameof(DevTunnelCli.CreatePortAsync)], cli.Calls.Select(c => c.Method));
+        Assert.All(cli.Calls, c => Assert.Equal("mytunnel.usw2", c.TunnelId));
+    }
+
+    [Fact]
+    public async Task MissingPortIsCreatedAndWrappedResponseIsRead()
+    {
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowPortResult(DevTunnelCli.ResourceNotFoundExitCode);
+        cli.EnqueueCreatePortResult(0, PortJson());
+        var result = await CreateClient(cli).CreatePortAsync("mytunnel.usw2", 3000, new() { Protocol = "http" });
+        Assert.Equal(3000, result.PortNumber);
+        Assert.Equal("mytunnel.usw2", result.TunnelId);
+        Assert.Equal([nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.CreatePortAsync)], cli.Calls.Select(c => c.Method));
+    }
+
+    [Fact]
     public async Task CreateTunnelAsync_WhenCreateConflictsAndUpdateIsNotFound_FailsWithoutRetrying()
     {
         var cli = new TestDevTunnelCli();
+        cli.EnqueueShowResult(DevTunnelCli.ResourceNotFoundExitCode);
         cli.EnqueueCreateResult(
             DevTunnelCli.ResourceConflictsWithExistingExitCode,
             error: "Tunnel service error: Conflict with existing entity. Retry tunnel operation.");
@@ -42,6 +247,11 @@ public class DevTunnelCliClientTests
             cli.Calls,
             call =>
             {
+                Assert.Equal(nameof(DevTunnelCli.ShowTunnelAsync), call.Method);
+                Assert.Equal("ghost.eun1", call.TunnelId);
+            },
+            call =>
+            {
                 Assert.Equal(nameof(DevTunnelCli.CreateTunnelAsync), call.Method);
                 Assert.Equal("ghost", call.TunnelId);
             },
@@ -51,4 +261,35 @@ public class DevTunnelCliClientTests
                 Assert.Equal("ghost.eun1", call.TunnelId);
             });
     }
+
+    private static DevTunnelCliClient CreateClient(TestDevTunnelCli cli) => new(new ConfigurationBuilder().Build(), cli);
+
+    private static DevTunnelAccessStatus.AccessControlEntry AnonymousAccess(bool deny) => new("Anonymous", deny, false, [], ["connect"]);
+
+    private static string TunnelJson(string description = "expected", string expiration = "30 days", DevTunnelAccessStatus.AccessControlEntry[]? access = null) =>
+        JsonSerializer.Serialize(new
+        {
+            tunnel = new
+            {
+                tunnelId = "mytunnel.usw2",
+                description,
+                labels = new[] { "label" },
+                tunnelExpiration = expiration,
+                accessControl = access ?? []
+            }
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+    private static string PortJson(string protocol = "http", string description = "expected", string[]? labels = null, DevTunnelAccessStatus.AccessControlEntry[]? access = null) =>
+        JsonSerializer.Serialize(new
+        {
+            port = new
+            {
+                tunnelId = "mytunnel.usw2",
+                portNumber = 3000,
+                protocol,
+                description,
+                labels = labels ?? ["label"],
+                accessControl = access ?? []
+            }
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 }

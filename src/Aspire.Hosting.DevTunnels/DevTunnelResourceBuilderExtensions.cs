@@ -144,13 +144,13 @@ public static partial class DevTunnelsResourceBuilderExtensions
                 string resolvedTunnelId;
                 try
                 {
-                    logger.LogInformation("Creating dev tunnel '{TunnelId}'", tunnelResource.TunnelId);
+                    logger.LogInformation("Ensuring dev tunnel '{TunnelId}' is configured", tunnelResource.TunnelId);
                     var tunnelStatus = await devTunnelClient.CreateTunnelAsync(tunnelResource.TunnelId, tunnelResource.Options, logger, ct).ConfigureAwait(false);
                     // The CLI resolves a bare ID and returns its cluster-qualified ID. Use that ID for
                     // port operations because bare IDs may not resolve tunnels across clusters.
                     // See https://github.com/microsoft/aspire/issues/18790.
                     resolvedTunnelId = tunnelStatus.TunnelId;
-                    logger.LogDebug("Dev tunnel '{TunnelId}' created", tunnelResource.TunnelId);
+                    logger.LogDebug("Dev tunnel '{TunnelId}' configured", tunnelResource.TunnelId);
                 }
                 catch (Exception ex)
                 {
@@ -212,7 +212,7 @@ public static partial class DevTunnelsResourceBuilderExtensions
                                 ct)
                             .ConfigureAwait(false);
 
-                        portLogger.LogInformation("Created dev tunnel port '{Port}' on tunnel '{Tunnel}' targeting endpoint '{Endpoint}' on resource '{TargetResource}'", tunnelPort, portResource.DevTunnel.TunnelId, portResource.TargetEndpoint.EndpointName, portResource.TargetEndpoint.Resource.Name);
+                        portLogger.LogInformation("Configured dev tunnel port '{Port}' on tunnel '{Tunnel}' targeting endpoint '{Endpoint}' on resource '{TargetResource}'", tunnelPort, portResource.DevTunnel.TunnelId, portResource.TargetEndpoint.EndpointName, portResource.TargetEndpoint.Resource.Name);
                     }
                     catch (Exception ex)
                     {

@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
@@ -65,6 +66,34 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
 
     public async Task<DevTunnelStatus> CreateTunnelAsync(string tunnelId, DevTunnelOptions options, ILogger? logger = default, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tunnelId);
+        var resolvedId = options.Region is not null ? $"{tunnelId}.{options.RegionCode}" : tunnelId;
+        var existing = await FindExistingAsync<DevTunnelStatus>(
+            (stdout, stderr, log, ct) => _cli.ShowTunnelAsync(resolvedId, stdout, stderr, log, ct),
+            "tunnel", $"dev tunnel '{resolvedId}'", logger, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            var access = existing.AccessControl;
+            if (access is null)
+            {
+                access = (await GetAccessAsync(existing.TunnelId, portNumber: null, logger, cancellationToken).ConfigureAwait(false)).AccessControlEntries;
+            }
+
+            var descriptionMatches = string.IsNullOrEmpty(options.Description) || string.Equals(existing.Description, options.Description, StringComparison.Ordinal);
+            var labelsMatch = options.Labels is null || options.Labels.All(l => (existing.Labels ?? []).Contains(l, StringComparer.Ordinal));
+            var expirationMatches = options.ExpirationHours is null || GetExpirationHours(existing.TunnelExpiration) == options.ExpirationHours;
+            if (!descriptionMatches || !labelsMatch || !expirationMatches)
+            {
+                var (updated, updateExitCode, updateError) = await CallCliAsJsonAsync<DevTunnelStatus>(
+                    (stdout, stderr, log, ct) => _cli.UpdateTunnelAsync(existing.TunnelId, options, stdout, stderr, log, ct),
+                    "tunnel", logger, cancellationToken).ConfigureAwait(false);
+                existing = updated ?? throw new DistributedApplicationException($"Failed to update dev tunnel '{existing.TunnelId}'. Exit code {updateExitCode}: {updateError}");
+            }
+
+            await EnsureAccessAsync(existing.TunnelId, portNumber: null, options.AllowAnonymous ? true : null, access, logger, cancellationToken).ConfigureAwait(false);
+            logger?.LogDebug("Reusing dev tunnel '{TunnelId}'.", existing.TunnelId);
+            return existing;
+        }
         var attempts = 0;
         var exitCode = 0;
         string? error = null;
@@ -94,7 +123,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
                 var createError = error;
                 (tunnel, exitCode, error) = await CallCliAsJsonAsync<DevTunnelStatus>(
                     (stdout, stderr, log, ct) => _cli.UpdateTunnelAsync(resolvedTunnelId, options, stdout, stderr, log, ct),
-                    logger, cancellationToken).ConfigureAwait(false);
+                    "tunnel", logger, cancellationToken).ConfigureAwait(false);
                 if (exitCode == DevTunnelCli.ResourceNotFoundExitCode)
                 {
                     // A service ghost can produce:
@@ -111,10 +140,11 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
 
                 if (exitCode == 0 && tunnel is not null)
                 {
+                    resolvedTunnelId = tunnel.TunnelId;
                     logger?.LogTrace("Dev tunnel '{TunnelId}' updated successfully.", resolvedTunnelId);
 
                     // Ensure tunnel access controls are set as specified in options by resetting existing policies first.
-                    // Ports get deleted and recreated separately, so we only need to reset access on the tunnel itself here.
+                    // Port-specific policies are reconciled separately.
                     logger?.LogTrace("Clearing access policies for dev tunnel '{TunnelId}'.", resolvedTunnelId);
                     (var accessStatus, exitCode, error) = await CallCliAsJsonAsync<DevTunnelAccessStatus>(
                         (stdout, stderr, log, ct) => _cli.ResetAccessAsync(resolvedTunnelId, portNumber: null, stdout, stderr, log, ct),
@@ -174,6 +204,31 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
 
     public async Task<DevTunnelPortStatus> CreatePortAsync(string tunnelId, int portNumber, DevTunnelPortOptions portOptions, ILogger? logger = default, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tunnelId);
+        var existing = await FindExistingAsync<DevTunnelPortStatus>(
+            (stdout, stderr, log, ct) => _cli.ShowPortAsync(tunnelId, portNumber, stdout, stderr, log, ct),
+            "port", $"port '{portNumber}' on dev tunnel '{tunnelId}'", logger, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            var protocolMatches = string.Equals(existing.Protocol, portOptions.Protocol ?? "auto", StringComparison.OrdinalIgnoreCase);
+            var descriptionMatches = string.IsNullOrEmpty(portOptions.Description) || string.Equals(existing.Description, portOptions.Description, StringComparison.Ordinal);
+            var labelsMatch = existing.Labels.ToHashSet(StringComparer.Ordinal).SetEquals(portOptions.Labels ?? []);
+            if (protocolMatches && descriptionMatches && labelsMatch)
+            {
+                var access = existing.AccessControl;
+                if (access is null)
+                {
+                    access = (await GetAccessAsync(tunnelId, portNumber, logger, cancellationToken).ConfigureAwait(false)).AccessControlEntries;
+                }
+                await EnsureAccessAsync(tunnelId, portNumber, portOptions.AllowAnonymous, access, logger, cancellationToken).ConfigureAwait(false);
+                logger?.LogDebug("Reusing dev tunnel port '{PortNumber}' on '{TunnelId}'.", portNumber, tunnelId);
+                return existing;
+            }
+
+            // Protocol cannot be changed by `devtunnel port update`. Recreate only ports whose
+            // modeled configuration changed, preserving unchanged port URLs and access policies.
+            await DeletePortAsync(tunnelId, portNumber, logger, cancellationToken).ConfigureAwait(false);
+        }
         var attempts = 0;
         var exitCode = 0;
         string? error = null;
@@ -189,7 +244,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
 
             (port, exitCode, error) = await CallCliAsJsonAsync<DevTunnelPortStatus>(
                 (outWriter, errWriter, log, ct) => _cli.CreatePortAsync(tunnelId, portNumber, portOptions, outWriter, errWriter, log, ct),
-                logger, cancellationToken).ConfigureAwait(false);
+                "port", logger, cancellationToken).ConfigureAwait(false);
 
             if (exitCode == 0 && port is not null)
             {
@@ -239,6 +294,114 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         }
 
         throw new DistributedApplicationException($"Failed to create port '{portNumber}' for tunnel '{tunnelId}' after {attempts} attempts. Exit code {exitCode}: {error}");
+    }
+
+    private async Task<T?> FindExistingAsync<T>(
+        Func<TextWriter, TextWriter, ILogger?, CancellationToken, Task<int>> query,
+        string propertyName,
+        string description,
+        ILogger? logger,
+        CancellationToken cancellationToken) where T : class
+    {
+        int exitCode = 0;
+        string? error = null;
+        for (var attempt = 1; attempt <= _maxCliAttempts; attempt++)
+        {
+            var response = await CallCliAsJsonAsync<T>(query, propertyName, logger, cancellationToken).ConfigureAwait(false);
+            (var result, exitCode, error) = response;
+            if (result is not null || exitCode == DevTunnelCli.ResourceNotFoundExitCode)
+            {
+                return result;
+            }
+            if (attempt < _maxCliAttempts)
+            {
+                logger?.LogWarning("Failed to inspect {Resource} (attempt {Attempt} of {MaxAttempts}); retrying.", description, attempt, _maxCliAttempts);
+                await Task.Delay(_cliRetryOnErrorDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        throw new DistributedApplicationException($"Failed to inspect {description}. Exit code {exitCode}: {error}");
+    }
+
+    private async Task EnsureAccessAsync(
+        string tunnelId,
+        int? portNumber,
+        bool? allowAnonymous,
+        IReadOnlyList<DevTunnelAccessStatus.AccessControlEntry> access,
+        ILogger? logger,
+        CancellationToken cancellationToken)
+    {
+        // Inherited entries belong to the parent tunnel. A port with no explicit policy must
+        // inherit them, whereas AllowAnonymous=false requires an explicit anonymous deny.
+        var explicitEntries = access.Where(e => !e.IsInherited).ToArray();
+        var matches = allowAnonymous is null
+            ? explicitEntries.Length == 0
+            : explicitEntries is [var entry]
+                && string.Equals(entry.Type, "Anonymous", StringComparison.OrdinalIgnoreCase)
+                && entry.IsDeny == !allowAnonymous.Value
+                && entry.Subjects.Count == 0
+                && entry.Scopes is [var scope]
+                && string.Equals(scope, "connect", StringComparison.OrdinalIgnoreCase);
+        if (matches)
+        {
+            return;
+        }
+
+        if (explicitEntries.Length > 0)
+        {
+            var (reset, exitCode, error) = await CallCliAsJsonAsync<DevTunnelAccessStatus>(
+                (stdout, stderr, log, ct) => _cli.ResetAccessAsync(tunnelId, portNumber, stdout, stderr, log, ct),
+                logger, cancellationToken).ConfigureAwait(false);
+            if (reset is null)
+            {
+                throw new DistributedApplicationException($"Failed to reset access for dev tunnel '{tunnelId}', port '{portNumber}'. Exit code {exitCode}: {error}");
+            }
+        }
+        if (allowAnonymous is { } allow)
+        {
+            var (created, createExitCode, createError) = await CallCliAsJsonAsync<DevTunnelAccessStatus>(
+                (stdout, stderr, log, ct) => _cli.CreateAccessAsync(tunnelId, portNumber, anonymous: true, deny: !allow, stdout, stderr, log, ct),
+                logger, cancellationToken).ConfigureAwait(false);
+            if (created is null)
+            {
+                throw new DistributedApplicationException($"Failed to set access for dev tunnel '{tunnelId}', port '{portNumber}'. Exit code {createExitCode}: {createError}");
+            }
+        }
+    }
+
+    private static decimal? GetExpirationHours(string? expiration)
+    {
+        // The CLI's JSON uses display strings, such as "1 hours", "30 days", or a combination
+        // of days and hours. An unfamiliar representation is not evidence of a match: reapply
+        // the requested expiration instead of silently keeping a potentially different value.
+        if (expiration is null)
+        {
+            return null;
+        }
+        var parts = expiration.Split([' ', ',', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0 || parts.Length % 2 != 0)
+        {
+            return null;
+        }
+        var hours = 0m;
+        for (var i = 0; i < parts.Length; i += 2)
+        {
+            if (!decimal.TryParse(parts[i], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) || value is < 0 or > 720)
+            {
+                return null;
+            }
+            var multiplier = parts[i + 1].ToLowerInvariant() switch
+            {
+                "hour" or "hours" => 1,
+                "day" or "days" => 24,
+                _ => 0
+            };
+            if (multiplier == 0)
+            {
+                return null;
+            }
+            hours += value * multiplier;
+        }
+        return hours;
     }
 
     public async Task<DevTunnelPortDeleteResult> DeletePortAsync(string tunnelId, int portNumber, ILogger? logger = default, CancellationToken cancellationToken = default)
@@ -313,7 +476,7 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         if (cancellationToken.IsCancellationRequested)
         {
             logger?.LogDebug("Operation was cancelled.");
-            return (default, exitCode, "Operation was cancelled.");
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         if (string.IsNullOrEmpty(output))
@@ -326,10 +489,27 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         {
             if (!string.IsNullOrEmpty(propertyName))
             {
-                output = JsonDocument.Parse(output).RootElement.GetProperty(propertyName).GetRawText();
-                logger?.LogTrace("Extracted JSON property '{PropertyName}':\n{Output}", propertyName, output);
+                // For example, update returns {"tunnel":{"tunnelId":"name.usw2",...}} and
+                // port create/show return {"port":{...}}. Also accept a flat response, but
+                // validate its identity below so an envelope can never deserialize to a null ID.
+                using var document = JsonDocument.Parse(output);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    throw new JsonException("The devtunnel response must be a JSON object.");
+                }
+                if (document.RootElement.TryGetProperty(propertyName, out var value))
+                {
+                    output = value.GetRawText();
+                    logger?.LogTrace("Extracted JSON property '{PropertyName}':\n{Output}", propertyName, output);
+                }
             }
             var result = JsonSerializer.Deserialize<T>(output, _jsonOptions);
+            if (result is DevTunnelStatus tunnel && string.IsNullOrWhiteSpace(tunnel.TunnelId)
+                || result is DevTunnelPortStatus port && (string.IsNullOrWhiteSpace(port.TunnelId) || port.PortNumber is < 1 or > 65535 || string.IsNullOrWhiteSpace(port.Protocol))
+                || result is DevTunnelAccessStatus { AccessControlEntries: null })
+            {
+                throw new JsonException("The devtunnel response is missing a valid tunnel or port identity.");
+            }
             logger?.LogTrace("JSON output successfully deserialized to '{TypeName}' instance", typeof(T).Name);
             return (result, 0, default);
         }

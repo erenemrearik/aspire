@@ -227,6 +227,8 @@ Aspire observes the `devtunnel host` console output to make public endpoints ava
 
 Health checks also reconcile tunnel ports and access settings with the dev tunnels service. If the CLI output is unrecognized or does not provide a complete readiness message, Aspire logs a warning and uses service-based reconciliation to discover the endpoints. Minor whitespace, line wrapping, and separator differences are supported. The warning is limited to once per resource start; the original console output remains available in the tunnel resource's logs.
 
+Starting a tunnel checks its remote configuration and reuses matching tunnels and ports. Unchanged access policies are left intact; changed policies are reconciled before hosting. Ports are recreated only when their protocol, description, or labels differ from the application model. Remote drift is checked on each start rather than relying on a cached successful setup.
+
 If tunnel status is incorrect after such a warning, include the output of `devtunnel --version` and the relevant tunnel console logs in an Aspire issue, after removing sensitive information. A service response indicating an active host will not override a disconnect reported by the local CLI, because that connection may belong to another host.
 
 ### Port forwarding logs
