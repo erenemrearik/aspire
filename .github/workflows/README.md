@@ -62,6 +62,36 @@ Node 20 action. There is no supported Node 24 upgrade for that dependency;
 replacing it requires a separate migration of its authentication and locking
 behavior, rather than merely changing an action pin.
 
+## Auto-sec dependency reconciliation
+
+`auto-sec.md` runs every 12 hours (and on demand). It reconciles open Dependabot
+alerts, including malware alerts, and version-mapped code scanning alerts against
+open Dependabot PRs. Pure code findings are out of scope.
+
+- **Dependabot PRs** that fix an open alert are approved by the Aspire bot App only
+  when `.github/workflows/auto-sec/auto-sec.js` re-verifies every gate in the
+  `approve_dependabot_pr` safe-output job. The gates are:
+  - only manifest or lock files change
+  - no package source or feed host is added
+  - CI and statuses are green
+  - the update stays within the same major version (same minor for `0.x`)
+  - every updated version was published at least 7 days ago
+- **Remaining alerts** are fixed in a single `[auto-sec]` PR on
+  `auto-sec/security-updates`, labeled `auto-sec`. Later runs update that PR
+  instead of opening another one. NuGet bumps are made only when the fixed version
+  already restores from the approved dnceng feeds. Otherwise the alert is reported
+  as blocked on mirroring.
+- The PR body and run summaries intentionally contain only package and version
+  summaries, never advisory details.
+
+Prerequisites:
+- The `auto-sec` label must exist.
+- The Aspire bot App needs pull request write access, and contents write access to
+  push the `auto-sec` branch.
+
+Because the compiler's Windows build mis-handles redaction paths, compile this
+workflow on Linux or WSL.
+
 ## Main to Release 14.0 Synchronization
 
 `sync-main-to-release-14.yml` keeps the advance `release/14.0` integration branch
