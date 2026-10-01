@@ -51,10 +51,7 @@ internal static class PackageSourceOverrideMappings
         ArgumentException.ThrowIfNullOrWhiteSpace(packageSourceOverride);
         ThrowIfCredentialBearingSourceOverride(packageSourceOverride);
 
-        if (string.IsNullOrWhiteSpace(packagePattern))
-        {
-            packagePattern = DefaultPackagePattern;
-        }
+        packagePattern = GetEffectivePackagePattern(packagePattern);
 
         var mappings = new List<PackageMapping>
         {
@@ -73,7 +70,7 @@ internal static class PackageSourceOverrideMappings
         {
             foreach (var mapping in requestedChannel.Mappings)
             {
-                if (CompetesWithOverridePattern(mapping.PackageFilter, packagePattern))
+                if (CompetesWithAuthoritativePattern(mapping.PackageFilter, packagePattern))
                 {
                     continue;
                 }
@@ -98,24 +95,39 @@ internal static class PackageSourceOverrideMappings
         return [.. mappings.DistinctBy(static mapping => $"{mapping.PackageFilter}\0{mapping.Source}")];
     }
 
-    private static bool CompetesWithOverridePattern(string channelPattern, string overridePattern)
-    {
-        if (!overridePattern.EndsWith('*'))
-        {
-            return string.Equals(channelPattern, overridePattern, StringComparison.OrdinalIgnoreCase);
-        }
+    internal static string GetEffectivePackagePattern(string? packagePattern)
+        => string.IsNullOrWhiteSpace(packagePattern) ? DefaultPackagePattern : packagePattern;
 
-        var overridePrefix = overridePattern[..^1];
-        if (channelPattern == PackageMapping.AllPackages)
+    internal static bool MatchesPackage(string packagePattern, string packageName)
+        => packagePattern.EndsWith('*')
+            ? packageName.StartsWith(packagePattern[..^1], StringComparison.OrdinalIgnoreCase)
+            : string.Equals(packageName, packagePattern, StringComparison.OrdinalIgnoreCase);
+
+    internal static bool CompetesWithAuthoritativePattern(
+        string candidatePattern,
+        string authoritativePattern)
+    {
+        if (authoritativePattern == PackageMapping.AllPackages)
         {
             return false;
         }
 
-        var channelPrefix = channelPattern.EndsWith('*')
-            ? channelPattern[..^1]
-            : channelPattern;
-        return channelPrefix.Length >= overridePrefix.Length &&
-            channelPrefix.StartsWith(overridePrefix, StringComparison.OrdinalIgnoreCase);
+        if (!authoritativePattern.EndsWith('*'))
+        {
+            return string.Equals(candidatePattern, authoritativePattern, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var authoritativePrefix = authoritativePattern[..^1];
+        if (candidatePattern == PackageMapping.AllPackages)
+        {
+            return false;
+        }
+
+        var candidatePrefix = candidatePattern.EndsWith('*')
+            ? candidatePattern[..^1]
+            : candidatePattern;
+        return candidatePrefix.Length >= authoritativePrefix.Length &&
+            candidatePrefix.StartsWith(authoritativePrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     public static PackageMapping[] CreateForSourceOnlyOperations(string packageSourceOverride)
@@ -128,7 +140,7 @@ internal static class PackageSourceOverrideMappings
         // cannot contact a channel feed or NuGet.org behind the user's approved proxy.
         return
         [
-            new("Aspire*", packageSourceOverride),
+            new(DefaultPackagePattern, packageSourceOverride),
             new(PackageMapping.AllPackages, packageSourceOverride)
         ];
     }

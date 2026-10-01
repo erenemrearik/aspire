@@ -93,9 +93,12 @@ internal sealed class IntegrationRestorePlanResolver(
             }
         }
 
+        var effectivePackageSourceOverridePattern = string.IsNullOrWhiteSpace(effectivePackageSourceOverride)
+            ? null
+            : PackageSourceOverrideMappings.GetEffectivePackagePattern(packageSourceOverridePattern);
         var restoreSources = ResolveSources(
             effectivePackageSourceOverride,
-            packageSourceOverridePattern,
+            effectivePackageSourceOverridePattern,
             requestedPolicyChannel,
             executionContext.NuGetServiceIndexOverride);
         restoreSources = NormalizeSources(restoreSources, new DirectoryInfo(appDirectoryPath));
@@ -112,6 +115,7 @@ internal sealed class IntegrationRestorePlanResolver(
 
         return new IntegrationRestorePlan(
             effectivePackageSourceOverride,
+            effectivePackageSourceOverridePattern,
             restoreSources,
             settings,
             configSources,
@@ -300,6 +304,7 @@ internal sealed class IntegrationRestorePlanResolver(
 /// </summary>
 internal sealed class IntegrationRestorePlan
 {
+    private readonly string? _effectivePackageSourceOverridePattern;
     private readonly IntegrationRestoreSources _restoreSources;
     private readonly NuGetSettingsInfo _settings;
     private readonly NuGetConfigSource[] _configSources;
@@ -309,6 +314,7 @@ internal sealed class IntegrationRestorePlan
 
     public IntegrationRestorePlan(
         string? effectivePackageSourceOverride,
+        string? effectivePackageSourceOverridePattern,
         IntegrationRestoreSources restoreSources,
         NuGetSettingsInfo settings,
         NuGetConfigSource[] configSources,
@@ -317,6 +323,7 @@ internal sealed class IntegrationRestorePlan
         BundleNuGetService nugetService)
     {
         EffectivePackageSourceOverride = effectivePackageSourceOverride;
+        _effectivePackageSourceOverridePattern = effectivePackageSourceOverridePattern;
         _restoreSources = restoreSources with
         {
             AdditionalSources = [.. restoreSources.AdditionalSources],
@@ -346,10 +353,12 @@ internal sealed class IntegrationRestorePlan
 
     public string GetRestoreVersion(string packageName, string version)
     {
-        var useExactAspirePackageVersion =
-            !string.IsNullOrWhiteSpace(EffectivePackageSourceOverride) &&
-            packageName.StartsWith("Aspire", StringComparison.OrdinalIgnoreCase);
-        if (!useExactAspirePackageVersion || version.Length == 0 || version[0] is '[' or '(')
+        var useExactPackageVersion =
+            _effectivePackageSourceOverridePattern is not null &&
+            PackageSourceOverrideMappings.MatchesPackage(
+                _effectivePackageSourceOverridePattern,
+                packageName);
+        if (!useExactPackageVersion || version.Length == 0 || version[0] is '[' or '(')
         {
             return version;
         }
@@ -599,7 +608,9 @@ internal sealed class IntegrationRestorePlan
         foreach (var patterns in patternsBySourceKey.Values)
         {
             patterns.RemoveAll(pattern => authoritativePatterns.Any(
-                authoritativePattern => CompetesWithAuthoritativePattern(pattern, authoritativePattern)));
+                authoritativePattern => PackageSourceOverrideMappings.CompetesWithAuthoritativePattern(
+                    pattern,
+                    authoritativePattern)));
         }
 
         foreach (var mapping in selectedMappings)
@@ -747,36 +758,6 @@ internal sealed class IntegrationRestorePlan
         {
             patterns.Add(pattern);
         }
-    }
-
-    private static bool CompetesWithAuthoritativePattern(
-        string ambientPattern,
-        string authoritativePattern)
-    {
-        if (authoritativePattern == PackageMapping.AllPackages)
-        {
-            return false;
-        }
-
-        if (!authoritativePattern.EndsWith('*'))
-        {
-            return string.Equals(
-                ambientPattern,
-                authoritativePattern,
-                StringComparison.OrdinalIgnoreCase);
-        }
-
-        var authoritativePrefix = authoritativePattern[..^1];
-        if (ambientPattern == PackageMapping.AllPackages)
-        {
-            return false;
-        }
-
-        var ambientPrefix = ambientPattern.EndsWith('*')
-            ? ambientPattern[..^1]
-            : ambientPattern;
-        return ambientPrefix.Length >= authoritativePrefix.Length &&
-            ambientPrefix.StartsWith(authoritativePrefix, StringComparison.OrdinalIgnoreCase);
     }
 }
 

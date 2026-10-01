@@ -2075,6 +2075,36 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
+    public async Task PrepareAsync_WithExactPackageSourceOverridePattern_PinsOnlyMatchingPackage()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var packageSourceOverride = workspace.CreateDirectory("integration-packages").FullName;
+        const string selectedPackage = "CommunityToolkit.Aspire.Hosting.Redis";
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
+        var workingDirectory = GetWorkingDirectory(server);
+
+        try
+        {
+            var result = await server.PrepareAsync(
+                "13.4.0",
+                [
+                    IntegrationReference.FromPackage("Aspire.Hosting.Redis", "13.4.0"),
+                    IntegrationReference.FromPackage(selectedPackage, "1.0.0")
+                ],
+                packageSourceOverride: packageSourceOverride,
+                packageSourceOverridePattern: selectedPackage);
+
+            Assert.True(result.Success);
+            Assert.Contains(("Aspire.Hosting.Redis", "13.4.0"), nuGetClient.LastRestorePackages!);
+            Assert.Contains((selectedPackage, "[1.0.0]"), nuGetClient.LastRestorePackages!);
+        }
+        finally
+        {
+            DeleteWorkingDirectory(workingDirectory);
+        }
+    }
+
+    [Fact]
     public async Task PrepareAsync_WithPackageSourceOverride_DoesNotAddNuGetOrgFallbackSource()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
