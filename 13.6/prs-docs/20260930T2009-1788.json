@@ -1,0 +1,9 @@
+{
+  "author": "app/dependabot",
+  "comment": "Routine NuGet dependency bump in docs repo build infra; no documentation content change for a changelog entry",
+  "mergedAt": "2026-09-30T20:09:00Z",
+  "number": 1788,
+  "runDate": "2026-10-01T00:08:39Z",
+  "status": "excluded",
+  "title": "Bump the nuget-selected group with 6 updates"
+}

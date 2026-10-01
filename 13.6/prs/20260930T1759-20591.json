@@ -1,0 +1,9 @@
+{
+  "author": "danegsta",
+  "comment": "Version bump only (eng/Versions.props patch increment); no user-facing product change",
+  "mergedAt": "2026-09-30T17:59:13Z",
+  "number": 20591,
+  "runDate": "2026-10-01T00:08:33Z",
+  "status": "excluded",
+  "title": "Increment release version to 13.6.1"
+}
