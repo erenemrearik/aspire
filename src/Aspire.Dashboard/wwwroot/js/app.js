@@ -8,6 +8,7 @@ fluentDropdownStyleSheet.replaceSync(`
         background-color: var(--colorNeutralBackground1);
         border: 1px solid var(--colorNeutralStroke1);
         box-shadow: none !important;
+        min-width: var(--aspire-dropdown-min-width, 160px);
     }
 
     .control:hover {

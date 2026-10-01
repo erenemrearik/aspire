@@ -3,7 +3,7 @@
     height: 100%;
     min-width: 0;
     min-height: 0;
-    padding: 0 8px 8px;
+    padding: 0 12px 12px;
     box-sizing: border-box;
     --colorNeutralForeground2: var(--colorNeutralForeground3);
     --colorNeutralForeground1Hover: var(--colorNeutralForeground1);
@@ -91,7 +91,8 @@
 
 .terminal-controls ::deep .terminal-size-select,
 .terminal-controls ::deep .terminal-palette-select {
-    width: max-content;
+    --aspire-dropdown-min-width: 110px;
+    width: 110px;
     min-width: 0;
 }
 
@@ -119,7 +120,7 @@
     align-items: center;
     flex: 0 0 30px;
     min-width: 0;
-    padding: 0 14px;
+    padding: 0 12px;
     padding-inline-end: 8px;
     box-sizing: border-box;
     background: var(--colorNeutralBackground2);
