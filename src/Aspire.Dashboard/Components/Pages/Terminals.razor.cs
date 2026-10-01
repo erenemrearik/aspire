@@ -181,18 +181,18 @@ public sealed partial class Terminals : ComponentBase, IAsyncDisposable, ICompon
     {
         var terminals = _resourceByName.Values.Where(ResourceSelectHelpers.HasUsableTerminal)
             .ToDictionary(r => r.Name, StringComparers.ResourceName);
-        _resources = ResourceSelectHelpers.CreateOptions(terminals, ConsoleLoc[nameof(Dashboard.Resources.ConsoleLogs.ConsoleLogsUnknownState)], _showHiddenResources);
+        _resources = ResourceSelectHelpers.CreateOptions(terminals, ConsoleLoc[nameof(Dashboard.Resources.ConsoleLogs.ConsoleLogsUnknownState)], _showHiddenResources)
+            .Insert(0, new() { Id = null, Name = ControlsLoc[nameof(ControlsStrings.LabelNone)] });
     }
 
     private SelectViewModel<ResourceTypeDetails>? FindResource(string? name)
     {
-        var first = _resources?.FirstOrDefault(r => r.Id?.InstanceId is not null);
-        if (first is null || _resources is null)
+        if (_resources is null)
         {
             return null;
         }
 
-        return _resources.GetResource(Logger, name, canSelectGrouping: false, fallbackViewModel: first);
+        return _resources.GetResource(Logger, name, canSelectGrouping: false, fallbackViewModel: _resources[0]);
     }
 
     public async Task UpdateViewModelFromQueryAsync(TerminalsViewModel viewModel)

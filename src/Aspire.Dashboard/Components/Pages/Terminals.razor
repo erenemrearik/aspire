@@ -43,12 +43,24 @@
                                   Title="@ControlsLoc[nameof(ControlsStrings.ResourceActions)]"
                                   Text="@(ViewportInformation.IsDesktop ? null : ControlsLoc[nameof(ControlsStrings.ResourceActions)].Value)" />
             }
-            <AspireMenuButton ButtonAppearance="ButtonAppearance.Default"
-                              ButtonClass="@(ViewportInformation.IsDesktop ? "toolbar-button toolbar-end" : null)"
-                              Icon="@(new Icons.Regular.Size20.Options())"
-                              ItemsProvider="@(() => _optionsMenuItems)"
-                              Title="@Loc[nameof(TerminalStrings.TerminalsSettings)]"
-                              Text="@(ViewportInformation.IsDesktop ? null : Loc[nameof(TerminalStrings.TerminalsSettings)].Value)" />
+            @if (ViewportInformation.IsDesktop)
+            {
+                <div class="toolbar-end">
+                    <AspireMenuButton ButtonAppearance="ButtonAppearance.Default"
+                                      ButtonClass="toolbar-button"
+                                      Icon="@(new Icons.Regular.Size20.Options())"
+                                      ItemsProvider="@(() => _optionsMenuItems)"
+                                      Title="@Loc[nameof(TerminalStrings.TerminalsSettings)]" />
+                </div>
+            }
+            else
+            {
+                <AspireMenuButton ButtonAppearance="ButtonAppearance.Default"
+                                  Icon="@(new Icons.Regular.Size20.Options())"
+                                  ItemsProvider="@(() => _optionsMenuItems)"
+                                  Title="@Loc[nameof(TerminalStrings.TerminalsSettings)]"
+                                  Text="@Loc[nameof(TerminalStrings.TerminalsSettings)].Value" />
+            }
         </ToolbarSection>
         <MainSection>
             @if (GetSelectedResource() is { } resource && resource.TryGetTerminalReplicaInfo(out var replicaIndex, out _))
@@ -58,7 +70,17 @@
             }
             else if (_resources is not null && !_redirected)
             {
-                <div role="status">@Loc[nameof(TerminalStrings.TerminalsNoVisibleResources)]</div>
+                <div class="aspire-empty-content" role="status">
+                    <FluentIcon Value="@(new Icons.Regular.Size20.WindowConsole())" Width="24px" Color="Color.Primary" />&nbsp;
+                    @if (ViewportInformation.IsDesktop)
+                    {
+                        @Loc[nameof(TerminalStrings.TerminalsSelectAResource)]
+                    }
+                    else
+                    {
+                        <a href="#" @onclick="@(async () => await _contentLayout!.OpenMobileToolbarAsync())" @onclick:preventDefault="true">@Loc[nameof(TerminalStrings.TerminalsSelectAResource)]</a>
+                    }
+                </div>
             }
         </MainSection>
     </AspirePageContentLayout>

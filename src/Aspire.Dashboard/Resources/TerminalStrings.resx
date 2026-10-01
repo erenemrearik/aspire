@@ -171,8 +171,8 @@
   <data name="TerminalsSettings" xml:space="preserve">
     <value>View options</value>
   </data>
-  <data name="TerminalsNoVisibleResources" xml:space="preserve">
-    <value>No terminal resources are visible. Enable Show hidden resources in View options to display hidden terminals.</value>
+  <data name="TerminalsSelectAResource" xml:space="preserve">
+    <value>Select a resource to view its terminal</value>
   </data>
   <data name="TerminalToolbarDecreaseFontSize" xml:space="preserve">
     <value>Decrease font size</value>

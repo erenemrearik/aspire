@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Xunit;
+using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
 
 namespace Aspire.Dashboard.Components.Tests.Pages;
 
@@ -58,8 +59,9 @@ public class TerminalsTests : DashboardTestContext
         }
         var selector = isDesktop ? cut.FindComponent<ResourceSelect>().Instance : dialogProvider.FindComponent<ResourceSelect>().Instance;
         Assert.False(selector.CanSelectGrouping);
-        Assert.Equal(new string?[] { null, "shell-1", "shell-2" }, selector.Resources!.Select(r => r.Id?.InstanceId));
-        Assert.All(selector.Resources!, r => Assert.NotNull(r.Id));
+        Assert.Equal(new string?[] { null, null, "shell-1", "shell-2" }, selector.Resources!.Select(r => r.Id?.InstanceId));
+        Assert.Equal(Resources.ControlsStrings.LabelNone, selector.Resources!.First().Name);
+        Assert.All(selector.Resources!.Skip(1), r => Assert.NotNull(r.Id));
         var terminal = cut.FindComponent<TerminalView>().Instance;
         Assert.Equal("shell", terminal.ResourceName);
         Assert.Equal(1, terminal.ReplicaIndex);
@@ -77,14 +79,75 @@ public class TerminalsTests : DashboardTestContext
         TerminalsSetupHelpers.SetupPage(this, CreateClient(TerminalSetupHelpers.CreateTerminalResource("shell", state: state)));
         var cut = RenderPage("shell");
         Assert.Equal("shell", cut.FindComponent<TerminalView>().Instance.ResourceName);
-        Assert.Equal($"shell ({state})", Assert.Single(cut.FindComponent<ResourceSelect>().Instance.Resources!).Name);
+        Assert.Equal(new[] { Resources.ControlsStrings.LabelNone, $"shell ({state})" },
+            cut.FindComponent<ResourceSelect>().Instance.Resources!.Select(r => r.Name));
     }
 
     [Theory]
-    [InlineData(null, "first")]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public void BaseRoute_DefaultsToNoneAndPromptsForResource(bool isDesktop, bool singleResource)
+    {
+        var resources = singleResource
+            ? new[] { TerminalSetupHelpers.CreateTerminalResource("shell") }
+            : new[] { TerminalSetupHelpers.CreateTerminalResource("first"), TerminalSetupHelpers.CreateTerminalResource("last") };
+        TerminalsSetupHelpers.SetupPage(this, CreateClient(resources));
+        var dialogProvider = Render<CascadingValue<ViewportInformation>>(builder => builder
+            .Add(p => p.Value, new ViewportInformation(IsDesktop: isDesktop, IsUltraLowHeight: false, IsUltraLowWidth: false))
+            .AddChildContent<FluentDialogProvider>());
+        var cut = RenderPage(null, isDesktop);
+
+        Assert.Equal("http://localhost/terminals", Services.GetRequiredService<NavigationManager>().Uri);
+        Assert.Equal(Resources.ControlsStrings.LabelNone, cut.Instance.PageViewModel.SelectedResource!.Name);
+        Assert.Null(cut.Instance.PageViewModel.SelectedResource.Id);
+        Assert.Empty(cut.FindComponents<TerminalView>());
+        Assert.Equal(Resources.TerminalStrings.TerminalsSelectAResource, cut.Find(".aspire-empty-content").TextContent.Trim());
+        Assert.Equal("WindowConsole", cut.FindComponent<FluentIcon<Icons.Regular.Size20.WindowConsole>>().Instance.Value.Name);
+        if (!isDesktop)
+        {
+            cut.Find(".aspire-empty-content a").Click();
+            dialogProvider.WaitForAssertion(() => Assert.Equal(Resources.ControlsStrings.LabelNone,
+                dialogProvider.FindComponent<ResourceSelect>().Instance.SelectedResource!.Name));
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void OptionsMenu_OpensAnchoredToToolbarButton(bool isDesktop)
+    {
+        TerminalsSetupHelpers.SetupPage(this, CreateClient(
+            TerminalSetupHelpers.CreateTerminalResource("shell"),
+            TerminalSetupHelpers.CreateTerminalResource("hidden", hidden: true)));
+        var dialogProvider = Render<CascadingValue<ViewportInformation>>(builder => builder
+            .Add(p => p.Value, new ViewportInformation(IsDesktop: isDesktop, IsUltraLowHeight: false, IsUltraLowWidth: false))
+            .AddChildContent<FluentDialogProvider>());
+        var cut = RenderPage("shell", isDesktop);
+        if (!isDesktop)
+        {
+            cut.Find(".mobile-toolbar").Click();
+            dialogProvider.WaitForAssertion(() => Assert.Single(dialogProvider.FindComponents<ResourceSelect>()));
+        }
+        var buttons = isDesktop ? cut.FindComponents<AspireMenuButton>() : dialogProvider.FindComponents<AspireMenuButton>();
+        var options = buttons.Single(b => b.Instance.Title == Resources.TerminalStrings.TerminalsSettings);
+        Assert.Empty(options.FindComponents<AspireMenu>());
+
+        options.Find($"#{options.Instance.MenuButtonId}").Click();
+
+        var menu = options.FindComponent<AspireMenu>().Instance;
+        Assert.True(menu.Open);
+        Assert.True(menu.Anchored);
+        Assert.Equal(options.Instance.MenuButtonId, menu.Anchor);
+        Assert.Equal(Resources.ControlsStrings.ShowHiddenResources, Assert.Single(menu.Items).Text);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
     [InlineData("last", "last")]
-    [InlineData("deleted", "first")]
-    public void BaseRoute_RestoresSelectionOrSelectsFirst(string? storedResource, string expected)
+    [InlineData("deleted", null)]
+    public void BaseRoute_RestoresSelectionOrDefaultsToNone(string? storedResource, string? expected)
     {
         var storage = new TestSessionStorage
         {
@@ -94,10 +157,18 @@ public class TerminalsTests : DashboardTestContext
         TerminalsSetupHelpers.SetupPage(this, CreateClient(
             TerminalSetupHelpers.CreateTerminalResource("first"), TerminalSetupHelpers.CreateTerminalResource("last")), storage);
         var cut = RenderPage(null);
-        Assert.Equal($"http://localhost/terminals/resource/{expected}", Services.GetRequiredService<NavigationManager>().Uri);
-        // bUnit does not run the Router when NavigateTo changes the address.
-        cut.Render(builder => builder.Add(p => p.ResourceName, expected));
-        Assert.Equal(expected, cut.FindComponent<TerminalView>().Instance.ResourceName);
+        Assert.Equal($"http://localhost{DashboardUrls.TerminalsUrl(expected)}", Services.GetRequiredService<NavigationManager>().Uri);
+        if (expected is not null)
+        {
+            // bUnit does not run the Router when NavigateTo changes the address.
+            cut.Render(builder => builder.Add(p => p.ResourceName, expected));
+            Assert.Equal(expected, cut.FindComponent<TerminalView>().Instance.ResourceName);
+        }
+        else
+        {
+            Assert.Equal(Resources.ControlsStrings.LabelNone, cut.Instance.PageViewModel.SelectedResource!.Name);
+            Assert.Empty(cut.FindComponents<TerminalView>());
+        }
     }
 
     [Fact]
@@ -143,12 +214,16 @@ public class TerminalsTests : DashboardTestContext
         TerminalsSetupHelpers.SetupPage(this, CreateClient(TerminalSetupHelpers.CreateTerminalResource("hidden", hidden: true)));
         var cut = RenderPage(null);
         Assert.Equal("http://localhost/terminals", Services.GetRequiredService<NavigationManager>().Uri);
-        Assert.Empty(cut.FindComponent<ResourceSelect>().Instance.Resources!);
-        Assert.Equal(Resources.TerminalStrings.TerminalsNoVisibleResources, cut.Find("[role='status']").TextContent);
+        Assert.Equal(Resources.ControlsStrings.LabelNone, Assert.Single(cut.FindComponent<ResourceSelect>().Instance.Resources!).Name);
+        Assert.Equal(Resources.TerminalStrings.TerminalsSelectAResource, cut.Find(".aspire-empty-content").TextContent.Trim());
         var options = cut.FindComponents<AspireMenuButton>().Single(b => b.Instance.Title == Resources.TerminalStrings.TerminalsSettings);
         var showHidden = Assert.Single(options.Instance.ItemsProvider(), i => i.Text == Resources.ControlsStrings.ShowHiddenResources);
         await cut.InvokeAsync(showHidden.OnClick!);
-        Assert.Equal("hidden", Assert.Single(cut.FindComponent<ResourceSelect>().Instance.Resources!).Id!.InstanceId);
+        var selector = cut.FindComponent<ResourceSelect>();
+        Assert.Equal(new string?[] { null, "hidden" }, selector.Instance.Resources!.Select(r => r.Id?.InstanceId));
+        Assert.Equal(Resources.ControlsStrings.LabelNone, selector.Instance.SelectedResource!.Name);
+        Assert.Empty(cut.FindComponents<TerminalView>());
+        await cut.InvokeAsync(() => selector.Instance.SelectedResourceChanged.InvokeAsync(selector.Instance.Resources!.Last()));
         Assert.Equal("hidden", cut.FindComponent<TerminalView>().Instance.ResourceName);
     }
 
@@ -172,8 +247,9 @@ public class TerminalsTests : DashboardTestContext
         await updates.Writer.WriteAsync([new(ResourceViewModelChangeType.Delete, last)]);
         cut.WaitForAssertion(() =>
         {
-            Assert.Equal("first", cut.FindComponent<TerminalView>().Instance.ResourceName);
-            Assert.Equal("http://localhost/terminals/resource/first", Services.GetRequiredService<NavigationManager>().Uri);
+            Assert.Equal(Resources.ControlsStrings.LabelNone, cut.Instance.PageViewModel.SelectedResource!.Name);
+            Assert.Empty(cut.FindComponents<TerminalView>());
+            Assert.Equal("http://localhost/terminals", Services.GetRequiredService<NavigationManager>().Uri);
         });
         await updates.Writer.WriteAsync([new(ResourceViewModelChangeType.Upsert, ModelTestHelpers.CreateResource("first"))]);
         cut.WaitForAssertion(() => Assert.Equal("http://localhost/", Services.GetRequiredService<NavigationManager>().Uri));
@@ -203,6 +279,67 @@ public class TerminalsTests : DashboardTestContext
         Assert.Same(viewer, cut.FindComponent<TerminalView>().Instance);
         Assert.Equal("last", viewer.ResourceName);
         Assert.Single(JSInterop.Invocations, i => i.Identifier == "reconnectTerminal");
+    }
+
+    [Fact]
+    public async Task SelectingNone_PersistsAndUnmountsViewerWithoutClosingProducer()
+    {
+        Terminals.TerminalsPageState? saved = null;
+        var storage = new TestSessionStorage
+        {
+            OnSetAsync = (key, value) =>
+            {
+                if (key == BrowserStorageKeys.TerminalsPageState)
+                {
+                    saved = Assert.IsType<Terminals.TerminalsPageState>(value);
+                }
+            }
+        };
+        var client = CreateClient(TerminalSetupHelpers.CreateTerminalResource("shell"));
+        TerminalsSetupHelpers.SetupPage(this, client, storage);
+        var cut = RenderPage("shell");
+        var selector = cut.FindComponent<ResourceSelect>();
+
+        await cut.InvokeAsync(() => selector.Instance.SelectedResourceChanged.InvokeAsync(selector.Instance.Resources!.First()));
+
+        Assert.NotNull(saved);
+        Assert.Null(saved.SelectedResource);
+        Assert.Equal("http://localhost/terminals", Services.GetRequiredService<NavigationManager>().Uri);
+        Assert.Equal(Resources.ControlsStrings.LabelNone, cut.Instance.PageViewModel.SelectedResource!.Name);
+        Assert.Empty(cut.FindComponents<TerminalView>());
+        Assert.Empty(client.ClosedTerminals);
+    }
+
+    [Fact]
+    public async Task ResourceUpdates_PreserveNoneSelection()
+    {
+        var updates = Channel.CreateUnbounded<IReadOnlyList<ResourceViewModelChange>>();
+        var client = new TestDashboardClient(isEnabled: true,
+            initialResources: [TerminalSetupHelpers.CreateTerminalResource("shell")], resourceChannelProvider: () => updates);
+        TerminalsSetupHelpers.SetupPage(this, client);
+        var cut = RenderPage(null);
+
+        await updates.Writer.WriteAsync([new(ResourceViewModelChangeType.Upsert, TerminalSetupHelpers.CreateTerminalResource("added"))]);
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal(new string?[] { null, "added", "shell" },
+                cut.FindComponent<ResourceSelect>().Instance.Resources!.Select(r => r.Id?.InstanceId));
+            Assert.Equal(Resources.ControlsStrings.LabelNone, cut.Instance.PageViewModel.SelectedResource!.Name);
+            Assert.Empty(cut.FindComponents<TerminalView>());
+            Assert.Equal("http://localhost/terminals", Services.GetRequiredService<NavigationManager>().Uri);
+        });
+    }
+
+    [Fact]
+    public void InvalidResourceRoute_DefaultsToNone()
+    {
+        TerminalsSetupHelpers.SetupPage(this, CreateClient(TerminalSetupHelpers.CreateTerminalResource("shell")));
+        var cut = RenderPage("deleted");
+
+        Assert.Equal("http://localhost/terminals", Services.GetRequiredService<NavigationManager>().Uri);
+        Assert.Equal(Resources.ControlsStrings.LabelNone, cut.Instance.PageViewModel.SelectedResource!.Name);
+        Assert.Empty(cut.FindComponents<TerminalView>());
     }
 
     [Theory]

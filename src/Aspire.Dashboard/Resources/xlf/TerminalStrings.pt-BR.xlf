@@ -257,14 +257,14 @@
         <target state="new">Terminals</target>
         <note />
       </trans-unit>
-      <trans-unit id="TerminalsNoVisibleResources">
-        <source>No terminal resources are visible. Enable Show hidden resources in View options to display hidden terminals.</source>
-        <target state="new">No terminal resources are visible. Enable Show hidden resources in View options to display hidden terminals.</target>
-        <note />
-      </trans-unit>
       <trans-unit id="TerminalsPageTitle">
         <source>Terminals</source>
         <target state="new">Terminals</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="TerminalsSelectAResource">
+        <source>Select a resource to view its terminal</source>
+        <target state="new">Select a resource to view its terminal</target>
         <note />
       </trans-unit>
       <trans-unit id="TerminalsSelectResourceToolbar">

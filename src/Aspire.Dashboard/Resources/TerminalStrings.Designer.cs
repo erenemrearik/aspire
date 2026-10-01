@@ -148,9 +148,12 @@ namespace Aspire.Dashboard.Resources {
             }
         }
 
-        public static string TerminalsNoVisibleResources {
+        /// <summary>
+        ///   Looks up a localized string similar to Select a resource to view its terminal.
+        /// </summary>
+        public static string TerminalsSelectAResource {
             get {
-                return ResourceManager.GetString("TerminalsNoVisibleResources", resourceCulture);
+                return ResourceManager.GetString("TerminalsSelectAResource", resourceCulture);
             }
         }
 

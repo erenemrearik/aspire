@@ -391,12 +391,15 @@ See the
 ### Terminals page
 
 Resource terminals are displayed on the **Terminals** page at `/terminals`,
-immediately after Console logs in desktop and mobile navigation. Its resource
+after Metrics as the final page link in desktop and mobile navigation. Its resource
 selector contains only terminal-enabled resources with replica metadata, with
 individual replicas selectable and no All option. The page restores the last
-selected resource from browser session storage, otherwise selecting the first
-visible terminal resource. An explicit `/terminals/resource/{resourceName}`
-URL takes precedence.
+selected resource from browser session storage, otherwise defaulting to
+**(None)**, even when only one terminal resource is available. Without a selected
+resource, the page displays a terminal icon and "Select a resource to view its
+terminal"; on mobile, the message opens the resource selector. An explicit
+`/terminals/resource/{resourceName}` URL takes precedence. A selection that is no
+longer available falls back to **(None)**.
 
 The selector follows Console logs for ordering, state labels and the shared
 Show hidden resources setting. Waiting and stopped terminal resources remain

@@ -19,7 +19,7 @@ public class DesktopNavMenuTests : DashboardTestContext
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
-    public void TerminalsNavigation_IsConditionalAndFollowsConsoleLogs(bool enabled, bool hasTerminals)
+    public void TerminalsNavigation_IsConditionalAndLastPageLink(bool enabled, bool hasTerminals)
     {
         FluentUISetupHelpers.AddCommonDashboardServices(this);
         FluentUISetupHelpers.SetupFluentUIComponents(this);
@@ -34,16 +34,18 @@ public class DesktopNavMenuTests : DashboardTestContext
         if (enabled)
         {
             expected.AddRange(["/", "/consolelogs"]);
-            if (hasTerminals)
-            {
-                expected.Add("/terminals");
-            }
         }
         expected.AddRange(["/structuredlogs", "/traces", "/metrics"]);
-        Assert.Equal(expected, cut.FindComponents<FluentAppBarItem>().Select(i => i.Instance.Href));
         if (enabled && hasTerminals)
         {
-            Assert.Equal(Resources.Layout.NavMenuTerminalsTab, cut.FindComponents<FluentAppBarItem>()[2].Instance.Text);
+            expected.Add("/terminals");
+        }
+        Assert.Equal(expected, cut.FindComponents<FluentAppBarItem>().Select(i => i.Instance.Href));
+        Assert.Equal(Resources.Layout.NavMenuStructuredLogsTab,
+            cut.FindComponents<FluentAppBarItem>().Single(i => i.Instance.Href == "/structuredlogs").Instance.Text);
+        if (enabled && hasTerminals)
+        {
+            Assert.Equal(Resources.Layout.NavMenuTerminalsTab, cut.FindComponents<FluentAppBarItem>()[^1].Instance.Text);
         }
     }
 }

@@ -19,7 +19,7 @@ public class MobileNavMenuTests : DashboardTestContext
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void TerminalsNavigation_IsConditionalAndFollowsConsoleLogs(bool hasTerminals)
+    public void TerminalsNavigation_IsConditionalAndLastPageLink(bool hasTerminals)
     {
         var cut = RenderMobileNavMenu("/terminals/resource/shell", hasResourceTerminals: hasTerminals);
         var titles = cut.FindAll("fluent-menu-item").Select(i => i.GetAttribute("title")).Take(hasTerminals ? 6 : 5);
@@ -28,12 +28,14 @@ public class MobileNavMenuTests : DashboardTestContext
             Resources.Layout.NavMenuResourcesTab,
             Resources.Layout.NavMenuConsoleLogsTab
         };
+        expected.AddRange([Resources.Layout.NavMenuStructuredLogsTab, Resources.Layout.NavMenuTracesTab, Resources.Layout.NavMenuMetricsTab]);
         if (hasTerminals)
         {
             expected.Add(Resources.Layout.NavMenuTerminalsTab);
         }
-        expected.AddRange([Resources.StructuredLogs.StructuredLogsHeader, Resources.Layout.NavMenuTracesTab, Resources.Layout.NavMenuMetricsTab]);
         Assert.Equal(expected, titles);
+        Assert.Equal(Resources.Layout.MainLayoutAspireRepoLink,
+            cut.FindAll("fluent-menu-item").Skip(hasTerminals ? 6 : 5).First().GetAttribute("title"));
         if (hasTerminals)
         {
             AssertMenuItemIsActive(cut, Resources.Layout.NavMenuTerminalsTab);
@@ -45,7 +47,7 @@ public class MobileNavMenuTests : DashboardTestContext
     {
         var cut = RenderMobileNavMenu(DashboardUrls.StructuredLogsUrl());
 
-        AssertMenuItemIsActive(cut, Resources.StructuredLogs.StructuredLogsHeader);
+        AssertMenuItemIsActive(cut, Resources.Layout.NavMenuStructuredLogsTab);
     }
 
     [Fact]
@@ -53,7 +55,7 @@ public class MobileNavMenuTests : DashboardTestContext
     {
         var cut = RenderMobileNavMenu(DashboardUrls.StructuredLogsUrl(logLevel: "warning"));
 
-        AssertMenuItemIsActive(cut, Resources.StructuredLogs.StructuredLogsHeader);
+        AssertMenuItemIsActive(cut, Resources.Layout.NavMenuStructuredLogsTab);
     }
 
     [Fact]
