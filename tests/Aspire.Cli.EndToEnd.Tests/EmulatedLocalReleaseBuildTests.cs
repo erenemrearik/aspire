@@ -182,31 +182,26 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Verifies that the package hive shipped with a PR CI archive can back each emulated channel
-    /// identity used to validate a build before publication. The TypeScript AppHost deliberately has
-    /// no persisted channel and the hive is not registered as an ambient NuGet source, so both
-    /// initialization and the subsequent cold <c>aspire add</c> must resolve through
-    /// <c>ASPIRE_CLI_PACKAGES</c>.
+    /// Verifies that the package hive shipped with a PR CI archive can back each channel identity
+    /// used to validate a build before publication. The identity version remains the archive's exact
+    /// package version because PR archives do not contain stable-shaped package aliases. The
+    /// TypeScript AppHost deliberately has no persisted channel and the hive is not registered as an
+    /// ambient NuGet source, so both initialization and the subsequent cold <c>aspire add</c> must
+    /// resolve through <c>ASPIRE_CLI_PACKAGES</c>.
     /// </summary>
     [CaptureWorkspaceOnFailure]
     [Theory]
-    [InlineData("local", false)]
-    [InlineData("daily", false)]
-    [InlineData("staging", false)]
-    [InlineData("staging", true)]
-    [InlineData("stable", true)]
-    public async Task ArchivePackagesBackEmulatedTypeScriptIdentity(
-        string identityChannel,
-        bool useStableShapedIdentityVersion)
+    [InlineData("local")]
+    [InlineData("daily")]
+    [InlineData("staging")]
+    [InlineData("stable")]
+    public async Task ArchivePackagesBackEmulatedTypeScriptIdentity(string identityChannel)
     {
         const string packageId = "Aspire.Hosting.Redis";
 
         var repoRoot = CliE2ETestHelpers.GetRepoRoot();
         var strategy = CliInstallStrategy.Detect(output.WriteLine);
         var archiveContext = RequireArchivePackagesOrSkip(repoRoot, strategy);
-        var identityVersion = useStableShapedIdentityVersion
-            ? GetStableShapedVersion(archiveContext.PackageVersion)
-            : archiveContext.PackageVersion;
         var workspace = TemporaryWorkspace.Create(output);
 
         using var terminal = CliE2ETestHelpers.CreateDockerTestTerminal(
@@ -230,7 +225,7 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
             auto,
             counter,
             identityChannel,
-            identityVersion,
+            archiveContext.PackageVersion,
             archiveContext.HiveLabel);
 
         // Each theory row gets an empty package cache. The archive hive remains invocation-scoped so
@@ -494,20 +489,6 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
             timeout: TimeSpan.FromSeconds(60),
             description: $"aspire --version reporting emulated {identityChannel} identity '{identityVersion}' with archive packages");
         await auto.WaitForSuccessPromptAsync(counter);
-    }
-
-    private static string GetStableShapedVersion(string packageVersion)
-    {
-        var prereleaseSeparator = packageVersion.IndexOf('-');
-        var metadataSeparator = packageVersion.IndexOf('+');
-        var separator = prereleaseSeparator switch
-        {
-            >= 0 when metadataSeparator >= 0 => Math.Min(prereleaseSeparator, metadataSeparator),
-            >= 0 => prereleaseSeparator,
-            _ => metadataSeparator
-        };
-
-        return separator >= 0 ? packageVersion[..separator] : packageVersion;
     }
 
     /// <summary>

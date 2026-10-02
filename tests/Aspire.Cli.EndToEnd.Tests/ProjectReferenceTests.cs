@@ -168,9 +168,12 @@ public sealed class ProjectReferenceTests(ITestOutputHelper output)
             }
             """);
 
-        // Force the mixed-graph operation to restore the complete closure rather than reusing the
-        // package-only assets from above. A new CLI process performs the second add.
+        // The project deliberately excludes ambient feeds, so preserve the already resolved
+        // third-party closure as an offline source before clearing the cache. The mixed-graph
+        // operation must then restore every package and project from sources rather than reusing the
+        // package-only assets above. A new CLI process performs the second add.
         await auto.RunCommandAsync(
+            "find \"$NUGET_PACKAGES\" -name '*.nupkg' -exec cp {} source-feed/ \\; && " +
             "rm -rf \"$NUGET_PACKAGES\" && mkdir -p \"$NUGET_PACKAGES\"",
             counter);
 
