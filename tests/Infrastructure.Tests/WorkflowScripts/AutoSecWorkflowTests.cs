@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Aspire.TestUtilities;
@@ -54,10 +55,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("package-source-changed-other-org")]
     [InlineData("breaking-change")]
     [InlineData("breaking-change-grouped-transition")]
+    [InlineData("breaking-change-unlisted-package")]
     [InlineData("cooldown-not-satisfied")]
+    [InlineData("cooldown-not-satisfied-unlisted-package")]
+    [InlineData("too-many-version-changes")]
     [InlineData("malware-requires-review")]
     [InlineData("fixes-no-open-alert")]
     [InlineData("fixes-no-open-alert-other-directory")]
+    [InlineData("fixes-no-open-alert-vulnerable-copy-remains")]
     [InlineData("no-checks")]
     [InlineData("checks-not-green")]
     [InlineData("statuses-not-green")]
@@ -105,6 +110,37 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 break;
             case "cooldown-not-satisfied":
                 scenario["responses"]!["https://registry.npmjs.org/lodash"]!["body"]!["time"]!["4.17.21"] = "2026-09-28T00:00:00Z";
+                break;
+            case "breaking-change-unlisted-package":
+                // The lockfile also moves react across a major version that the PR body omits.
+                expectedReason = "breaking-change";
+                scenario["contents"]!["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("react", "17.0.2");
+                scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("react", "18.2.0");
+                scenario["responses"]!["https://registry.npmjs.org/react"] = Response(new JsonObject { ["time"] = new JsonObject { ["18.2.0"] = "2026-09-01T00:00:00Z" } });
+                break;
+            case "cooldown-not-satisfied-unlisted-package":
+                // The lockfile also bumps minimist to a release published three days ago.
+                expectedReason = "cooldown-not-satisfied";
+                scenario["contents"]!["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("minimist", "1.2.5");
+                scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("minimist", "1.2.8");
+                scenario["responses"]!["https://registry.npmjs.org/minimist"] = Response(new JsonObject { ["time"] = new JsonObject { ["1.2.8"] = "2026-09-28T00:00:00Z" } });
+                break;
+            case "too-many-version-changes":
+                var baseLock = new StringBuilder(YarnLockEntry("lodash", "4.17.20"));
+                var headLock = new StringBuilder(YarnLockEntry("lodash", "4.17.21"));
+                for (var i = 0; i < 50; i++)
+                {
+                    baseLock.Append(YarnLockEntry($"package-{i}", "1.0.0"));
+                    headLock.Append(YarnLockEntry($"package-{i}", "1.0.1"));
+                }
+                scenario["contents"]!["extension/yarn.lock@base"] = baseLock.ToString();
+                scenario["contents"]!["extension/yarn.lock@head"] = headLock.ToString();
+                break;
+            case "fixes-no-open-alert-vulnerable-copy-remains":
+                // The top-level lodash is bumped but a nested copy stays on the vulnerable version.
+                expectedReason = "fixes-no-open-alert";
+                scenario["contents"]!["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20");
+                scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("lodash", "4.17.20");
                 break;
             case "fixes-no-open-alert":
                 scenario["alerts"]![0]!["first_patched_version"] = "4.17.22";
@@ -228,6 +264,10 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("https://registry.example.com/a/-/a-1.0.0.tgz", "https://registry.example.com/")]
     [InlineData("https://registry.npmjs.org:443/a/-/a-1.0.0.tgz", "")]
     [InlineData("https://registry.npmjs.org:8443/a/-/a-1.0.0.tgz", "https://registry.npmjs.org:8443/")]
+    [InlineData("git://github.com/a/b.git", "git://github.com/")]
+    [InlineData("git://github.com:9418/a/b.git", "git://github.com/")]
+    [InlineData("HTTPS://Registry.Example.com/a.tgz", "https://registry.example.com/")]
+    [InlineData("HTTPS://REGISTRY.NPMJS.ORG/a/-/a-1.0.0.tgz", "")]
     public async Task FindsPackageSourcesAddedOnHead(string headUrl, string expected)
     {
         var result = await RunHarnessAsync(new JsonObject
@@ -238,6 +278,22 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         });
 
         Assert.Equal(expected, string.Join(",", result["value"]!.AsArray().Select(source => source!.GetValue<string>())));
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task ApprovesPrWhoseUnlistedVersionChangesPassEveryGate()
+    {
+        var scenario = CreateApprovalScenario();
+        scenario["contents"]!["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("minimist", "1.2.5");
+        scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("minimist", "1.2.8") + YarnLockEntry("left-pad", "1.3.0");
+        scenario["responses"]!["https://registry.npmjs.org/minimist"] = Response(new JsonObject { ["time"] = new JsonObject { ["1.2.8"] = "2026-09-01T00:00:00Z" } });
+        scenario["responses"]!["https://registry.npmjs.org/left-pad"] = Response(new JsonObject { ["time"] = new JsonObject { ["1.3.0"] = "2026-09-01T00:00:00Z" } });
+
+        var result = await RunHarnessAsync(scenario);
+
+        var decision = Assert.Single(result["value"]!.AsArray());
+        Assert.Equal("approve", decision!["decision"]!.GetValue<string>());
     }
 
     [Fact]
@@ -364,12 +420,16 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             new JsonObject { ["number"] = 2, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "other/yarn.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
             new JsonObject { ["number"] = 3, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = "4.17.22", ["malware"] = false },
             new JsonObject { ["number"] = 4, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = null, ["malware"] = true },
-            new JsonObject { ["number"] = 5, ["ecosystem"] = "pip", ["package"] = "lodash", ["manifest_path"] = "app/uv.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false });
+            new JsonObject { ["number"] = 5, ["ecosystem"] = "pip", ["package"] = "lodash", ["manifest_path"] = "app/uv.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
+            new JsonObject { ["number"] = 6, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "nested/yarn.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
+            new JsonObject { ["number"] = 8, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "nested/yarn.lock", ["first_patched_version"] = null, ["malware"] = true });
         var updates = new JsonArray(new JsonObject { ["name"] = "lodash", ["from"] = "4.17.20", ["to"] = "4.17.21" });
         var headContents = new JsonObject
         {
             ["app/yarn.lock"] = YarnLockEntry("lodash", "4.17.21"),
             ["other/yarn.lock"] = YarnLockEntry("lodash", "4.17.20"),
+            // A nested copy keeps the vulnerable version, so neither alert in nested/ is covered.
+            ["nested/yarn.lock"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("lodash", "4.17.20"),
         };
 
         var result = await RunHarnessAsync(new JsonObject

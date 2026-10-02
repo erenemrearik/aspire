@@ -74,10 +74,12 @@ open Dependabot PRs. Pure code findings are out of scope.
   - only manifest or lock files change
   - no package source or feed is added (only the dnceng public feeds and sources the
     file already uses are accepted)
-  - a changed manifest in the alert's own directory carries the fixed version
+  - a changed manifest in the alert's own directory carries the fixed version, and no
+    copy of the package there stays below it
   - CI and statuses are green
-  - the update stays within the same major version (same minor for `0.x`)
-  - every updated version was published at least 7 days ago
+  - every package version the diff introduces, listed in the PR body or not, stays
+    within the same major version (same minor for `0.x`) and was published at least
+    7 days ago
   - no updated package has an open malware alert (those always need a human review)
 - **Remaining alerts** are fixed in a single `[auto-sec]` PR on
   `auto-sec/security-updates`, labeled `auto-sec`. Later runs update that PR

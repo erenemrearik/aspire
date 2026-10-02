@@ -20,6 +20,9 @@ const DEFAULT_BOT_LOGIN = 'aspire-repo-bot[bot]';
 // at the front of the agent's list cannot starve eligible ones on every run.
 const MAX_APPROVALS = 10;
 const MAX_EVALUATED_REQUESTS = 100;
+// Upper bound on distinct package versions one PR may introduce. Each needs a registry
+// lookup for the cooldown gate, so a larger diff is left to a human reviewer.
+const MAX_VERSION_CHANGES = 50;
 
 // Package sources that are always acceptable in a lockfile or manifest: the
 // repository's dnceng public Azure Artifacts feeds only. Any other source must
@@ -54,6 +57,7 @@ const DEFAULT_PORTS = {
     'git+https': 443,
     'ssh': 22,
     'git+ssh': 22,
+    'git': 9418,
 };
 
 const SUCCESSFUL_CHECK_CONCLUSIONS = new Set(['success', 'skipped', 'neutral']);
@@ -254,10 +258,16 @@ function sourceKey(scheme, host, port, path) {
     return `${origin}/`;
 }
 
+// Every URL scheme npm, yarn, pnpm, uv and NuGet accept for a package location:
+//   https://registry.npmjs.org/a/-/a-1.0.0.tgz   git+https://github.com/o/r.git#v1
+//   git+ssh://git@github.com/o/r.git             git://github.com/o/r.git
+//   ssh://git@github.com/o/r.git
+// URI schemes and hosts are case-insensitive (RFC 3986 sections 3.1 and 3.2.2), so
+// `HTTPS://Registry.Example.com/` is matched and keyed like its lowercase form.
 function extractSources(text) {
     const sources = new Set();
-    for (const match of String(text ?? '').matchAll(/\b(https?|git\+https?|git\+ssh|ssh):\/\/(?:[^@/\s"']+@)?([A-Za-z0-9.-]+)(?::(\d+))?(\/[^\s"'<>]*)?/g)) {
-            sources.add(sourceKey(match[1], match[2], match[3], match[4] ?? '/'));
+    for (const match of String(text ?? '').matchAll(/\b(https?|git\+https?|git\+ssh|git|ssh):\/\/(?:[^@/\s"']+@)?([A-Za-z0-9.-]+)(?::(\d+))?(\/[^\s"'<>]*)?/gi)) {
+        sources.add(sourceKey(match[1], match[2], match[3], match[4] ?? '/'));
     }
     return sources;
 }
@@ -318,28 +328,34 @@ function readJson(text) {
     }
 }
 
+// Every manifest reader below returns the `{ name, version }` entries the file declares
+// or resolves. A package can appear more than once (a lockfile with a top-level and a
+// nested copy, or a dependency plus an override), and every occurrence is returned.
+
 // package.json pins a range per dependency map; `overrides` nest by package name and
 // `resolutions` keys can be glob paths (`**/lodash`), so both are searched recursively.
-function packageJsonVersions(text, matches) {
+// A nested override object pins its own package through the `.` key:
+//   "overrides": { "parent": { ".": "1.0.0", "lodash": "4.17.21" } }
+function packageJsonEntries(text) {
     const json = readJson(text);
     if (!json) {
         return [];
     }
-    const versions = [];
+    const entries = [];
     for (const map of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
         for (const [key, value] of Object.entries(json[map] ?? {})) {
-            if (matches(key) && typeof value === 'string') {
-                versions.push(stripRangeOperators(value));
+            if (typeof value === 'string') {
+                entries.push({ name: key, version: stripRangeOperators(value) });
             }
         }
     }
     const visit = node => {
         for (const [key, value] of Object.entries(node ?? {})) {
-            if (typeof value === 'string' && matches(overrideKeyName(key))) {
-                versions.push(stripRangeOperators(value));
+            if (typeof value === 'string' && key !== '.') {
+                entries.push({ name: overrideKeyName(key), version: stripRangeOperators(value) });
             } else if (value && typeof value === 'object') {
-                if (matches(overrideKeyName(key)) && typeof value['.'] === 'string') {
-                    versions.push(stripRangeOperators(value['.']));
+                if (typeof value['.'] === 'string') {
+                    entries.push({ name: overrideKeyName(key), version: stripRangeOperators(value['.']) });
                 }
                 visit(value);
             }
@@ -347,34 +363,34 @@ function packageJsonVersions(text, matches) {
     };
     visit(json.overrides);
     visit(json.resolutions);
-    return versions;
+    return entries;
 }
 
 // package-lock.json / npm-shrinkwrap.json:
 //   v2/v3: { "packages": { "node_modules/a/node_modules/lodash": { "version": "4.17.21" } } }
 //   v1:    { "dependencies": { "lodash": { "version": "4.17.21", "dependencies": { ... } } } }
-function packageLockVersions(text, matches) {
+function packageLockEntries(text) {
     const json = readJson(text);
     if (!json) {
         return [];
     }
-    const versions = [];
+    const entries = [];
     for (const [path, entry] of Object.entries(json.packages ?? {})) {
         const index = path.lastIndexOf('node_modules/');
-        if (index >= 0 && matches(path.slice(index + 'node_modules/'.length)) && typeof entry?.version === 'string') {
-            versions.push(entry.version);
+        if (index >= 0 && typeof entry?.version === 'string') {
+            entries.push({ name: path.slice(index + 'node_modules/'.length), version: entry.version });
         }
     }
     const visit = dependencies => {
         for (const [key, entry] of Object.entries(dependencies ?? {})) {
-            if (matches(key) && typeof entry?.version === 'string') {
-                versions.push(entry.version);
+            if (typeof entry?.version === 'string') {
+                entries.push({ name: key, version: entry.version });
             }
             visit(entry?.dependencies);
         }
     };
     visit(json.dependencies);
-    return versions;
+    return entries;
 }
 
 // yarn.lock blocks start with an unindented header listing every spec the entry
@@ -382,23 +398,25 @@ function packageLockVersions(text, matches) {
 //   classic: "lodash@^4.17.20", lodash@^4.17.21:\n  version "4.17.21"
 //   berry:   "lodash@npm:^4.17.20":\n  version: 4.17.21
 // Nested `dependencies:` entries are indented further and never bind a version here.
-function yarnLockVersions(text, matches) {
-    const versions = [];
-    let inBlock = false;
+// A header can alias several names to one block; the version is attributed to each.
+function yarnLockEntries(text) {
+    const entries = [];
+    let names = [];
     for (const line of String(text ?? '').split(/\r?\n/)) {
         if (/^\S/.test(line)) {
-            inBlock = !line.startsWith('#') && line.trimEnd().endsWith(':')
-                && line.trimEnd().slice(0, -1).split(',')
-                    .map(spec => spec.trim().replace(/^"|"$/g, ''))
-                    .some(spec => matches(splitNpmSpec(spec).name));
+            names = !line.startsWith('#') && line.trimEnd().endsWith(':')
+                ? [...new Set(line.trimEnd().slice(0, -1).split(',')
+                    .map(spec => splitNpmSpec(spec.trim().replace(/^"|"$/g, '')).name)
+                    .filter(Boolean))]
+                : [];
             continue;
         }
-        const version = inBlock ? /^ {2}version:?\s+"?([^"\s]+)"?\s*$/.exec(line) : null;
+        const version = names.length ? /^ {2}version:?\s+"?([^"\s]+)"?\s*$/.exec(line) : null;
         if (version) {
-            versions.push(version[1]);
+            entries.push(...names.map(name => ({ name, version: version[1] })));
         }
     }
-    return versions;
+    return entries;
 }
 
 // pnpm-lock.yaml lists each resolved package as a two-space indented key, with optional
@@ -406,8 +424,9 @@ function yarnLockVersions(text, matches) {
 //   v9:  '@babel/parser@7.29.3':     lodash@4.17.21(react@18.0.0):
 //   v6:  /lodash@4.17.21:
 //   v5:  /lodash/4.17.21:            /@babel/parser/7.29.3:
-function pnpmLockVersions(text, matches) {
-    const versions = [];
+// Keys without a version (`importers:` children such as `  .:`) are skipped.
+function pnpmLockEntries(text) {
+    const entries = [];
     for (const [, rawKey] of String(text ?? '').matchAll(/^ {2}(\S.*?):\s*$/gm)) {
         const key = rawKey.replace(/^'|'$/g, '').replace(/\(.*$/, '');
         const trimmed = key.replace(/^\//, '');
@@ -417,85 +436,163 @@ function pnpmLockVersions(text, matches) {
             name = trimmed.slice(0, slash);
             range = trimmed.slice(slash + 1);
         }
-        if (range && matches(name)) {
-            versions.push(range);
+        if (range && name) {
+            entries.push({ name, version: range });
         }
     }
-    return versions;
+    return entries;
 }
 
 // uv.lock: [[package]]\nname = "jinja2"\nversion = "3.1.6"
-function uvLockVersions(text, matches) {
-    const versions = [];
+function uvLockEntries(text) {
+    const entries = [];
     for (const block of String(text ?? '').split(/^\[\[package\]\]\s*$/m).slice(1)) {
         const body = block.split(/^\[/m)[0];
         const name = /^name\s*=\s*"([^"]+)"/m.exec(body);
         const version = /^version\s*=\s*"([^"]+)"/m.exec(body);
-        if (name && version && matches(name[1])) {
-            versions.push(version[1]);
+        if (name && version) {
+            entries.push({ name: name[1], version: version[1] });
         }
     }
-    return versions;
+    return entries;
 }
 
 // pyproject.toml PEP 508 requirement strings (https://peps.python.org/pep-0508/):
 //   "jinja2>=3.1.6", "jinja2[i18n]==3.1.6; python_version >= '3.9'", "jinja2 ~= 3.1.6, < 4"
 // Only the lower or exact bound proves the version, so `<`, `<=` and `!=` are ignored.
-function pyprojectVersions(text, matches) {
-    const versions = [];
+function pyprojectEntries(text) {
+    const entries = [];
     for (const [, requirement] of String(text ?? '').matchAll(/["']([A-Za-z0-9][A-Za-z0-9._-]*\s*(?:\[[^\]]*\])?\s*(?:===|==|~=|>=|>)[^"']*)["']/g)) {
         const name = /^[A-Za-z0-9][A-Za-z0-9._-]*/.exec(requirement)[0];
-        if (!matches(name)) {
-            continue;
-        }
         for (const [, version] of requirement.split(';')[0].matchAll(/(?:===|==|~=|>=|>)\s*([^\s,;]+)/g)) {
-            versions.push(version);
+            entries.push({ name, version });
         }
     }
-    return versions;
+    return entries;
 }
 
 // Directory.Packages.props: <PackageVersion Include="System.Text.Json" Version="9.0.5" />
 // The attributes may appear in either order.
-function packagesPropsVersions(text, matches) {
-    const versions = [];
+function packagesPropsEntries(text) {
+    const entries = [];
     for (const [element] of String(text ?? '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/<PackageVersion\b[^>]*>/gi)) {
         const include = xmlAttribute(element, 'Include');
         const version = xmlAttribute(element, 'Version');
-        if (include && version && matches(include)) {
-            versions.push(version.replace(/^\[|\]$/g, ''));
+        if (include && version) {
+            entries.push({ name: include, version: version.replace(/^\[|\]$/g, '') });
         }
     }
-    return versions;
+    return entries;
 }
 
-const MANIFEST_VERSION_READERS = {
-    'package.json': packageJsonVersions,
-    'package-lock.json': packageLockVersions,
-    'npm-shrinkwrap.json': packageLockVersions,
-    'yarn.lock': yarnLockVersions,
-    'pnpm-lock.yaml': pnpmLockVersions,
-    'uv.lock': uvLockVersions,
-    'pyproject.toml': pyprojectVersions,
-    'directory.packages.props': packagesPropsVersions,
+const MANIFEST_READERS = {
+    'package.json': packageJsonEntries,
+    'package-lock.json': packageLockEntries,
+    'npm-shrinkwrap.json': packageLockEntries,
+    'yarn.lock': yarnLockEntries,
+    'pnpm-lock.yaml': pnpmLockEntries,
+    'uv.lock': uvLockEntries,
+    'pyproject.toml': pyprojectEntries,
+    'directory.packages.props': packagesPropsEntries,
 };
+
+// Lockfiles record every resolved copy of a package. The other manifests record only a
+// declared range, whose lower bound (`^4.0.0`) says nothing about what is installed.
+const LOCKFILE_BASENAMES = new Set(['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'uv.lock']);
+
+function manifestReader(path) {
+    return MANIFEST_READERS[basenameOf(String(path ?? '')).toLowerCase()] ?? null;
+}
+
+function sameVersion(left, right) {
+    return left === right || compareVersions(left, right) === 0;
+}
+
+/**
+ * Every version the manifest at `path` binds to `name`, one per occurrence. Package
+ * names compare case-insensitively, with pip names normalized per PEP 503. An
+ * unrecognized manifest returns an empty list so callers fail closed.
+ */
+function manifestPackageVersions(path, text, ecosystem, name) {
+    const reader = manifestReader(path);
+    if (!reader) {
+        return [];
+    }
+    const wanted = normalizePackageName(ecosystem, name);
+    return reader(text)
+        .filter(entry => normalizePackageName(ecosystem, entry.name) === wanted)
+        .map(entry => entry.version);
+}
 
 /**
  * True when the manifest at `path` binds `name` to `version` in one of its own package
  * entries. Each manifest format is parsed so a version is only attributed to the entry
- * that declares it, never to a neighbouring package. Package names compare
- * case-insensitively, with pip names normalized per PEP 503. An unrecognized manifest
- * returns false so the caller fails closed.
+ * that declares it, never to a neighbouring package.
  */
 function manifestMentionsVersion(path, text, ecosystem, name, version) {
-    const reader = MANIFEST_VERSION_READERS[basenameOf(String(path ?? '')).toLowerCase()];
-    if (!reader) {
-        return false;
-    }
-    const wanted = normalizePackageName(ecosystem, name);
-    const matches = candidate => normalizePackageName(ecosystem, candidate) === wanted;
-    return reader(text, matches).some(found => found === version || compareVersions(found, version) === 0);
+    return manifestPackageVersions(path, text, ecosystem, name).some(found => sameVersion(found, version));
 }
+
+/**
+ * Package versions a PR introduces in one manifest: every `{ name, from, to }` where
+ * `to` is bound on head but not on base. `from` lists the base versions the new one
+ * replaces: those removed by the PR, or, when the PR adds a copy and keeps the old ones,
+ * every base version of the package. It is empty for a package that is new to the file.
+ */
+function manifestVersionChanges(path, baseText, headText, ecosystem) {
+    const reader = manifestReader(path);
+    if (!reader) {
+        return [];
+    }
+    const group = text => {
+        const packages = new Map();
+        for (const { name, version } of reader(text)) {
+            const key = normalizePackageName(ecosystem, name);
+            if (!packages.has(key)) {
+                packages.set(key, { name, versions: new Set() });
+            }
+            packages.get(key).versions.add(version);
+        }
+        return packages;
+    };
+    const base = group(baseText);
+    const changes = [];
+    for (const [key, { name, versions }] of group(headText)) {
+        const baseVersions = [...(base.get(key)?.versions ?? [])];
+        const removed = baseVersions.filter(version => !versions.has(version));
+        for (const version of versions) {
+            if (!baseVersions.includes(version)) {
+                changes.push({ name, from: removed.length ? removed : baseVersions, to: version });
+            }
+        }
+    }
+    return changes;
+}
+
+// A new version is breaking unless at least one base version it replaces is a
+// non-breaking predecessor. A package new to the manifest has no predecessor and is
+// left to the cooldown and source gates.
+function isBreakingVersionChange(change) {
+    return change.from.length > 0 && change.from.every(from => isBreakingChange(from, change.to));
+}
+
+/**
+ * True when every occurrence of `update.name` in the changed manifests of the alert's
+ * directory is `acceptable`, and at least one occurrence is the update's new version.
+ * A lockfile can keep an old nested copy (`lodash@4.17.20` under a parent) next to the
+ * bumped top-level one, so a single matching occurrence does not prove the fix. When the
+ * directory has a changed lockfile, only lockfiles are consulted, because a declared
+ * range in package.json does not say which version is installed.
+ */
+function alertDirectoryCarries(alert, ecosystem, update, headContents, acceptable) {
+    const alertDirectory = directoryOf(alert.manifest_path ?? '');
+    const manifests = Object.entries(headContents ?? {}).filter(([path]) => directoryOf(path) === alertDirectory);
+    const lockfiles = manifests.filter(([path]) => LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase()));
+    const versions = (lockfiles.length ? lockfiles : manifests)
+        .flatMap(([path, text]) => manifestPackageVersions(path, text, ecosystem, update.name));
+    return versions.some(version => sameVersion(version, update.to)) && versions.every(acceptable);
+}
+
 function updateMatchesAlert(alert, ecosystem, update) {
     return alert.ecosystem === ecosystem
         && normalizePackageName(ecosystem, alert.package) === normalizePackageName(ecosystem, update.name);
@@ -503,29 +600,29 @@ function updateMatchesAlert(alert, ecosystem, update) {
 
 /**
  * True when `update` provably fixes `alert`. Grouped Dependabot PRs can update the same
- * package in several directories, so a match on package name alone is not enough: a
- * changed manifest in the alert's own directory must name the package at the new version
- * on the PR head. `headContents` maps each changed manifest path to its head text.
- * Malware alerts are never counted as fixed (see `evaluateApprovalGates`).
+ * package in several directories, so a match on package name alone is not enough: the
+ * changed manifests in the alert's own directory must carry the new version on the PR
+ * head, and every remaining occurrence of the package there must be at or above the
+ * first patched version. `headContents` maps each changed manifest path to its head
+ * text. Malware alerts are never counted as fixed (see `evaluateApprovalGates`).
  */
 function alertFixedByUpdate(alert, ecosystem, update, headContents) {
     if (alert.malware || !updateMatchesAlert(alert, ecosystem, update)) {
         return false;
     }
-    const comparison = alert.first_patched_version ? compareVersions(update.to, alert.first_patched_version) : null;
+    const patched = alert.first_patched_version;
+    const comparison = patched ? compareVersions(update.to, patched) : null;
     if (comparison === null || comparison < 0) {
         return false;
     }
-    const alertDirectory = directoryOf(alert.manifest_path ?? '');
-    return Object.entries(headContents ?? {}).some(([path, text]) =>
-        directoryOf(path) === alertDirectory && manifestMentionsVersion(path, text, ecosystem, update.name, update.to));
+    return alertDirectoryCarries(alert, ecosystem, update, headContents, version => (compareVersions(version, patched) ?? -1) >= 0);
 }
 
 /**
  * Alert numbers a Dependabot PR covers, so the agent does not duplicate the fix in the
  * auto-sec PR. Non-malware alerts use the same proof as the approval gate
- * (`alertFixedByUpdate`). Malware alerts have no patched version; they are covered when
- * a changed manifest in the alert's directory moves the flagged package to the PR's new
+ * (`alertFixedByUpdate`). Malware alerts have no patched version; they are covered only
+ * when every occurrence of the flagged package in the alert's directory is the PR's new
  * version, and the approval gate still leaves those PRs to a human reviewer.
  */
 function coveredAlerts(alerts, ecosystem, updates, headContents) {
@@ -535,9 +632,7 @@ function coveredAlerts(alerts, ecosystem, updates, headContents) {
     return (alerts ?? [])
         .filter(alert => updates.some(update => alert.malware
             ? updateMatchesAlert(alert, ecosystem, update)
-                && Object.entries(headContents ?? {}).some(([path, text]) =>
-                    directoryOf(path) === directoryOf(alert.manifest_path ?? '')
-                    && manifestMentionsVersion(path, text, ecosystem, update.name, update.to))
+                && alertDirectoryCarries(alert, ecosystem, update, headContents, version => sameVersion(version, update.to))
             : alertFixedByUpdate(alert, ecosystem, update, headContents)))
         .map(alert => alert.number)
         .sort((a, b) => a - b);
@@ -582,15 +677,25 @@ function evaluateApprovalGates(input) {
     if (sourceChanges.some(change => change.newSources.length > 0)) {
         reasons.push('package-source-changed');
     }
+    // `versionChanges` is every package version the diff introduces, including ones the
+    // PR body does not list, so the gates below cannot be bypassed by an unlisted bump.
+    const versionChanges = input.versionChanges ?? [];
+    const tooManyVersionChanges = versionChanges.length > MAX_VERSION_CHANGES;
+    if (tooManyVersionChanges) {
+        reasons.push('too-many-version-changes');
+    }
 
     const updates = parseDependabotUpdates(pr.title, pr.body);
     if (!updates.length) {
         reasons.push('no-parseable-updates');
     }
-    if (updates.some(update => isBreakingChange(update.from, update.to))) {
+    if (updates.some(update => isBreakingChange(update.from, update.to))
+        || versionChanges.some(isBreakingVersionChange)) {
         reasons.push('breaking-change');
     }
-    if (updates.some(update => !isCooldownSatisfied(packageInfo[`${update.name}@${update.to}`]?.published_at, now))) {
+    const published = (name, version) => packageInfo[`${name}@${version}`]?.published_at;
+    if (updates.some(update => !isCooldownSatisfied(published(update.name, update.to), now))
+        || (!tooManyVersionChanges && versionChanges.some(change => !isCooldownSatisfied(published(change.name, change.to), now)))) {
         reasons.push('cooldown-not-satisfied');
     }
 
@@ -763,18 +868,22 @@ async function isNuGetVersionAvailable(fetchImpl, nugetConfigText, id, normalize
  *
  * NuGet availability follows the repository NuGet.config (`nugetConfigText`): only the
  * sources its package source mapping assigns to the package are probed. When no config
- * text is supplied, `available_on_approved_feed` is `null` (unknown).
+ * text is supplied, `available_on_approved_feed` is `null` (unknown). The approval gate
+ * passes `checkAvailability: false`, since it needs only the publish date; availability
+ * is then `null`.
  */
-async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetch, now = new Date(), nugetConfigText = null } = {}) {
+async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetch, now = new Date(), nugetConfigText = null, checkAvailability = true } = {}) {
     let publishedAt = null;
-    let available = false;
+    let available = null;
 
     switch (ecosystem) {
         case 'npm': {
             const packument = await fetchJson(fetchImpl, `https://registry.npmjs.org/${npmPackagePath(name)}`);
             publishedAt = packument?.time?.[version] ?? null;
-            const mirror = await fetchJson(fetchImpl, `${APPROVED_NPM_REGISTRY}${npmPackagePath(name)}`);
-            available = Boolean(mirror?.versions?.[version]);
+            if (checkAvailability) {
+                const mirror = await fetchJson(fetchImpl, `${APPROVED_NPM_REGISTRY}${npmPackagePath(name)}`);
+                available = Boolean(mirror?.versions?.[version]);
+            }
             break;
         }
         case 'pip': {
@@ -782,7 +891,7 @@ async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetc
             const release = await fetchJson(fetchImpl, `https://pypi.org/pypi/${encodeURIComponent(name)}/${encodeURIComponent(version)}/json`);
             const uploads = (release?.urls ?? []).map(file => file.upload_time_iso_8601).filter(Boolean).sort();
             publishedAt = uploads[0] ?? null;
-            available = release !== null;
+            available = checkAvailability ? release !== null : null;
             break;
         }
         case 'nuget': {
@@ -790,7 +899,7 @@ async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetc
             const normalizedVersion = version.toLowerCase();
             const leaf = await fetchJson(fetchImpl, `https://api.nuget.org/v3/registration5-semver1/${id}/${normalizedVersion}.json`);
             publishedAt = leaf?.published ?? null;
-            available = nugetConfigText ? await isNuGetVersionAvailable(fetchImpl, nugetConfigText, id, normalizedVersion) : null;
+            available = checkAvailability && nugetConfigText ? await isNuGetVersionAvailable(fetchImpl, nugetConfigText, id, normalizedVersion) : null;
             break;
         }
         default:
@@ -849,7 +958,7 @@ function normalizeAlert(alert) {
     };
 }
 
-async function collectGateInput(github, owner, repo, request, { fetchImpl, now, botLogin }) {
+async function collectGateInput(github, owner, repo, request, { fetchImpl, now, botLogin, lookupCache = new Map() }) {
     const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: request.prNumber });
     const pr = {
         number: pull.number,
@@ -871,12 +980,26 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
     // The head text also proves which manifests an update actually touched.
     const sourceChanges = [];
     const headContents = {};
+    const versionChangesByKey = new Map();
+    const ecosystem = ecosystemFromBranch(pr.head_ref);
     for (const file of files.filter(entry => isAllowedManifest(entry.filename))) {
         const baseText = await getFileText(github, owner, repo, file.filename, pr.base_sha);
         const headText = await getFileText(github, owner, repo, file.filename, pr.head_sha);
         headContents[file.filename] = headText;
         sourceChanges.push({ filename: file.filename, newSources: findNewSources(baseText, headText) });
+        if (ecosystem && ecosystem !== 'actions') {
+            for (const change of manifestVersionChanges(file.filename, baseText, headText, ecosystem)) {
+                const key = `${normalizePackageName(ecosystem, change.name)}@${change.to}`;
+                const existing = versionChangesByKey.get(key);
+                if (existing) {
+                    existing.from = [...new Set([...existing.from, ...change.from])];
+                } else {
+                    versionChangesByKey.set(key, { ...change, from: [...change.from] });
+                }
+            }
+        }
     }
+    const versionChanges = [...versionChangesByKey.values()];
 
     const alerts = (await github.paginate('GET /repos/{owner}/{repo}/dependabot/alerts', { owner, repo, state: 'open', per_page: 100 }))
         .map(normalizeAlert);
@@ -894,19 +1017,31 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
     const reviews = (await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number, per_page: 100 }))
         .map(review => ({ user_login: review.user?.login ?? '', state: review.state, commit_id: review.commit_id }));
 
-    const ecosystem = ecosystemFromBranch(pr.head_ref);
     const packageInfo = {};
     if (ecosystem && ecosystem !== 'actions') {
-        for (const update of parseDependabotUpdates(pr.title, pr.body)) {
+        const targets = parseDependabotUpdates(pr.title, pr.body).map(update => ({ name: update.name, to: update.to }));
+        // Past the cap the gate already fails, so skip one registry request per change.
+        if (versionChanges.length <= MAX_VERSION_CHANGES) {
+            targets.push(...versionChanges);
+        }
+        for (const { name, to } of targets) {
+            const key = `${name}@${to}`;
+            if (key in packageInfo) {
+                continue;
+            }
+            const cacheKey = `${ecosystem}:${normalizePackageName(ecosystem, name)}@${to}`;
             try {
-                packageInfo[`${update.name}@${update.to}`] = await lookupPackageVersion(ecosystem, update.name, update.to, { fetchImpl, now });
+                if (!lookupCache.has(cacheKey)) {
+                    lookupCache.set(cacheKey, await lookupPackageVersion(ecosystem, name, to, { fetchImpl, now, checkAvailability: false }));
+                }
+                packageInfo[key] = lookupCache.get(cacheKey);
             } catch {
                 // A failed lookup leaves the entry missing, which fails the cooldown gate closed.
             }
         }
     }
 
-    return { pr, expectedHeadSha: request.headSha, files, alerts, checkRuns, statuses, sourceChanges, headContents, packageInfo, reviews, now, botLogin };
+    return { pr, expectedHeadSha: request.headSha, files, alerts, checkRuns, statuses, sourceChanges, headContents, versionChanges, packageInfo, reviews, now, botLogin };
 }
 
 /**
@@ -930,6 +1065,7 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
     const botLogin = env.AUTO_SEC_BOT_LOGIN || DEFAULT_BOT_LOGIN;
     const { owner, repo } = context.repo;
     const results = [];
+    const lookupCache = new Map();
     let approvals = 0;
 
     for (const request of requests) {
@@ -940,7 +1076,7 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
             continue;
         }
         try {
-            const input = await collectGateInput(github, owner, repo, request, { fetchImpl, now, botLogin });
+            const input = await collectGateInput(github, owner, repo, request, { fetchImpl, now, botLogin, lookupCache });
             result = { pr: request.prNumber, ...evaluateApprovalGates(input) };
         } catch (error) {
             result = { pr: request.prNumber, decision: 'skip', reasons: ['gate-evaluation-failed'], fixedAlerts: [] };
@@ -1000,7 +1136,7 @@ module.exports = {
     APPROVED_SOURCE_PREFIXES,
     COOLDOWN_DAYS,
     MAX_APPROVALS,
-    alertFixedByUpdate,
+    MAX_VERSION_CHANGES,
     compareVersions,
     coveredAlerts,
     ecosystemFromBranch,
@@ -1012,6 +1148,8 @@ module.exports = {
     isCooldownSatisfied,
     lookupPackageVersion,
     manifestMentionsVersion,
+    manifestPackageVersions,
+    manifestVersionChanges,
     normalizePackageName,
     parseDependabotUpdates,
     parseNuGetConfig,

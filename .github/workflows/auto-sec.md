@@ -59,7 +59,8 @@ network:
 tools:
   edit:
   # Package managers are needed to regenerate lockfiles. The prompt requires
-  # `--ignore-scripts` so no dependency install script runs in the agent.
+  # `--ignore-scripts` (npm, yarn) or `--lockfile-only` (pnpm, via corepack) so no
+  # dependency install script runs in the agent.
   bash: ["cat", "ls", "grep", "head", "tail", "wc", "jq", "sed", "find", "diff", "git", "node", "npm", "yarn", "corepack", "uv"]
   github:
     toolsets: [repos, pull_requests]
@@ -88,7 +89,7 @@ pre-agent-steps:
       # A 403 here means the token lost alert access; fail loudly rather than
       # report a misleading "nothing to do".
       gh api --paginate "/repos/${REPO}/dependabot/alerts?state=open&per_page=100" \
-        --jq '.[] | {number, ecosystem: .dependency.package.ecosystem, package: .dependency.package.name, manifest_path: .dependency.manifest_path, scope: .dependency.scope, relationship: .dependency.relationship, severity: .security_advisory.severity, ghsa_id: .security_advisory.ghsa_id, vulnerable_version_range: .security_vulnerability.vulnerable_version_range, first_patched_version: .security_vulnerability.first_patched_version.identifier}' \
+        --jq '.[] | {number, ecosystem: .dependency.package.ecosystem, package: .dependency.package.name, manifest_path: .dependency.manifest_path, scope: .dependency.scope, relationship: .dependency.relationship, vulnerable_version_range: .security_vulnerability.vulnerable_version_range, first_patched_version: .security_vulnerability.first_patched_version.identifier}' \
         | jq -s '.' > .auto-sec/dependabot-alerts.json
       gh api --paginate "/repos/${REPO}/dependabot/alerts?state=open&classification=malware&per_page=100" \
         --jq '.[] | .number' | jq -s '.' > .auto-sec/malware-alert-numbers.json
@@ -313,7 +314,8 @@ these states:
    CVE ids, severities, vulnerability descriptions, or the words "vulnerability",
    "exploit", or "malware".
 5. Never run dependency install scripts. Always pass `--ignore-scripts` to `npm`
-   and `yarn`. Never edit files outside dependency manifests and lockfiles.
+   and `yarn`, and `--lockfile-only` to `pnpm` (which then never runs scripts).
+   Never edit files outside dependency manifests and lockfiles.
 
 ## Inputs
 
@@ -377,6 +379,11 @@ Skip alerts the existing auto-sec PR already fixes.
 - **yarn** (`yarn.lock`): use `yarn up <name>@<version> --mode=update-lockfile`
   (Berry) or `yarn upgrade <name>@<version> --ignore-scripts` (classic), whichever
   matches the directory, or a `resolutions` entry for transitive dependencies.
+- **pnpm** (`pnpm-lock.yaml`): in the manifest directory run
+  `corepack pnpm update <name>@<version> --lockfile-only` for direct dependencies.
+  For transitive dependencies, add a `pnpm.overrides` entry in `package.json` with
+  the patched version, then run `corepack pnpm install --lockfile-only`. Never run
+  `npm` or `yarn` in a pnpm directory; they would write a second lockfile.
 - **pip** (`uv.lock`): in the project directory run
   `uv lock --upgrade-package <name>==<version>`.
 - **nuget** (`Directory.Packages.props`): update the `PackageVersion` entry only
