@@ -64,6 +64,14 @@ public sealed class ProjectReferenceTests(ITestOutputHelper output)
         await auto.WaitUntilTextAsync("Created apphost.mts", timeout: TimeSpan.FromMinutes(2));
         await auto.WaitForSuccessPromptAsync(counter);
 
+        // Establish a package-only restore before introducing the project integration. The second
+        // add below must transition this existing AppHost to a mixed package/project graph rather
+        // than only proving that a graph created as mixed from the outset can restore.
+        await auto.TypeAsync("aspire add Aspire.Hosting.Redis --source source-feed --non-interactive");
+        await auto.EnterAsync();
+        await auto.WaitForAspireAddSuccessAsync(counter, TimeSpan.FromMinutes(3));
+        await auto.RunCommandAsync("grep -q addRedis .aspire/modules/aspire.mts", counter);
+
         var workDir = workspace.WorkspaceRoot.FullName;
         var configPath = Path.Combine(workDir, "aspire.config.json");
         var config = JsonNode.Parse(File.ReadAllText(configPath))?.AsObject()
@@ -160,7 +168,13 @@ public sealed class ProjectReferenceTests(ITestOutputHelper output)
             }
             """);
 
-        await auto.TypeAsync("aspire add Aspire.Hosting.Redis --source source-feed --non-interactive");
+        // Force the mixed-graph operation to restore the complete closure rather than reusing the
+        // package-only assets from above. A new CLI process performs the second add.
+        await auto.RunCommandAsync(
+            "rm -rf \"$NUGET_PACKAGES\" && mkdir -p \"$NUGET_PACKAGES\"",
+            counter);
+
+        await auto.TypeAsync("aspire add Aspire.Hosting.PostgreSQL --source source-feed --non-interactive");
         await auto.EnterAsync();
         await auto.WaitForAspireAddSuccessAsync(counter, TimeSpan.FromMinutes(3));
 
@@ -169,7 +183,8 @@ public sealed class ProjectReferenceTests(ITestOutputHelper output)
             "test -f MyIntegration/obj/AspireIntegration.NuGet.Config && " +
             "grep -q 'packageSource key=\"aspire-apphost-' MyIntegration/obj/AspireIntegration.NuGet.Config && " +
             "grep -q addMyService .aspire/modules/aspire.mts && " +
-            "grep -q addRedis .aspire/modules/aspire.mts",
+            "grep -q addRedis .aspire/modules/aspire.mts && " +
+            "grep -q addPostgres .aspire/modules/aspire.mts",
             counter);
     }
 
