@@ -23,3 +23,8 @@
     border: 1px solid transparent;
     border-radius: 6px;
 }
+
+/* Previous runs show a full date, time and duration on one line, which doesn't fit FluentUI's default 300px menu width. */
+.application-run-select ::deep fluent-menu-list {
+    max-width: 380px;
+}

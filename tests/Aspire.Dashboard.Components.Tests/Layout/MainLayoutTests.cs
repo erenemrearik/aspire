@@ -295,11 +295,11 @@ public partial class MainLayoutTests : DashboardTestContext
             runSelect.FindComponent<AspireMenu>().Instance.Items,
             item =>
             {
-                Assert.Equal("Live run", item.Text);
+                Assert.Equal("Live view", item.Text);
                 Assert.True(item.Checked);
             },
             item => Assert.True(item.IsDivider),
-            item => Assert.Equal("Learn about runs", item.Text));
+            item => Assert.Equal("Learn about recordings", item.Text));
     }
 
     [Fact]
@@ -337,7 +337,7 @@ public partial class MainLayoutTests : DashboardTestContext
         };
         var runStore = new FluentUISetupHelpers.TestDashboardRunStore([currentRun, unavailableRun, incompatibleRun]);
         SetupMainLayoutServices(dashboardRunStore: runStore);
-        var expectedRunText = FormatHelpers.FormatTimeWithOptionalDate(
+        var expectedRunText = FormatHelpers.FormatDateTime(
             Services.GetRequiredService<BrowserTimeProvider>(),
             incompatibleRun.StartedAtUtc.UtcDateTime);
         var cut = Render<DashboardRunSelect>(builder =>
@@ -350,13 +350,14 @@ public partial class MainLayoutTests : DashboardTestContext
         cut.Find("fluent-button").Click();
 
         var items = cut.FindComponent<AspireMenuButton>().Instance.Items;
-        Assert.DoesNotContain(items, item => string.Equals(item.Text, FormatHelpers.FormatTimeWithOptionalDate(
+        Assert.DoesNotContain(items, item => string.Equals(item.Text, FormatHelpers.FormatDateTime(
             Services.GetRequiredService<BrowserTimeProvider>(),
             unavailableRun.StartedAtUtc.UtcDateTime), StringComparison.Ordinal));
-        var incompatibleItem = items[2];
+        Assert.True(items[2].IsGroupHeader);
+        var incompatibleItem = items[3];
         Assert.Equal(expectedRunText, incompatibleItem.Text);
         Assert.True(incompatibleItem.IsDisabled);
-        Assert.Equal("This run can't be viewed because it was created by an incompatible version of the dashboard.", incompatibleItem.Tooltip);
+        Assert.Equal("This recording can't be viewed because it was created by an incompatible version of the dashboard.", incompatibleItem.Tooltip);
         Assert.IsType<Icons.Regular.Size16.Pin>(incompatibleItem.SecondaryActionIcon);
         Assert.NotNull(incompatibleItem.OnSecondaryActionClick);
         var incompatibleMenuItem = cut.WaitForElements("fluent-menu-item")[1];
@@ -440,6 +441,9 @@ public partial class MainLayoutTests : DashboardTestContext
         var expectedHistoricalRunText = FormatHelpers.FormatTimeWithOptionalDate(
             Services.GetRequiredService<BrowserTimeProvider>(),
             historicalRun.StartedAtUtc.UtcDateTime);
+        var expectedHistoricalMenuText = FormatHelpers.FormatDateTime(
+            Services.GetRequiredService<BrowserTimeProvider>(),
+            historicalRun.StartedAtUtc.UtcDateTime);
         JSInterop.SetupVoid("focusElement", _ => true).SetVoidResult();
         var initializedCount = 0;
         var disposedCount = 0;
@@ -459,13 +463,14 @@ public partial class MainLayoutTests : DashboardTestContext
         var menuButton = runSelect.FindComponent<AspireMenuButton>();
         var statusIcon = runSelect.Find(".application-run-status");
         Assert.Equal("start", statusIcon.GetAttribute("slot"));
-        Assert.Contains("fill: var(--success)", statusIcon.GetAttribute("style"), StringComparison.Ordinal);
-        Assert.Equal("Live run", menuButton.Instance.Text);
+        Assert.IsType<Icons.Regular.Size16.History>(menuButton.Instance.IconStart);
+        Assert.Contains("fill: currentColor", statusIcon.GetAttribute("style"), StringComparison.Ordinal);
+        Assert.Equal("Live view", menuButton.Instance.Text);
         Assert.True(menuButton.Instance.HideIcon);
         Assert.Empty(menuButton.FindComponents<AspireMenu>());
         var menuButtonElement = runSelect.Find("fluent-button");
         var menuButtonId = menuButtonElement.Id;
-        Assert.Equal("Select run: Live run", menuButtonElement.GetAttribute("aria-label"));
+        Assert.Equal("Select view: Live view", menuButtonElement.GetAttribute("aria-label"));
 
         var navigationOccurred = false;
         Services.GetRequiredService<NavigationManager>().LocationChanged += (_, _) => navigationOccurred = true;
@@ -474,31 +479,38 @@ public partial class MainLayoutTests : DashboardTestContext
             menuButton.FindComponent<AspireMenu>().Instance.Items,
             item =>
             {
-                Assert.Equal("Live run", item.Text);
+                Assert.Equal("Live view", item.Text);
                 Assert.Equal(MenuItemRole.Radio, item.Role);
                 Assert.True(item.Checked);
                 Assert.IsType<Icons.Regular.Size16.Checkmark>(item.Icon);
+                Assert.Null(item.Description);
                 Assert.IsType<Icons.Regular.Size16.Pin>(item.SecondaryActionIcon);
-                Assert.Equal("Pin run", item.SecondaryActionAriaLabel);
+                Assert.Equal("Pin recording", item.SecondaryActionAriaLabel);
                 Assert.False(item.IsSecondaryActionSelected);
             },
             item => Assert.True(item.IsDivider),
             item =>
             {
-                Assert.Equal(expectedHistoricalRunText, item.Text);
+                Assert.True(item.IsGroupHeader);
+                Assert.Equal("Recordings", item.Text);
+            },
+            item =>
+            {
+                Assert.Equal(expectedHistoricalMenuText, item.Text);
+                Assert.Equal("1h", item.Description);
                 Assert.Equal(MenuItemRole.Radio, item.Role);
                 Assert.False(item.Checked);
                 Assert.IsType<Icons.Regular.Size16.Checkmark>(item.Icon);
                 Assert.IsType<Icons.Regular.Size16.Pin>(item.SecondaryActionIcon);
-                Assert.Equal("Pin run", item.SecondaryActionAriaLabel);
+                Assert.Equal("Pin recording", item.SecondaryActionAriaLabel);
                 Assert.False(item.IsSecondaryActionSelected);
             },
             item => Assert.True(item.IsDivider),
             item =>
             {
-                Assert.Equal("Learn about runs", item.Text);
+                Assert.Equal("Learn about recordings", item.Text);
                 Assert.Equal(
-                    "Switch between the live run and read-only data from previous runs. Pin a run to keep it from being automatically deleted.",
+                    "Switch between the live view and read-only recordings of previous runs. Pin a recording to keep it from being automatically deleted.",
                     item.Tooltip);
                 Assert.IsType<Icons.Regular.Size16.QuestionCircle>(item.Icon);
                 Assert.NotNull(item.AdditionalAttributes);
@@ -523,8 +535,10 @@ public partial class MainLayoutTests : DashboardTestContext
 
         var menuItems = cut.WaitForElements("fluent-menu-item");
         Assert.Equal(2, cut.FindAll("fluent-divider").Count);
+        Assert.Equal("Recordings", cut.Find(".aspire-menu-group-header").TextContent.Trim());
         Assert.Empty(menuItems[0].QuerySelectorAll("span[slot='start']"));
         Assert.Empty(menuItems[1].QuerySelectorAll("span[slot='start']"));
+        Assert.Equal("1h", Assert.Single(menuItems[1].QuerySelectorAll(".aspire-menu-item-description")).TextContent);
         Assert.Single(menuItems[0].QuerySelectorAll("[slot='indicator']"));
         Assert.Single(menuItems[1].QuerySelectorAll("[slot='indicator']"));
         Assert.Equal("menuitemradio", menuItems[0].GetAttribute("role"));
@@ -551,9 +565,9 @@ public partial class MainLayoutTests : DashboardTestContext
         Assert.Null(runSelection.SelectedRunId);
         Assert.True(runSelect.FindComponent<AspireMenu>().Instance.Open);
         menuButton = runSelect.FindComponent<AspireMenuButton>();
-        var historicalItem = menuButton.Instance.Items[2];
+        var historicalItem = menuButton.Instance.Items[3];
         Assert.IsType<Icons.Filled.Size16.Pin>(historicalItem.SecondaryActionIcon);
-        Assert.Equal("Unpin run", historicalItem.SecondaryActionAriaLabel);
+        Assert.Equal("Unpin recording", historicalItem.SecondaryActionAriaLabel);
         Assert.True(historicalItem.IsSecondaryActionSelected);
 
         menuItems = cut.WaitForElements("fluent-menu-item");
@@ -567,11 +581,12 @@ public partial class MainLayoutTests : DashboardTestContext
         runSelect = cut.FindComponent<DashboardRunSelect>();
         menuButton = runSelect.FindComponent<AspireMenuButton>();
         statusIcon = runSelect.Find(".application-run-status");
+        Assert.IsType<Icons.Regular.Size16.History>(menuButton.Instance.IconStart);
         Assert.Contains("fill: var(--warning)", statusIcon.GetAttribute("style"), StringComparison.Ordinal);
         Assert.Equal(expectedHistoricalRunText, menuButton.Instance.Text);
         Assert.False(menuButton.FindComponent<AspireMenu>().Instance.Open);
         Assert.Equal(menuButtonId, runSelect.Find("fluent-button").Id);
-        Assert.Equal($"Select run: {expectedHistoricalRunText}", runSelect.Find("fluent-button").GetAttribute("aria-label"));
+        Assert.Equal($"Select view: {expectedHistoricalRunText}", runSelect.Find("fluent-button").GetAttribute("aria-label"));
         Assert.Contains(
             JSInterop.Invocations,
             invocation => invocation.Identifier == "focusElement" && invocation.Arguments.Single() is string id && id == menuButtonId);
@@ -585,13 +600,14 @@ public partial class MainLayoutTests : DashboardTestContext
                 Assert.IsType<Icons.Regular.Size16.Checkmark>(item.Icon);
             },
             item => Assert.True(item.IsDivider),
+            item => Assert.True(item.IsGroupHeader),
             item =>
             {
                 Assert.True(item.Checked);
                 Assert.IsType<Icons.Regular.Size16.Checkmark>(item.Icon);
             },
             item => Assert.True(item.IsDivider),
-            item => Assert.Equal("Learn about runs", item.Text));
+            item => Assert.Equal("Learn about recordings", item.Text));
         menuItems = cut.WaitForElements("fluent-menu-item");
         Assert.Equal(2, cut.FindAll("fluent-divider").Count);
         Assert.Empty(menuItems[0].QuerySelectorAll("span[slot='start']"));
@@ -606,8 +622,8 @@ public partial class MainLayoutTests : DashboardTestContext
         runSelect = cut.FindComponent<DashboardRunSelect>();
         menuButton = runSelect.FindComponent<AspireMenuButton>();
         statusIcon = runSelect.Find(".application-run-status");
-        Assert.Contains("fill: var(--success)", statusIcon.GetAttribute("style"), StringComparison.Ordinal);
-        Assert.Equal("Live run", menuButton.Instance.Text);
+        Assert.Contains("fill: currentColor", statusIcon.GetAttribute("style"), StringComparison.Ordinal);
+        Assert.Equal("Live view", menuButton.Instance.Text);
         Assert.False(menuButton.FindComponent<AspireMenu>().Instance.Open);
     }
 
@@ -668,7 +684,7 @@ public partial class MainLayoutTests : DashboardTestContext
         Assert.NotNull(cut.Find("#body-content"));
         Assert.True(runSelection.SelectedRun.IsCurrent);
         Assert.Equal(string.Empty, storedRunId);
-        Assert.Equal("Live run", cut.FindComponent<DashboardRunSelect>().FindComponent<AspireMenuButton>().Instance.Text);
+        Assert.Equal("Live view", cut.FindComponent<DashboardRunSelect>().FindComponent<AspireMenuButton>().Instance.Text);
         var errorLog = Assert.Single(testSink.Writes);
         Assert.Equal(LogLevel.Error, errorLog.LogLevel);
         Assert.Equal("Failed to switch to dashboard run 'historical'. Keeping dashboard run 'current' selected.", errorLog.Message);
@@ -759,6 +775,19 @@ public partial class MainLayoutTests : DashboardTestContext
     }
 
     [Fact]
+    public void DashboardRunSelect_FormatRunDuration_UsesRecordedEndTime()
+    {
+        var startedAtUtc = new DateTimeOffset(2025, 1, 2, 12, 0, 0, TimeSpan.Zero);
+        DashboardRunDescriptor CreateRun(DateTimeOffset? endedAtUtc, bool isCurrent = false) =>
+            new("run", DashboardRunStore.SchemaVersion, startedAtUtc, endedAtUtc, CleanShutdown: endedAtUtc is not null, "TestApp", string.Empty, isCurrent);
+
+        Assert.Equal("26m 6s", DashboardRunSelect.FormatRunDuration(CreateRun(startedAtUtc.AddMinutes(26).AddSeconds(6.4))));
+        Assert.Null(DashboardRunSelect.FormatRunDuration(CreateRun(endedAtUtc: null)));
+        Assert.Null(DashboardRunSelect.FormatRunDuration(CreateRun(startedAtUtc.AddMinutes(-1))));
+        Assert.Null(DashboardRunSelect.FormatRunDuration(CreateRun(startedAtUtc.AddMinutes(5), isCurrent: true)));
+    }
+
+    [Fact]
     public void DashboardRunSelect_SortsHistoricalRunsAndRestoresPinFocusAfterReordering()
     {
         var currentRun = new DashboardRunDescriptor(
@@ -785,7 +814,7 @@ public partial class MainLayoutTests : DashboardTestContext
         var expectedHistoricalTexts = historicalRuns
             .OrderByDescending(run => run.IsPinned)
             .ThenByDescending(run => run.StartedAtUtc)
-            .Select(run => FormatHelpers.FormatTimeWithOptionalDate(browserTimeProvider, run.StartedAtUtc.UtcDateTime))
+            .Select(run => FormatHelpers.FormatDateTime(browserTimeProvider, run.StartedAtUtc.UtcDateTime))
             .ToArray();
         var cut = Render<DashboardRunSelect>(builder =>
         {
@@ -797,15 +826,16 @@ public partial class MainLayoutTests : DashboardTestContext
         cut.Find("fluent-button").Click();
 
         var items = cut.FindComponent<AspireMenuButton>().Instance.Items;
-        Assert.Equal("Live run", items[0].Text);
+        Assert.Equal("Live view", items[0].Text);
         Assert.IsType<Icons.Regular.Size16.Pin>(items[0].SecondaryActionIcon);
         Assert.False(items[0].IsSecondaryActionSelected);
         Assert.True(items[1].IsDivider);
-        Assert.Equal(expectedHistoricalTexts, items.Skip(2).Take(historicalRuns.Length).Select(item => item.Text));
-        Assert.All(items.Skip(2).Take(2), item => Assert.True(item.IsSecondaryActionSelected));
-        Assert.All(items.Skip(4).Take(2), item => Assert.False(item.IsSecondaryActionSelected));
+        Assert.True(items[2].IsGroupHeader);
+        Assert.Equal(expectedHistoricalTexts, items.Skip(3).Take(historicalRuns.Length).Select(item => item.Text));
+        Assert.All(items.Skip(3).Take(2), item => Assert.True(item.IsSecondaryActionSelected));
+        Assert.All(items.Skip(5).Take(2), item => Assert.False(item.IsSecondaryActionSelected));
         Assert.True(items[^2].IsDivider);
-        Assert.Equal("Learn about runs", items[^1].Text);
+        Assert.Equal("Learn about recordings", items[^1].Text);
 
         var menuItems = cut.WaitForElements("fluent-menu-item");
         var pinButton = Assert.Single(menuItems[3].QuerySelectorAll("fluent-button"));
@@ -818,12 +848,12 @@ public partial class MainLayoutTests : DashboardTestContext
         expectedHistoricalTexts = historicalRuns
             .OrderByDescending(run => run.IsPinned)
             .ThenByDescending(run => run.StartedAtUtc)
-            .Select(run => FormatHelpers.FormatTimeWithOptionalDate(browserTimeProvider, run.StartedAtUtc.UtcDateTime))
+            .Select(run => FormatHelpers.FormatDateTime(browserTimeProvider, run.StartedAtUtc.UtcDateTime))
             .ToArray();
         items = cut.FindComponent<AspireMenuButton>().Instance.Items;
-        Assert.Equal(expectedHistoricalTexts, items.Skip(2).Take(historicalRuns.Length).Select(item => item.Text));
-        Assert.All(items.Skip(2).Take(3), item => Assert.True(item.IsSecondaryActionSelected));
-        Assert.False(items[5].IsSecondaryActionSelected);
+        Assert.Equal(expectedHistoricalTexts, items.Skip(3).Take(historicalRuns.Length).Select(item => item.Text));
+        Assert.All(items.Skip(3).Take(3), item => Assert.True(item.IsSecondaryActionSelected));
+        Assert.False(items[6].IsSecondaryActionSelected);
 
         menuItems = cut.WaitForElements("fluent-menu-item");
         Assert.Same(pinMenuItem, cut.FindComponents<FluentMenuItem>().Single(item => item.Instance.Id == pinMenuItemId).Instance);
@@ -841,8 +871,8 @@ public partial class MainLayoutTests : DashboardTestContext
         Assert.Equal(
             ["pinned-b", "pinned-a", "unpinned-b", "unpinned-a"],
             DashboardRunSelect.GetSortedRuns(runStore.GetRuns()).Skip(1).Select(run => run.RunId));
-        Assert.All(items.Skip(2).Take(2), item => Assert.True(item.IsSecondaryActionSelected));
-        Assert.All(items.Skip(4).Take(2), item => Assert.False(item.IsSecondaryActionSelected));
+        Assert.All(items.Skip(3).Take(2), item => Assert.True(item.IsSecondaryActionSelected));
+        Assert.All(items.Skip(5).Take(2), item => Assert.False(item.IsSecondaryActionSelected));
         Assert.True(cut.FindComponent<AspireMenu>().Instance.Open);
         Assert.Equal(pinId, Assert.Single(cut.WaitForElements("fluent-menu-item")[3].QuerySelectorAll("fluent-button")).Id);
         Assert.Equal(
@@ -885,7 +915,7 @@ public partial class MainLayoutTests : DashboardTestContext
         Assert.True(runSelection.SelectedRun.IsCurrent);
         var runSelect = cut.FindComponent<DashboardRunSelect>();
         var menuButton = runSelect.FindComponent<AspireMenuButton>();
-        Assert.Equal("Live run", menuButton.Instance.Text);
+        Assert.Equal("Live view", menuButton.Instance.Text);
         Assert.Empty(menuButton.FindComponents<AspireMenu>());
         Assert.Equal(getRunsCallCount, runStore.GetRunsCallCount);
 
@@ -935,7 +965,7 @@ public partial class MainLayoutTests : DashboardTestContext
             builder.Add(p => p.Body, bodyBuilder => bodyBuilder.AddMarkupContent(0, "<div id=\"body-content\"></div>"));
         });
 
-        Assert.Equal("Live run", cut.FindComponent<DashboardRunSelect>().FindComponent<AspireMenuButton>().Instance.Text);
+        Assert.Equal("Live view", cut.FindComponent<DashboardRunSelect>().FindComponent<AspireMenuButton>().Instance.Text);
 
         await cut.InvokeAsync(() => runSelectionSource.SetResult((true, "historical")));
 
@@ -1003,7 +1033,7 @@ public partial class MainLayoutTests : DashboardTestContext
         Assert.True(runSelection.SelectedRun.IsCurrent);
         Assert.Null(runSelection.SelectedRunId);
         Assert.Equal(string.Empty, storedRunId);
-        Assert.Equal("Live run", cut.FindComponent<DashboardRunSelect>().FindComponent<AspireMenuButton>().Instance.Text);
+        Assert.Equal("Live view", cut.FindComponent<DashboardRunSelect>().FindComponent<AspireMenuButton>().Instance.Text);
         var errorLog = Assert.Single(testSink.Writes);
         Assert.Equal(LogLevel.Error, errorLog.LogLevel);
         Assert.Equal("Failed to restore dashboard run 'historical'. Falling back to the current run.", errorLog.Message);
@@ -1059,7 +1089,7 @@ public partial class MainLayoutTests : DashboardTestContext
 
         var runSelection = Assert.IsType<FluentUISetupHelpers.TestDashboardRunSelection>(Services.GetRequiredService<IDashboardRunSelection>());
         Assert.True(runSelection.SelectedRun.IsCurrent);
-        Assert.Equal("Live run", cut.FindComponent<DashboardRunSelect>().FindComponent<AspireMenuButton>().Instance.Text);
+        Assert.Equal("Live view", cut.FindComponent<DashboardRunSelect>().FindComponent<AspireMenuButton>().Instance.Text);
     }
 
     [Theory]

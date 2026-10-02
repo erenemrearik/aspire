@@ -1,7 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Globalization;
 using Aspire.Dashboard.Model;
+using Aspire.Shared;
 using Aspire.Dashboard.Utils;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Localization;
@@ -16,6 +18,7 @@ public partial class DashboardRunSelect : ComponentBase
     private const string DashboardRunsHelpUrl = "https://aka.ms/aspire/run-persistence";
 
     private static readonly Icon s_checkmarkIcon = new Icons.Regular.Size16.Checkmark();
+    private static readonly Icon s_historyIcon = new Icons.Regular.Size16.History();
     private static readonly Icon s_helpIcon = new Icons.Regular.Size16.QuestionCircle();
     private static readonly Icon s_pinIcon = new Icons.Regular.Size16.Pin();
     private static readonly Icon s_pinnedIcon = new Icons.Filled.Size16.Pin();
@@ -56,14 +59,31 @@ public partial class DashboardRunSelect : ComponentBase
         var runs = GetSortedRuns(RunStore.GetRuns());
 
         var menuItems = new List<MenuButtonItem>();
+        var hasRecordings = false;
         foreach (var run in runs)
         {
+            if (!run.IsCurrent && !hasRecordings)
+            {
+                hasRecordings = true;
+                if (menuItems.Count > 0)
+                {
+                    menuItems.Add(new MenuButtonItem { IsDivider = true });
+                }
+                menuItems.Add(new MenuButtonItem
+                {
+                    Id = $"{_runMenuItemIdPrefix}-recordings-header",
+                    IsGroupHeader = true,
+                    Text = Loc[nameof(LayoutResources.DashboardRunSelectRecordings)]
+                });
+            }
+
             var isCompatible = run.IsCompatible;
             var menuItem = new MenuButtonItem
             {
                 Id = $"{_runMenuItemIdPrefix}-{Uri.EscapeDataString(run.RunId)}",
                 RenderKey = run.RunId,
                 Text = FormatRunOption(run),
+                Description = FormatRunDuration(run),
                 Role = MenuItemRole.Radio,
                 Checked = string.Equals(run.RunId, SelectedRunId, StringComparison.Ordinal),
                 Icon = s_checkmarkIcon,
@@ -82,11 +102,6 @@ public partial class DashboardRunSelect : ComponentBase
                 OnClick = () => SelectedRunIdChanged.InvokeAsync(run.IsCurrent ? null : run.RunId)
             };
             menuItems.Add(menuItem);
-
-            if (run.IsCurrent && runs.Count > 1)
-            {
-                menuItems.Add(new MenuButtonItem { IsDivider = true });
-            }
         }
 
         menuItems.Add(new MenuButtonItem { IsDivider = true });
@@ -152,6 +167,21 @@ public partial class DashboardRunSelect : ComponentBase
             return Loc[nameof(LayoutResources.DashboardRunSelectCurrent)];
         }
 
-        return FormatHelpers.FormatTimeWithOptionalDate(TimeProvider, run.StartedAtUtc.UtcDateTime);
+        // Recordings always show their date, unlike the header button, so recordings from different
+        // days remain distinguishable in the list.
+        return FormatHelpers.FormatDateTime(TimeProvider, run.StartedAtUtc.UtcDateTime);
+    }
+
+    internal static string? FormatRunDuration(DashboardRunDescriptor run)
+    {
+        // Runs that didn't shut down cleanly have no end time, so their duration is unknown.
+        if (run.IsCurrent || run.EndedAtUtc is not { } endedAtUtc || endedAtUtc < run.StartedAtUtc)
+        {
+            return null;
+        }
+
+        // Round to whole seconds: sub-second precision is noise for a run's length.
+        var duration = TimeSpan.FromSeconds(Math.Round((endedAtUtc - run.StartedAtUtc).TotalSeconds));
+        return DurationFormatter.FormatDuration(duration, CultureInfo.CurrentCulture);
     }
 }

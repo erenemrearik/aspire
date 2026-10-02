@@ -57,18 +57,25 @@ else
                 <FluentIcon Value="@Item.Icon" Style="vertical-align: text-bottom;" Width="16px" Color="Color.Primary" />
             </span>
         }
-        @if (Item.SecondaryActionIcon is not null)
+        @if (Item.Description is not null || Item.SecondaryActionIcon is not null)
         {
             <span class="aspire-menu-secondary-action-container" slot="end">
-                <FluentButton Id="@($"{Item.Id}-secondary-action")"
-                              Class="@($"aspire-menu-secondary-action{(Item.IsSecondaryActionSelected ? " selected" : null)}")"
-                              Appearance="ButtonAppearance.Transparent"
-                              Title="@Item.SecondaryActionAriaLabel"
-                              AriaLabel="@Item.SecondaryActionAriaLabel"
-                              aria-pressed="@(Item.IsSecondaryActionSelected ? "true" : "false")"
-                              @onclick="HandleSecondaryActionClicked">
-                    <FluentIcon Value="@Item.SecondaryActionIcon" Width="16px" Color="Color.Primary" />
-                </FluentButton>
+                @if (Item.Description is not null)
+                {
+                    <span class="aspire-menu-item-description">@Item.Description</span>
+                }
+                @if (Item.SecondaryActionIcon is not null)
+                {
+                    <FluentButton Id="@($"{Item.Id}-secondary-action")"
+                                  Class="@($"aspire-menu-secondary-action{(Item.IsSecondaryActionSelected ? " selected" : null)}")"
+                                  Appearance="ButtonAppearance.Transparent"
+                                  Title="@Item.SecondaryActionAriaLabel"
+                                  AriaLabel="@Item.SecondaryActionAriaLabel"
+                                  aria-pressed="@(Item.IsSecondaryActionSelected ? "true" : "false")"
+                                  @onclick="HandleSecondaryActionClicked">
+                        <FluentIcon Value="@Item.SecondaryActionIcon" Width="16px" Color="Color.Primary" />
+                    </FluentButton>
+                }
             </span>
         }
     </FluentMenuItem>

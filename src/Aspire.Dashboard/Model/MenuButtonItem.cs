@@ -41,6 +41,11 @@ public class MenuButtonItem
     public List<MenuButtonItem>? NestedMenuItems { get; set; }
     public string? Text { get; set; }
     public string? Tooltip { get; set; }
+    /// <summary>
+    /// Optional secondary text displayed in a muted style at the end of the item, before any
+    /// secondary action (e.g. the duration of a recording).
+    /// </summary>
+    public string? Description { get; set; }
     public Icon? Icon { get; set; }
     public Icon? SecondaryActionIcon { get; set; }
     public string? SecondaryActionAriaLabel { get; set; }

@@ -61,7 +61,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Select dashboard run.
+        ///   Looks up a localized string similar to Live view and recordings.
         /// </summary>
         public static string DashboardRunSelectTitle {
             get {
@@ -70,7 +70,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Select run: {0}.
+        ///   Looks up a localized string similar to Select view: {0}.
         /// </summary>
         public static string DashboardRunSelectAccessibleLabel {
             get {
@@ -79,7 +79,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Live run.
+        ///   Looks up a localized string similar to Live view.
         /// </summary>
         public static string DashboardRunSelectCurrent {
             get {
@@ -88,7 +88,16 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Pin run.
+        ///   Looks up a localized string similar to Recordings.
+        /// </summary>
+        public static string DashboardRunSelectRecordings {
+            get {
+                return ResourceManager.GetString("DashboardRunSelectRecordings", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Pin recording.
         /// </summary>
         public static string DashboardRunSelectPin {
             get {
@@ -97,7 +106,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Unpin run.
+        ///   Looks up a localized string similar to Unpin recording.
         /// </summary>
         public static string DashboardRunSelectUnpin {
             get {
@@ -106,7 +115,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to This run can't be viewed because it was created by an incompatible version of the dashboard..
+        ///   Looks up a localized string similar to This recording can't be viewed because it was created by an incompatible version of the dashboard..
         /// </summary>
         public static string DashboardRunSelectIncompatibleTooltip {
             get {
@@ -115,7 +124,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Learn about runs.
+        ///   Looks up a localized string similar to Learn about recordings.
         /// </summary>
         public static string DashboardRunSelectHelp {
             get {
@@ -124,7 +133,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Switch between the live run and read-only data from previous runs. Pin a run to keep it from being automatically deleted..
+        ///   Looks up a localized string similar to Switch between the live view and read-only recordings of previous runs. Pin a recording to keep it from being automatically deleted..
         /// </summary>
         public static string DashboardRunSelectHelpTooltip {
             get {

@@ -5,6 +5,18 @@ span.aspire-menu-secondary-action-container {
     grid-column: 4;
     grid-row: 1;
     justify-content: center;
+    gap: 8px;
+}
+
+/* Keep secondary text from touching the item text when the menu is at its maximum width. */
+span.aspire-menu-secondary-action-container:has(.aspire-menu-item-description) {
+    padding-inline-start: 16px;
+}
+
+.aspire-menu-item-description {
+    color: var(--colorNeutralForeground3);
+    font-size: var(--fontSizeBase200);
+    white-space: nowrap;
 }
 
 ::deep .aspire-menu-secondary-action {

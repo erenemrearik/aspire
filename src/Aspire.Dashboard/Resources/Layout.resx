@@ -181,28 +181,31 @@
     <value>AI agents</value>
   </data>
   <data name="DashboardRunSelectTitle" xml:space="preserve">
-    <value>Select dashboard run</value>
+    <value>Live view and recordings</value>
   </data>
   <data name="DashboardRunSelectAccessibleLabel" xml:space="preserve">
-    <value>Select run: {0}</value>
+    <value>Select view: {0}</value>
   </data>
   <data name="DashboardRunSelectCurrent" xml:space="preserve">
-    <value>Live run</value>
+    <value>Live view</value>
+  </data>
+  <data name="DashboardRunSelectRecordings" xml:space="preserve">
+    <value>Recordings</value>
   </data>
   <data name="DashboardRunSelectPin" xml:space="preserve">
-    <value>Pin run</value>
+    <value>Pin recording</value>
   </data>
   <data name="DashboardRunSelectUnpin" xml:space="preserve">
-    <value>Unpin run</value>
+    <value>Unpin recording</value>
   </data>
   <data name="DashboardRunSelectIncompatibleTooltip" xml:space="preserve">
-    <value>This run can't be viewed because it was created by an incompatible version of the dashboard.</value>
+    <value>This recording can't be viewed because it was created by an incompatible version of the dashboard.</value>
   </data>
   <data name="DashboardRunSelectHelp" xml:space="preserve">
-    <value>Learn about runs</value>
+    <value>Learn about recordings</value>
   </data>
   <data name="DashboardRunSelectHelpTooltip" xml:space="preserve">
-    <value>Switch between the live run and read-only data from previous runs. Pin a run to keep it from being automatically deleted.</value>
+    <value>Switch between the live view and read-only recordings of previous runs. Pin a recording to keep it from being automatically deleted.</value>
   </data>
   <data name="NavMenuLandmark" xml:space="preserve">
     <value>Main navigation</value>
