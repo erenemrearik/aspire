@@ -1130,35 +1130,53 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
 
     private string? GetRowAriaCurrent(bool isSelected) => isSelected ? (IsMultiSelection ? "true" : "page") : null;
 
+    private static string GetTabId(ResourceTab tab) => $"tab-{tab}";
+
+    private void OnTabChanged(FluentTab? newTab)
+    {
+        // FluentTabs also raises this when a tab is disposed, for example when leaving the resources view, and
+        // when it syncs with ActiveTabId after a navigation. Only a change made while this layout shows the current
+        // URL is a user selecting a tab.
+        if (!string.Equals(NavigationManager.Uri, _lastLocation, StringComparison.Ordinal)
+            || newTab?.Id is not { } id
+            || !id.StartsWith("tab-", StringComparison.Ordinal)
+            || !Enum.TryParse<ResourceTab>(id["tab-".Length..], out var tab)
+            || tab == CurrentTab)
+        {
+            return;
+        }
+
+        // Tabs map to pages, so a tab change is a navigation. The tab URL keeps the current resource selection.
+        if (GetTabs().FirstOrDefault(t => t.Tab == tab && t.IsVisible)?.Href is { } href)
+        {
+            NavigationManager.NavigateTo(href);
+        }
+    }
+
     private IEnumerable<TabItem> GetTabs()
     {
         var resource = SelectedResource;
         var isTelemetryOnly = SelectedTelemetryOnlyResource is not null;
         var isMultiSelection = IsMultiSelection;
 
-        if (resource is not null || isMultiSelection || _selectedItems.Count == 0)
-        {
-            yield return CreateTab(ResourceTab.Overview, Loc[nameof(Resources.Layout.ResourceTabOverview)], new Icons.Regular.Size16.Board());
-        }
-
-        if (!isTelemetryOnly)
-        {
-            yield return CreateTab(ResourceTab.Console, Loc[nameof(Resources.Layout.NavMenuConsoleLogsTab)], new Icons.Regular.Size16.SlideText());
-        }
-
+        // Every tab is always rendered and hidden when it doesn't apply. Removing a FluentTab makes FluentTabs
+        // activate its first tab, which would navigate away from the current page.
         var errorCount = _selectedItems.Sum(i => i.Resource is { } r ? GetUnviewedErrorCount(r) : 0);
-        yield return CreateTab(ResourceTab.StructuredLogs, StructuredLogsLoc[nameof(Resources.StructuredLogs.StructuredLogsHeader)], new Icons.Regular.Size16.SlideTextSparkle(), errorCount);
-        yield return CreateTab(ResourceTab.Traces, Loc[nameof(Resources.Layout.NavMenuTracesTab)], new Icons.Regular.Size16.GanttChart());
+        yield return CreateTab(ResourceTab.Overview, Loc[nameof(Resources.Layout.ResourceTabOverview)], new Icons.Regular.Size24.Board(),
+            isVisible: resource is not null || isMultiSelection || _selectedItems.Count == 0);
+        yield return CreateTab(ResourceTab.Console, Loc[nameof(Resources.Layout.NavMenuConsoleLogsTab)], new Icons.Regular.Size24.SlideText(),
+            isVisible: !isTelemetryOnly);
+        yield return CreateTab(ResourceTab.StructuredLogs, StructuredLogsLoc[nameof(Resources.StructuredLogs.StructuredLogsHeader)], new Icons.Regular.Size24.SlideTextSparkle(),
+            isVisible: true, errorCount);
+        yield return CreateTab(ResourceTab.Traces, Loc[nameof(Resources.Layout.NavMenuTracesTab)], new Icons.Regular.Size24.GanttChart(),
+            isVisible: true);
+        yield return CreateTab(ResourceTab.Metrics, Loc[nameof(Resources.Layout.NavMenuMetricsTab)], new Icons.Regular.Size24.ChartMultiple(),
+            isVisible: _selectedItems.Count > 0 || CurrentTab == ResourceTab.Metrics);
 
-        if (_selectedItems.Count > 0 || CurrentTab == ResourceTab.Metrics)
-        {
-            yield return CreateTab(ResourceTab.Metrics, Loc[nameof(Resources.Layout.NavMenuMetricsTab)], new Icons.Regular.Size16.ChartMultiple());
-        }
-
-        TabItem CreateTab(ResourceTab tab, string text, Icon icon, int errorCount = 0)
+        TabItem CreateTab(ResourceTab tab, string text, Icon icon, bool isVisible, int errorCount = 0)
         {
             var isAvailable = IsTabAvailable(tab);
-            return new TabItem(tab, text, icon, isAvailable ? GetTabUrl(tab, _selectedResourceNames, RouteResourceName) : null, tab == CurrentTab, errorCount);
+            return new TabItem(tab, text, icon, isVisible, isAvailable ? GetTabUrl(tab, _selectedResourceNames, RouteResourceName) : null, errorCount);
         }
     }
 
@@ -1217,5 +1235,5 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
 
     private sealed record StateCount(string State, int Count, ResourceViewModel Example);
 
-    private sealed record TabItem(ResourceTab Tab, string Text, Icon Icon, string? Href, bool IsActive, int ErrorCount);
+    private sealed record TabItem(ResourceTab Tab, string Text, Icon Icon, bool IsVisible, string? Href, int ErrorCount);
 }

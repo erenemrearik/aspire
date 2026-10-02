@@ -422,31 +422,35 @@ else
                     }
                 </div>
 
-                <nav class="resource-tabs" aria-label="@Loc[nameof(Dashboard.Resources.Layout.ResourceTabsLandmark)]">
-                    @foreach (var tab in GetTabs())
-                    {
-                        @if (tab.Href is not null)
+                @*
+                    Tab content isn't nested inside FluentTab elements. The tab control is just used to display the tabs,
+                    and each tab maps to a page rendered in the body below.
+                *@
+                <div class="resource-tabs">
+                    <FluentTabs Class="resources-tab-header"
+                                ActiveTabId="@GetTabId(CurrentTab)"
+                                ActiveTabChanged="@OnTabChanged"
+                                aria-label="@Loc[nameof(Dashboard.Resources.Layout.ResourceTabsLandmark)]"
+                                Size="null">
+                        @foreach (var tab in GetTabs())
                         {
-                            <a class="resource-tab @(tab.IsActive ? "active" : string.Empty)"
-                               href="@tab.Href"
-                               aria-current="@(tab.IsActive ? "page" : null)">
-                                <FluentIcon Value="@tab.Icon" Width="16px" Color="Color.Custom" CustomColor="currentColor" />
-                                <span>@tab.Text</span>
-                                @if (tab.ErrorCount > 0)
-                                {
-                                    <span class="resource-tab-count error">@tab.ErrorCount</span>
-                                }
-                            </a>
+                            <FluentTab HeaderClass="tab-label"
+                                       Id="@GetTabId(tab.Tab)"
+                                       Visible="@tab.IsVisible"
+                                       Disabled="@(tab.Href is null)"
+                                       title="@(tab.Href is null ? Loc[nameof(Dashboard.Resources.Layout.ResourceTabUnavailable)] : null)"
+                                       IconStart="@tab.Icon">
+                                <HeaderTemplate>
+                                    <span>@tab.Text</span>
+                                    @if (tab.ErrorCount > 0)
+                                    {
+                                        <FluentBadge Class="resource-tab-error-count" Appearance="BadgeAppearance.Tint" Circular="true">@tab.ErrorCount</FluentBadge>
+                                    }
+                                </HeaderTemplate>
+                            </FluentTab>
                         }
-                        else
-                        {
-                            <span class="resource-tab disabled" aria-disabled="true" title="@Loc[nameof(Dashboard.Resources.Layout.ResourceTabUnavailable)]">
-                                <FluentIcon Value="@tab.Icon" Width="16px" Color="Color.Custom" CustomColor="currentColor" />
-                                <span>@tab.Text</span>
-                            </span>
-                        }
-                    }
-                </nav>
+                    </FluentTabs>
+                </div>
             </header>
 
             <div class="resource-tab-body">

@@ -632,71 +632,21 @@
 }
 
 .resource-tabs {
-    display: flex;
-    gap: 2px;
     margin-top: 10px;
+    min-width: 0;
+}
+
+/* FluentTabs keeps its horizontal tab list at max-content width. Constrain the host so
+   focus can scroll the selected tab into view when space is limited. */
+.resource-tabs ::deep .resources-tab-header {
+    width: max-content;
+    max-width: 100%;
+    min-width: 0;
     overflow-x: auto;
-    border-bottom: 1px solid var(--colorNeutralStroke3);
-    scrollbar-width: none;
+    overflow-y: hidden;
 }
 
-.resource-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    position: relative;
-    padding: 9px 12px 10px;
-    color: var(--colorNeutralForeground2);
-    font-size: 13.5px;
-    text-decoration: none;
-    white-space: nowrap;
-}
-
-a.resource-tab:hover {
-    color: var(--colorNeutralForeground1);
-}
-
-.resource-tab.active {
-    color: var(--colorNeutralForeground1);
-    font-weight: 600;
-}
-
-.resource-tab.active ::deep svg {
-    color: var(--colorBrandForeground1);
-}
-
-.resource-tab.active::after {
-    content: "";
-    position: absolute;
-    left: 10px;
-    right: 10px;
-    bottom: -1px;
-    height: 3px;
-    border-radius: 2px;
-    background: var(--colorBrandBackground);
-}
-
-.resource-tab.disabled {
-    opacity: var(--disabled-opacity);
-    cursor: default;
-}
-
-.resource-tab:focus-visible {
-    outline: 2px solid var(--colorStrokeFocus2);
-    outline-offset: -2px;
-    border-radius: 6px;
-}
-
-.resource-tab-count {
-    padding: 0 6px;
-    border-radius: 8px;
-    background: var(--colorNeutralBackground3);
-    color: var(--colorNeutralForeground2);
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.resource-tab-count.error {
+.resource-tabs ::deep .resource-tab-error-count {
     background: color-mix(in srgb, var(--error) 14%, transparent);
     color: var(--error);
 }
