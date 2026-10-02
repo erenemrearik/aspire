@@ -277,6 +277,11 @@
         <target state="new">{0}, {1}</target>
         <note />
       </trans-unit>
+      <trans-unit id="ResourcePaneTagGroupToggle">
+        <source>Expand or collapse {0}</source>
+        <target state="new">Expand or collapse {0}</target>
+        <note>{0} is the tag name</note>
+      </trans-unit>
       <trans-unit id="ResourcePaneTelemetryOnly">
         <source>Sends telemetry, not part of the app model</source>
         <target state="new">Sends telemetry, not part of the app model</target>

@@ -484,6 +484,15 @@ namespace Aspire.Dashboard.Resources {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Expand or collapse {0}.
+        /// </summary>
+        public static string ResourcePaneTagGroupToggle {
+            get {
+                return ResourceManager.GetString("ResourcePaneTagGroupToggle", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Untagged.
         /// </summary>
         public static string ResourcePaneUntaggedGroup {

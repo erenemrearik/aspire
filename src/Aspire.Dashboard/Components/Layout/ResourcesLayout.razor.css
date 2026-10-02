@@ -189,40 +189,49 @@
 .resource-tag-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    width: 100%;
-    min-height: 30px;
-    padding: 4px 8px 4px 4px;
-    border: 0;
+    position: relative;
     border-radius: 8px;
-    background: transparent;
-    color: var(--colorNeutralForeground1);
-    font: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    text-align: start;
-    cursor: pointer;
 }
 
 .resource-tag-header:hover {
-    background: var(--colorNeutralBackground3);
+    background: var(--datagrid-hover-color);
 }
 
-.resource-tag-header:focus-visible {
+.resource-tag-header.selected {
+    background: var(--aspire-control-background);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+}
+
+.resource-tag-header.selected::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--colorBrandBackground);
+}
+
+/* Matches the resource row link so the tag icon lines up with the resource icons below it. */
+.resource-tag-link {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 30px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    color: var(--colorNeutralForeground1);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.resource-tag-link:focus-visible {
     outline: 2px solid var(--colorStrokeFocus2);
     outline-offset: -2px;
-}
-
-.resource-tag-chevron {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    color: var(--colorNeutralForeground2);
-}
-
-.resource-tag-header.collapsed .resource-tag-chevron ::deep svg {
-    transform: rotate(-90deg);
 }
 
 .resource-tag-name {

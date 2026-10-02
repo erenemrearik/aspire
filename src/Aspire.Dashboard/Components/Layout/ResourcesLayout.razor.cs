@@ -1077,6 +1077,44 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
         NavigationManager.NavigateTo(GetSelectionUrl(selection));
     }
 
+    // A single selected resource is shown by its row alone, so a one-resource tag doesn't duplicate the highlight.
+    private bool IsTagGroupSelected(List<string> groupResourceNames) =>
+        groupResourceNames.Count > 1 &&
+        groupResourceNames.Count == _selectedResourceNames.Count &&
+        groupResourceNames.All(IsSelected);
+
+    private void OnTagGroupClick(MouseEventArgs e, List<string> groupResourceNames)
+    {
+        if (groupResourceNames.Count == 0)
+        {
+            return;
+        }
+
+        IReadOnlyList<string> selection;
+        if (e.CtrlKey || e.MetaKey)
+        {
+            // Like rows, a modifier click toggles the tag's resources in the current selection.
+            var toggled = _selectedResourceNames.ToList();
+            if (groupResourceNames.All(IsSelected))
+            {
+                toggled.RemoveAll(n => groupResourceNames.Contains(n, StringComparers.ResourceName));
+            }
+            else
+            {
+                toggled.AddRange(groupResourceNames.Where(n => !IsSelected(n)));
+            }
+
+            selection = toggled;
+        }
+        else
+        {
+            selection = groupResourceNames;
+        }
+
+        _selectionAnchor = selection is [.., var last] ? last : null;
+        NavigationManager.NavigateTo(GetSelectionUrl(selection));
+    }
+
     private async Task OnAllResourcesClickAsync()
     {
         _selectionAnchor = null;

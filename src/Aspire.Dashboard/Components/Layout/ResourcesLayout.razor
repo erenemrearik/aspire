@@ -178,26 +178,37 @@ else
                             }
                             else
                             {
-                                <button type="button"
-                                        class="resource-tag-header @(isGroupCollapsed ? "collapsed" : string.Empty)"
-                                        aria-expanded="@((!isGroupCollapsed).ToString().ToLowerInvariant())"
-                                        aria-label="@string.Format(CultureInfo.CurrentCulture, Loc[nameof(Dashboard.Resources.Layout.ResourcePaneTagGroupLabel)], groupName, countText)"
-                                        @onclick="@(() => ToggleTagGroup(group))">
-                                    <span class="resource-tag-chevron" aria-hidden="true">
-                                        <FluentIcon Value="@(new Icons.Regular.Size12.ChevronDown())" Color="Color.Custom" CustomColor="currentColor" />
-                                    </span>
-                                    @if (group.Tag is { } tag)
-                                    {
-                                        <FluentIcon Value="@(new Icons.Filled.Size16.Tag())" Width="16px" Color="Color.Custom" CustomColor="@ColorGenerator.Instance.GetColorVariableByKey(tag)" />
-                                        <span class="resource-tag-name"><FluentHighlighter HighlightedText="@_filter.TextFilter" Text="@tag" /></span>
-                                    }
-                                    else
-                                    {
-                                        <FluentIcon Value="@(new Icons.Regular.Size16.Tag())" Width="16px" Color="Color.Custom" CustomColor="var(--colorNeutralForeground3)" />
-                                        <span class="resource-tag-name">@groupName</span>
-                                    }
-                                    <span class="resource-tag-count" aria-hidden="true">@group.Resources.Count</span>
-                                </button>
+                                var groupResourceNames = group.Resources.Select(GetResourceName).ToList();
+                                var isGroupSelected = IsTagGroupSelected(groupResourceNames);
+
+                                <div class="resource-tag-header @(isGroupSelected ? "selected" : string.Empty)">
+                                    @* Selecting a tag selects all of its resources, like a multi-selection of their rows. *@
+                                    <a class="resource-tag-link"
+                                       href="@GetSelectionUrl(groupResourceNames)"
+                                       aria-current="@(isGroupSelected ? "true" : null)"
+                                       aria-label="@string.Format(CultureInfo.CurrentCulture, Loc[nameof(Dashboard.Resources.Layout.ResourcePaneTagGroupLabel)], groupName, countText)"
+                                       @onclick="@(e => OnTagGroupClick(e, groupResourceNames))"
+                                       @onclick:preventDefault="true">
+                                        @if (group.Tag is { } tag)
+                                        {
+                                            <FluentIcon Value="@(new Icons.Filled.Size16.Tag())" Width="16px" Color="Color.Custom" CustomColor="@ColorGenerator.Instance.GetColorVariableByKey(tag)" />
+                                            <span class="resource-tag-name"><FluentHighlighter HighlightedText="@_filter.TextFilter" Text="@tag" /></span>
+                                        }
+                                        else
+                                        {
+                                            <FluentIcon Value="@(new Icons.Regular.Size16.Tag())" Width="16px" Color="Color.Custom" CustomColor="var(--colorNeutralForeground3)" />
+                                            <span class="resource-tag-name">@groupName</span>
+                                        }
+                                        <span class="resource-tag-count" aria-hidden="true">@group.Resources.Count</span>
+                                    </a>
+                                    <button type="button"
+                                            class="resource-row-toggle @(isGroupCollapsed ? "collapsed" : string.Empty)"
+                                            aria-expanded="@((!isGroupCollapsed).ToString().ToLowerInvariant())"
+                                            aria-label="@string.Format(CultureInfo.CurrentCulture, Loc[nameof(Dashboard.Resources.Layout.ResourcePaneTagGroupToggle)], groupName)"
+                                            @onclick="@(() => ToggleTagGroup(group))">
+                                        <FluentIcon Value="@(new Icons.Regular.Size12.ChevronDown())" Color="Color.Default" />
+                                    </button>
+                                </div>
                             }
 
                             @if (!isGroupCollapsed)

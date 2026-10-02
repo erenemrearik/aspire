@@ -297,6 +297,10 @@
   <data name="ResourcePaneTagGroupLabel" xml:space="preserve">
     <value>{0}, {1}</value>
   </data>
+  <data name="ResourcePaneTagGroupToggle" xml:space="preserve">
+    <value>Expand or collapse {0}</value>
+    <comment>{0} is the tag name</comment>
+  </data>
   <data name="PlaceholderPageComingSoon" xml:space="preserve">
     <value>Coming soon</value>
   </data>
