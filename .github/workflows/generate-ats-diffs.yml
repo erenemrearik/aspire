@@ -148,7 +148,7 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           # Release-branch history can differ from main in workflow files.
-          permission-workflows: write
+          permission-workflows: ${{ startsWith(matrix.target_branch, 'release/') && 'write' || '' }}
 
       - name: Create or update pull request
         uses: ./.github/actions/create-pull-request
