@@ -34,6 +34,7 @@ public class TestDashboardClient : IDashboardClient
     public bool IsEnabled { get; }
     public bool IsReadOnly { get; set; }
     public Task WhenConnected { get; }
+    public Task WhenResourcesReady { get; }
     public string ApplicationName { get; } = "TestApp";
     public string? MinRequiredVersion => null;
     public DashboardConnectionState ConnectionState => _connectionState;
@@ -42,6 +43,7 @@ public class TestDashboardClient : IDashboardClient
     public Action? OnTerminalSubscriptionDisposed { get; set; }
     public Action? OnResourceSubscriptionDisposed { get; set; }
     public Func<WatchTerminalsUpdate, Task>? BeforeTerminalUpdateAsync { get; set; }
+    public Func<CancellationToken, Task>? BeforeResourceSubscriptionAsync { get; set; }
     public Action<WatchTerminalsUpdate>? OnTerminalUpdateProcessed { get; set; }
     public int TerminalSubscriptionCount => Volatile.Read(ref _terminalSubscriptionCount);
     public int ActiveTerminalSubscriptionCount => Volatile.Read(ref _activeTerminalSubscriptionCount);
@@ -65,12 +67,14 @@ public class TestDashboardClient : IDashboardClient
         bool isReadOnly = false,
         Func<Channel<WatchTerminalsUpdate>>? terminalChannelProvider = null,
         Func<string, CancellationToken, Task>? closeTerminal = null,
-        Func<string, CancellationToken, Task<Stream>>? attachTerminal = null)
+        Func<string, CancellationToken, Task<Stream>>? attachTerminal = null,
+        Task? whenResourcesReady = null)
     {
         IsEnabled = isEnabled ?? false;
         IsReadOnly = isReadOnly;
         ApplicationName = applicationName ?? "TestApp";
         WhenConnected = whenConnected ?? Task.CompletedTask;
+        WhenResourcesReady = whenResourcesReady ?? WhenConnected;
         _consoleLogsChannelProvider = consoleLogsChannelProvider;
         _resourceChannelProvider = resourceChannelProvider;
         _interactionChannelProvider = interactionChannelProvider;
@@ -191,17 +195,22 @@ public class TestDashboardClient : IDashboardClient
         return Task.CompletedTask;
     }
 
-    public Task<ResourceViewModelSubscription> SubscribeResourcesAsync(CancellationToken cancellationToken)
+    public async Task<ResourceViewModelSubscription> SubscribeResourcesAsync(CancellationToken cancellationToken)
     {
         if (_resourceChannelProvider == null)
         {
             throw new InvalidOperationException("No channel provider set.");
         }
 
+        if (BeforeResourceSubscriptionAsync is { } beforeSubscription)
+        {
+            await beforeSubscription(cancellationToken);
+        }
+
         var channel = _resourceChannelProvider();
         Interlocked.Increment(ref _resourceSubscriptionCount);
 
-        return Task.FromResult(new ResourceViewModelSubscription(_initialResources?.ToImmutableArray() ?? [], BuildSubscription(channel, cancellationToken)));
+        return new ResourceViewModelSubscription(_initialResources?.ToImmutableArray() ?? [], BuildSubscription(channel, cancellationToken));
 
         async IAsyncEnumerable<IReadOnlyList<ResourceViewModelChange>> BuildSubscription(Channel<IReadOnlyList<ResourceViewModelChange>> channel, [EnumeratorCancellation] CancellationToken cancellationToken)
         {

@@ -42,6 +42,7 @@ public sealed class MockDashboardClient : IDashboardClient, IResourceRepositoryW
 
     public bool IsEnabled => true;
     public Task WhenConnected => Task.CompletedTask;
+    public Task WhenResourcesReady => Task.CompletedTask;
     public string ApplicationName => "IntegrationTestApplication";
     public string? MinRequiredVersion => null;
     public DashboardConnectionState ConnectionState => DashboardConnectionState.Connected;

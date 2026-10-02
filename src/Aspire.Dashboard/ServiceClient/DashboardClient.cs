@@ -603,6 +603,7 @@ internal sealed class DashboardClient : IDashboardClient
             List<ResourceViewModelChange>? changes = null;
             ImmutableHashSet<Channel<IReadOnlyList<ResourceViewModelChange>>> resourceChannels = [];
             var shouldUpdateConnectionState = false;
+            var initialDataReceivedTcs = _initialDataReceivedTcs;
 
             lock (_lock)
             {
@@ -637,7 +638,6 @@ internal sealed class DashboardClient : IDashboardClient
                         changes.Add(new(ResourceViewModelChangeType.Upsert, viewModel));
                     }
 
-                    _initialDataReceivedTcs.TrySetResult();
                 }
                 else if (response.KindCase == WatchResourcesUpdate.KindOneofCase.Changes)
                 {
@@ -697,6 +697,9 @@ internal sealed class DashboardClient : IDashboardClient
             if (response.KindCase == WatchResourcesUpdate.KindOneofCase.InitialData)
             {
                 await _resourceRepositoryWriter.ReplaceResourcesAsync(response.InitialData.Resources).ConfigureAwait(false);
+                // SelectedDashboardClient reads the persisted repository, not the in-memory map.
+                // Complete this snapshot's readiness only after both contain the initial resources.
+                initialDataReceivedTcs.TrySetResult();
             }
             else if (response.KindCase == WatchResourcesUpdate.KindOneofCase.Changes)
             {
@@ -851,6 +854,16 @@ internal sealed class DashboardClient : IDashboardClient
     }
 
     public string? MinRequiredVersion => _minRequiredVersion;
+
+    public Task WhenResourcesReady
+    {
+        get
+        {
+            EnsureInitialized();
+
+            return _initialDataReceivedTcs.Task;
+        }
+    }
 
     public ResourceViewModel? GetResource(string resourceName)
     {

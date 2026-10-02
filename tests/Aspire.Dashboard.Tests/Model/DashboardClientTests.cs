@@ -475,6 +475,75 @@ public sealed class DashboardClientTests(ITestOutputHelper testOutputHelper) : I
         Assert.Equal("api", Assert.Single(repositoryWriter.LoadedConsoleLogs));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenResourcesReady_WaitsForInitialSnapshotPersistence(bool emptySnapshot)
+    {
+        var updates = Channel.CreateUnbounded<WatchResourcesUpdate>();
+        var persisting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var persisted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writer = new RecordingResourceRepositoryWriter
+        {
+            OnReplaceResourcesAsync = async _ =>
+            {
+                persisting.TrySetResult();
+                await persisted.Task;
+            }
+        };
+        await using var client = CreateResourceServiceClient(resourceRepositoryWriter: writer);
+        client.SetDashboardServiceClient(new MockDashboardServiceClient { ResourceUpdatesChannel = updates.Reader });
+        var ready = client.WhenResourcesReady;
+        await client.WhenConnected.DefaultTimeout();
+        var subscription = client.SubscribeResourcesAsync(CancellationToken.None);
+        Assert.False(ready.IsCompleted);
+        Assert.False(subscription.IsCompleted);
+
+        try
+        {
+            var initialData = new InitialResourceData();
+            if (!emptySnapshot)
+            {
+                initialData.Resources.Add(new Resource { Name = "shell", CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow) });
+            }
+            await updates.Writer.WriteAsync(new WatchResourcesUpdate { InitialData = initialData });
+            await persisting.Task.DefaultTimeout();
+            Assert.False(ready.IsCompleted);
+            Assert.False(subscription.IsCompleted);
+
+            persisted.SetResult();
+            await ready.DefaultTimeout();
+            var (snapshot, _) = await subscription.DefaultTimeout();
+            Assert.Equal(emptySnapshot ? [] : ["shell"], snapshot.Select(r => r.Name));
+            Assert.Equal(emptySnapshot ? [] : ["shell"], client.GetResources().Select(r => r.Name));
+        }
+        finally
+        {
+            persisted.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task WhenResourcesReady_ReconnectWaitsForNewSnapshot()
+    {
+        await using var client = CreateResourceServiceClient();
+        client.SetDashboardServiceClient(new MockDashboardServiceClient
+        {
+            ResourceUpdatesChannel = Channel.CreateUnbounded<WatchResourcesUpdate>().Reader
+        });
+        var ready = client.WhenResourcesReady;
+        await client.WhenConnected.DefaultTimeout();
+        client.SetInitialDataReceived();
+        await ready.DefaultTimeout();
+
+        client.SetConnectionStateForTesting(DashboardConnectionState.Disconnected);
+        var reconnectedReady = client.WhenResourcesReady;
+        Assert.False(reconnectedReady.IsCompleted);
+        client.SetInitialDataReceived();
+        await reconnectedReady.DefaultTimeout();
+        Assert.NotSame(ready, reconnectedReady);
+    }
+
     [Fact]
     public async Task SubscribeInteractions_OnCancel_ChannelRemoved()
     {
@@ -1228,10 +1297,11 @@ public sealed class DashboardClientTests(ITestOutputHelper testOutputHelper) : I
     {
         public List<(string ResourceName, IReadOnlyList<ConsoleLogLine> LogLines)> ConsoleLogs { get; } = [];
         public List<string> LoadedConsoleLogs { get; } = [];
+        public Func<IReadOnlyList<Resource>, Task>? OnReplaceResourcesAsync { get; init; }
 
         public Task ReplaceResourcesAsync(IReadOnlyList<Resource> resources)
         {
-            return Task.CompletedTask;
+            return OnReplaceResourcesAsync?.Invoke(resources) ?? Task.CompletedTask;
         }
 
         public Task ApplyChangesAsync(IReadOnlyList<WatchResourcesChange> changes)

@@ -470,13 +470,16 @@ Outside the dock, terminal headers keep a fixed icon slot before the workload ti
 uses a ring with the percentage in its tooltip, not inline text; otherwise the
 resource page and detached resource windows show the resource icon when its
 metadata is available, and other surfaces use a terminal icon. Detached windows
-look up the matching resource replica in the Dashboard client's current snapshot
-once when opened; they do not carry icons in their URLs or subscribe to resource
+wait for the initial resource snapshot to be received and persisted before looking
+up the matching resource replica once when opened. The Terminals page also waits
+for that snapshot before restoring its selection or deciding that terminals are
+unavailable. Detached windows do not carry icons in their URLs or subscribe to resource
 updates. Their route is `/terminal-window/resource/{resourceName}`, using the
 same canonical name as the Terminals page: a stable display name for a singleton
 or an instance name for replicas and display-name collisions. The window key uses
 that same name. Reloading a singleton window after a dashboard restart resolves
-the current instance even if its generated name has changed.
+the current instance even if its generated name has changed. A window selects its
+terminal once at startup; opening another terminal uses a new window.
 The window uses resource metadata for the display name and icon; the WebSocket
 connection still uses the resolved instance name, without a numeric replica index.
 An unavailable resource or ambiguous display name shows the ended-terminal

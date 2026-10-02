@@ -22,6 +22,107 @@ namespace Aspire.Dashboard.Components.Tests.Pages;
 [UseCulture("en-US")]
 public class TerminalsTests : DashboardTestContext
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InitialResources_PreservesExplicitOrSavedSelection(bool savedSelection)
+    {
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resources = new List<ResourceViewModel>();
+        var client = new TestDashboardClient(isEnabled: true, initialResources: resources, whenResourcesReady: ready.Task,
+            resourceChannelProvider: () => Channel.CreateUnbounded<IReadOnlyList<ResourceViewModelChange>>());
+        var storage = new TestSessionStorage
+        {
+            OnGetAsync = key => key == BrowserStorageKeys.TerminalsPageState
+                ? (true, new Terminals.TerminalsPageState("shell"))
+                : (false, null)
+        };
+        TerminalsSetupHelpers.SetupPage(this, client, storage);
+        var cut = RenderPage(savedSelection ? null : "shell");
+        var navigation = Services.GetRequiredService<NavigationManager>();
+
+        Assert.True(client.WhenConnected.IsCompleted);
+        Assert.Equal(savedSelection ? "http://localhost/terminals" : "http://localhost/terminals/resource/shell", navigation.Uri);
+        Assert.Empty(cut.FindComponents<TerminalView>());
+        Assert.Equal(0, client.ResourceSubscriptionCount);
+
+        var restored = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        navigation.LocationChanged += (_, _) => restored.TrySetResult();
+        resources.Add(TerminalSetupHelpers.CreateTerminalResource("shell-instance", displayName: "shell"));
+        ready.SetResult();
+        if (savedSelection)
+        {
+            await restored.Task.WaitAsync(DefaultWaitTimeout);
+            // bUnit doesn't run the Router after restoring a saved selection.
+            cut.Render(builder => builder.Add(p => p.ResourceName, "shell"));
+        }
+        cut.WaitForAssertion(() =>
+        {
+            var viewer = cut.FindComponent<TerminalView>().Instance;
+            Assert.Equal("shell-instance", viewer.ResourceName);
+            Assert.Equal("shell", viewer.WindowResourceName);
+            Assert.Equal("http://localhost/terminals/resource/shell", navigation.Uri);
+        });
+    }
+
+    [Fact]
+    public async Task InitialResources_EmptySnapshotRedirectsOnlyAfterReadiness()
+    {
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new TestDashboardClient(isEnabled: true, whenResourcesReady: ready.Task,
+            resourceChannelProvider: () => Channel.CreateUnbounded<IReadOnlyList<ResourceViewModelChange>>());
+        TerminalsSetupHelpers.SetupPage(this, client);
+        var cut = RenderPage("shell");
+        var navigation = Services.GetRequiredService<NavigationManager>();
+        var redirected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        navigation.LocationChanged += (_, _) => redirected.TrySetResult();
+
+        Assert.Equal("http://localhost/terminals/resource/shell", navigation.Uri);
+        ready.SetResult();
+        await redirected.Task.WaitAsync(DefaultWaitTimeout);
+        Assert.Equal("http://localhost/", navigation.Uri);
+        Assert.Empty(cut.FindComponents<TerminalView>());
+    }
+
+    [Theory]
+    [InlineData("storage")]
+    [InlineData("resources")]
+    [InlineData("subscription")]
+    public async Task DisposalDuringInitialization_DoesNotStartWatchOrNavigate(string phase)
+    {
+        var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var client = new TestDashboardClient(isEnabled: true,
+            whenResourcesReady: phase == "resources" ? pending.Task : Task.CompletedTask,
+            initialResources: [TerminalSetupHelpers.CreateTerminalResource("shell")],
+            resourceChannelProvider: () => Channel.CreateUnbounded<IReadOnlyList<ResourceViewModelChange>>())
+        {
+            // Model a repository read already in flight that completes after cancellation.
+            BeforeResourceSubscriptionAsync = _ => phase == "subscription" ? pending.Task : Task.CompletedTask
+        };
+        var storage = new TestSessionStorage
+        {
+            OnGetTaskAsync = async _ =>
+            {
+                if (phase == "storage")
+                {
+                    await pending.Task;
+                }
+                return (false, null);
+            }
+        };
+        TerminalsSetupHelpers.SetupPage(this, client, storage);
+        var cut = RenderPage("shell");
+        var renderCount = cut.RenderCount;
+
+        await cut.InvokeAsync(() => cut.Instance.DisposeAsync().AsTask());
+        pending.SetResult();
+        cut.WaitForState(() => cut.RenderCount > renderCount);
+        Assert.False(Renderer.UnhandledException.IsCompleted);
+        Assert.Empty(cut.FindComponents<TerminalView>());
+        Assert.Equal("http://localhost/terminals/resource/shell", Services.GetRequiredService<NavigationManager>().Uri);
+        Assert.Empty(client.ClosedTerminals);
+    }
+
     [Fact]
     public void InitialConnection_DoesNotRedirectBeforeSnapshotLoads()
     {

@@ -184,6 +184,7 @@ public class DefaultTerminalConnectionResolverTests
     {
         public bool IsEnabled => false;
         public Task WhenConnected => Task.CompletedTask;
+        public Task WhenResourcesReady => Task.CompletedTask;
         public string ApplicationName => "Disabled";
         public string? MinRequiredVersion => null;
         public DashboardConnectionState ConnectionState => DashboardConnectionState.Connected;

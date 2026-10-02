@@ -86,30 +86,32 @@ public sealed partial class Terminals : ComponentBase, IAsyncDisposable, ICompon
             return;
         }
 
-        var hidden = await SessionStorage.GetAsync<bool>(BrowserStorageKeys.ResourcesShowHiddenResources);
-        _showHiddenResources = hidden.Success && hidden.Value;
-        // The persisted repository can still be empty until the resource service's initial snapshot arrives.
-        // Connected is reported after that snapshot is persisted, so don't redirect from a startup placeholder.
+        var cancellationToken = _cts.Token;
         try
         {
-            await DashboardClient.WhenConnected.WaitAsync(_cts.Token);
+            var hidden = await SessionStorage.GetAsync<bool>(BrowserStorageKeys.ResourcesShowHiddenResources).WaitAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            _showHiddenResources = hidden.Success && hidden.Value;
+            // Connection readiness precedes persistence of the initial resource snapshot.
+            await DashboardClient.WhenResourcesReady.WaitAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var (snapshot, updates) = await DataSource.ResourceRepository.SubscribeResourcesAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var resource in snapshot)
+            {
+                _resourceByName[resource.Name] = resource;
+            }
+            UpdateResources();
+            _watchTask = WatchResourcesAsync(updates, cancellationToken);
         }
-        catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return;
         }
-        var (snapshot, updates) = await DataSource.ResourceRepository.SubscribeResourcesAsync(_cts.Token);
-        foreach (var resource in snapshot)
-        {
-            _resourceByName[resource.Name] = resource;
-        }
-        UpdateResources();
-        _watchTask = WatchResourcesAsync(updates, _cts.Token);
     }
 
     protected override async Task OnParametersSetAsync()
     {
-        if (_redirected || _resources is null)
+        if (_disposed || _redirected || _resources is null)
         {
             return;
         }

@@ -16,6 +16,12 @@ public interface IDashboardClient : IResourceRepository, IAsyncDisposable
     Task WhenConnected { get; }
 
     /// <summary>
+    /// Gets a task that completes when the initial resource snapshot has been received and persisted
+    /// to the current run's resource repository. Historical runs are already ready.
+    /// </summary>
+    Task WhenResourcesReady { get; }
+
+    /// <summary>
     /// Gets whether the client object is enabled for use.
     /// </summary>
     /// <remarks>
