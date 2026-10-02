@@ -117,6 +117,11 @@ internal sealed class AddCommand : BaseCommand
                 return CommandResult.Failure(CliExitCodes.InvalidCommand);
             }
 
+            source = string.IsNullOrWhiteSpace(source)
+                ? null
+                : PackageSourceOverrideMappings.ResolveForWorkingDirectory(
+                    source,
+                    ExecutionContext.WorkingDirectory);
             addActivity = _profilingTelemetry.StartAddCommand(integrationName, version, source, passedAppHostProjectFile);
 
             AppHostProjectSearchResult searchResult;
@@ -133,12 +138,6 @@ internal sealed class AddCommand : BaseCommand
             {
                 return AddCommandFailure(CliExitCodes.FailedToFindProject);
             }
-
-            var resolvedSource = string.IsNullOrWhiteSpace(source)
-                ? null
-                : PackageSourceOverrideMappings.ResolveForWorkingDirectory(
-                    source,
-                    ExecutionContext.WorkingDirectory);
 
             // Get the appropriate project handler
             var project = _projectFactory.GetProject(effectiveAppHostProjectFile);
@@ -201,7 +200,7 @@ internal sealed class AddCommand : BaseCommand
                         async () => await _integrationPackageSearchService.GetIntegrationPackagesWithPolyglotCompatibilityAsync(
                             effectiveAppHostProjectFile.Directory!,
                             configuredChannel,
-                            resolvedSource,
+                            source,
                             cancellationToken));
                     packagesWithChannels = discoveredPackages as List<(NuGetPackage Package, PackageChannel Channel)> ?? discoveredPackages.ToList();
                     polyglotCompatibleIds = discoveredPolyglotIds;
@@ -213,7 +212,7 @@ internal sealed class AddCommand : BaseCommand
                         async () => await _integrationPackageSearchService.GetIntegrationPackagesWithChannelsAsync(
                             effectiveAppHostProjectFile.Directory!,
                             configuredChannel,
-                            resolvedSource,
+                            source,
                             cancellationToken));
                     packagesWithChannels = discoveredPackages as List<(NuGetPackage Package, PackageChannel Channel)> ?? discoveredPackages.ToList();
                 }
@@ -318,7 +317,7 @@ internal sealed class AddCommand : BaseCommand
                     integrationName,
                     version,
                     configuredChannel,
-                    resolvedSource,
+                    source,
                     cancellationToken,
                     promptForSinglePackage: integrationName is not null),
                 1 when packageMatchKind == ProfilingTelemetry.Values.AddPackageMatchKindExact
@@ -329,7 +328,7 @@ internal sealed class AddCommand : BaseCommand
                     filteredPackagesWithShortName,
                     version,
                     configuredChannel,
-                    resolvedSource,
+                    source,
                     cancellationToken,
                     promptForSingleFuzzyPackage)
             };
@@ -358,11 +357,10 @@ internal sealed class AddCommand : BaseCommand
                 if (mappings is { Length: > 0 })
                 {
                     var projectDir = effectiveAppHostProjectFile.Directory!;
-                    projectDir.Create();
                     var nugetConfigPath = Path.Combine(projectDir.FullName, "nuget.config");
                     if (!File.Exists(nugetConfigPath))
                     {
-                        var packageSourceMappingEnabled = await _nugetSettingsProvider.IsPackageSourceMappingEnabledAsync(
+                        var packageSourceMappingEnabled = _nugetSettingsProvider.IsPackageSourceMappingEnabled(
                             projectDir,
                             cancellationToken);
                         CreateAdditiveLocalSourceNuGetConfig(
@@ -382,9 +380,9 @@ internal sealed class AddCommand : BaseCommand
                 RequestedChannel = GetRequestedRestoreChannel(
                     selectedNuGetPackage.Channel,
                     selectedNuGetPackage.Package.Id,
-                    resolvedSource),
-                Source = resolvedSource,
-                SourcePackagePattern = resolvedSource is null
+                    source),
+                Source = source,
+                SourcePackagePattern = source is null
                     ? null
                     : selectedNuGetPackage.Package.Id
             };

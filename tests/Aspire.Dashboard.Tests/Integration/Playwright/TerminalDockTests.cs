@@ -32,7 +32,6 @@ public sealed class TerminalDockTests(TerminalDockTests.TerminalDockDashboardSer
             var heading = panel.GetByRole(AriaRole.Heading, new() { Name = "No docked terminals", Exact = true });
             var hint = panel.Locator(".terminal-dock-panel-hint");
             var moreInformation = panel.GetByRole(AriaRole.Link, new() { Name = "More information", Exact = true, IncludeHidden = true });
-            var body = panel.Locator(".terminal-dock-panel-body");
             var handle = page.GetByRole(AriaRole.Separator, new() { Name = "Terminals", Exact = true });
             await Assertions.Expect(panel).ToBeVisibleAsync();
 
@@ -63,8 +62,7 @@ public sealed class TerminalDockTests(TerminalDockTests.TerminalDockDashboardSer
                     {
                         (heading, true),
                         (hint, true),
-                        (moreInformation, height > 120),
-                        (body, height == 420 || (width == 1280 && height == 320))
+                        (moreInformation, height > 120)
                     })
                     {
                         if (visible)
@@ -89,7 +87,6 @@ public sealed class TerminalDockTests(TerminalDockTests.TerminalDockDashboardSer
                 await Assertions.Expect(heading).ToBeVisibleAsync();
                 await Assertions.Expect(hint).ToBeHiddenAsync();
                 await Assertions.Expect(moreInformation).ToBeHiddenAsync();
-                await Assertions.Expect(body).ToBeHiddenAsync();
                 var tinyPanelBox = await panel.BoundingBoxAsync();
                 var headingBox = await heading.BoundingBoxAsync();
                 Assert.NotNull(tinyPanelBox);

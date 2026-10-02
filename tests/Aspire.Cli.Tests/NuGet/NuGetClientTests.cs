@@ -4,10 +4,10 @@
 using System.IO.Compression;
 using System.Xml.Linq;
 using Aspire.Cli.NuGet;
+using Aspire.Cli.Packaging;
 using Aspire.Cli.Tests.TestServices;
 using Aspire.Cli.Tests.Utils;
 using Aspire.Hosting;
-using Aspire.Shared;
 using Microsoft.DotNet.RemoteExecutor;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Testing;
@@ -166,6 +166,47 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
 
         var package = Assert.Single(results);
         Assert.Equal("Aspire.Test.Package", package.Id);
+    }
+
+    [Fact]
+    public async Task SearchAsync_RedactsCredentialBearingAmbientSourceDiagnostics()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        const string sourceNameSecret = "source-name-secret";
+        const string sourceValueSecret = "source-value-secret";
+        var sourceName = $"https://alias.example/v3/index.json?sig={sourceNameSecret}";
+        var sourceValue = $"https://127.0.0.1:1/v3/index.json?sig={sourceValueSecret}";
+        var nugetConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "nuget.config");
+        File.WriteAllText(
+            nugetConfigPath,
+            $"""
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="{sourceName}" value="{sourceValue}" />
+              </packageSources>
+            </configuration>
+            """);
+        var logger = new FakeLogger<NuGetClient>();
+        var client = new NuGetClient(
+            new TestFeatures(),
+            new TestEnvironment(),
+            logger);
+
+        var results = await client.SearchAsync(
+            "Aspire.Test.Package",
+            prerelease: false,
+            take: 100,
+            [],
+            nugetConfigPath,
+            workspace.WorkspaceRoot.FullName,
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(results);
+        var logRecords = logger.Collector.GetSnapshot();
+        Assert.NotEmpty(logRecords);
+        Assert.DoesNotContain(logRecords, record => record.Message.Contains(sourceNameSecret, StringComparison.Ordinal));
+        Assert.DoesNotContain(logRecords, record => record.Message.Contains(sourceValueSecret, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -371,6 +412,59 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
 
             Assert.Null(HttpHandlerResourceV3.CredentialService);
         }).Dispose();
+    }
+
+    [Fact]
+    public void DiagnosticNuGetLogger_RedactsUnionOfActiveSensitiveSources()
+    {
+        const string firstSource = "https://first.example/v3/index.json?sig=first-secret";
+        const string secondSource = "https://second.example/v3/index.json?sig=second-secret";
+        var logger = new FakeLogger<NuGetClient>();
+        var diagnosticLogger = new NuGetClient.DiagnosticNuGetLogger(logger);
+
+        using var first = diagnosticLogger.RegisterSensitiveSources([firstSource]);
+        using var second = diagnosticLogger.RegisterSensitiveSources([secondSource]);
+
+        diagnosticLogger.LogDebug(
+            "Credential provider checked https://first-cdn.example/v3-flatcontainer/package/index.json?sig=first-secret " +
+            "and https://second-cdn.example/v3-flatcontainer/package/index.json?sig=second-secret.");
+
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(
+            "Credential provider checked https://first-cdn.example/v3-flatcontainer/package/index.json?*** " +
+            "and https://second-cdn.example/v3-flatcontainer/package/index.json?***.",
+            record.Message);
+    }
+
+    [Fact]
+    public void DiagnosticNuGetLogger_ReferenceCountsOverlappingSensitiveSources()
+    {
+        const string sharedSource = "https://feed.example/v3/index.json?sig=shared-secret";
+        const string nextSource = "https://next.example/v3/index.json?sig=next-secret";
+        var logger = new FakeLogger<NuGetClient>();
+        var diagnosticLogger = new NuGetClient.DiagnosticNuGetLogger(logger);
+
+        var first = diagnosticLogger.RegisterSensitiveSources([sharedSource]);
+        var second = diagnosticLogger.RegisterSensitiveSources([sharedSource]);
+
+        first.Dispose();
+        first.Dispose();
+        diagnosticLogger.LogDebug($"Credential provider checked {sharedSource}.");
+
+        second.Dispose();
+        using (diagnosticLogger.RegisterSensitiveSources([nextSource]))
+        {
+            diagnosticLogger.LogDebug($"Credential provider checked {sharedSource} and {nextSource}.");
+        }
+
+        Assert.Collection(
+            logger.Collector.GetSnapshot(),
+            record => Assert.Equal(
+                "Credential provider checked https://feed.example/v3/index.json.",
+                record.Message),
+            record => Assert.Equal(
+                $"Credential provider checked {sharedSource} and https://next.example/v3/index.json.",
+                record.Message));
     }
 
     [Fact]
@@ -1120,13 +1214,45 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
         Assert.False(sourceInfo.IsEnabled);
         Assert.True(sourceInfo.HasCredentials);
         Assert.Contains(source, settings.SensitiveSourceValues);
-        Assert.True(settings.PackageSourceMappingEnabled);
         var mapping = Assert.Single(settings.PackageSourceMappings);
         Assert.Equal("private", mapping.SourceKey);
         Assert.Equal(["Aspire.*"], mapping.Patterns);
         Assert.Contains("private", settings.DisabledPackageSourceKeys);
         Assert.Contains("private", settings.ReservedPackageSourceKeys);
         Assert.NotEmpty(settings.CacheIdentity);
+    }
+
+    [Fact]
+    public void GetSettings_TreatsCredentialBearingSourceNameAsSensitive()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var projectDirectory = workspace.CreateDirectory("AppHost");
+        var configPath = Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config");
+        const string sourceName = "https://user:credential-marker@packages.example.com";
+        const string source = "https://packages.example.com/v3/index.json";
+        File.WriteAllText(
+            configPath,
+            $$"""
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="{{sourceName}}" value="{{source}}" />
+              </packageSources>
+            </configuration>
+            """);
+        var client = new NuGetClient(
+            new TestFeatures(),
+            new TestEnvironment(),
+            NullLogger<NuGetClient>.Instance);
+
+        var settings = client.GetSettings(
+            projectDirectory.FullName,
+            Enumerable.Repeat((byte)0x5A, NuGetSourceIdentity.KeySizeInBytes).ToArray());
+
+        var sourceInfo = Assert.Single(settings.Sources);
+        Assert.Equal(sourceName, sourceInfo.Name);
+        Assert.Contains(sourceName, settings.SensitiveSourceValues);
+        Assert.DoesNotContain(source, settings.SensitiveSourceValues);
     }
 
     [Fact]
@@ -1160,8 +1286,8 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
             NullLogger<NuGetClient>.Instance);
 
         client.WriteConfigOverlay(
-            new NuGetConfigOverlayRequest(
-                [new("private", "https://packages.example.com/v3/index.json")],
+            new NuGetConfigOverlay(
+                [("private", "https://packages.example.com/v3/index.json")],
                 [new("private", ["Aspire.*"])],
                 ClearDisabledPackageSources: true,
                 DisabledPackageSourceKeys: ["other"],

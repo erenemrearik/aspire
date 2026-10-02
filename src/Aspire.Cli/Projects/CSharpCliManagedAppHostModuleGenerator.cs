@@ -99,6 +99,7 @@ internal sealed class CSharpCliManagedAppHostModuleGenerator(
             .ToList();
         var restorePlan = await _restorePlanResolver.ResolveAsync(
             appHostDirectory.FullName,
+            AppHostWorkloadId.Create(appHostFile),
             sdkVersion,
             restoreChannel,
             packageSourceOverride,
@@ -106,9 +107,9 @@ internal sealed class CSharpCliManagedAppHostModuleGenerator(
             cancellationToken)
             .ConfigureAwait(false);
         var policyDirectory = IntegrationClosureBuilder.GetAppHostIntegrationPolicyDirectory(appHostDirectory);
-        var restoreConfiguration = await restorePlan.ApplyProjectRestoreConfigurationAsync(
+        var restoreConfiguration = restorePlan.ApplyProjectRestoreConfiguration(
             policyDirectory,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
         if (nuGetConfigFile.Exists)
         {
             nuGetConfigFile.Delete();

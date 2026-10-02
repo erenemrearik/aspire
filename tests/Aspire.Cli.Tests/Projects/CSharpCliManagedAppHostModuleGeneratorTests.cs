@@ -10,7 +10,6 @@ using Aspire.Cli.Projects;
 using Aspire.Cli.Tests.TestServices;
 using Aspire.Cli.Tests.Utils;
 using Aspire.Cli.Utils;
-using Aspire.Shared;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aspire.Cli.Tests.Projects;
@@ -379,7 +378,7 @@ public class CSharpCliManagedAppHostModuleGeneratorTests : IDisposable
     }
 
     [Fact]
-    public async Task TryGenerateAsyncUsesNuGetConfigForChannelAndSourceOverride()
+    public async Task TryGenerateAsyncUsesNuGetConfigForSourceOverrideAndIgnoresChannelFallback()
     {
         using var workspace = TemporaryWorkspace.Create(_outputHelper);
         var appHostFile = CreateCliManagedAppHost(workspace.WorkspaceRoot);
@@ -426,9 +425,8 @@ public class CSharpCliManagedAppHostModuleGeneratorTests : IDisposable
             appHostBuildProps.Descendants("RestoreRootConfigDirectory").Single().Value);
 
         var nugetConfig = XDocument.Load(restoreConfigFile);
-        Assert.Equal(["/tmp/aspire-pr-hive/packages", "https://example.invalid/daily/all"], GetPackageSources(nugetConfig));
+        Assert.Equal(["/tmp/aspire-pr-hive/packages"], GetPackageSources(nugetConfig));
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(nugetConfig, "/tmp/aspire-pr-hive/packages"));
-        Assert.Equal(["*"], GetPackagePatternsForSource(nugetConfig, "https://example.invalid/daily/all"));
     }
 
     [Fact]
@@ -475,7 +473,7 @@ public class CSharpCliManagedAppHostModuleGeneratorTests : IDisposable
         Assert.NotNull(generationResult);
         Assert.Equal(PackageChannelNames.Staging, packagingService.LastRequestedChannelName);
         var nugetConfig = XDocument.Load(Path.Combine(workspace.WorkspaceRoot.FullName, ".aspire", "NuGet.Config"));
-        Assert.Equal(["https://example.invalid/staging"], GetPackageSources(nugetConfig));
+        Assert.Empty(GetPackageSources(nugetConfig));
     }
 
     [Fact]
@@ -505,13 +503,12 @@ public class CSharpCliManagedAppHostModuleGeneratorTests : IDisposable
         var restoreConfigFile = Path.Combine(workspace.WorkspaceRoot.FullName, ".aspire", "NuGet.Config");
 
         var nugetConfig = XDocument.Load(restoreConfigFile);
-        Assert.Equal(["/tmp/aspire-pr-hive/packages", PackageSources.NuGetOrg], GetPackageSources(nugetConfig));
+        Assert.Equal(["/tmp/aspire-pr-hive/packages"], GetPackageSources(nugetConfig));
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(nugetConfig, "/tmp/aspire-pr-hive/packages"));
-        Assert.Equal(["*"], GetPackagePatternsForSource(nugetConfig, PackageSources.NuGetOrg));
     }
 
     [Fact]
-    public async Task TryGenerateAsyncUsesNuGetServiceIndexOverrideForSourceOverrideFallback()
+    public async Task TryGenerateAsyncDoesNotAddNuGetServiceIndexOverrideFallback()
     {
         using var workspace = TemporaryWorkspace.Create(_outputHelper);
         var appHostFile = CreateCliManagedAppHost(workspace.WorkspaceRoot);
@@ -535,9 +532,8 @@ public class CSharpCliManagedAppHostModuleGeneratorTests : IDisposable
         var restoreConfigFile = Path.Combine(workspace.WorkspaceRoot.FullName, ".aspire", "NuGet.Config");
 
         var nugetConfig = XDocument.Load(restoreConfigFile);
-        Assert.Equal(["/tmp/aspire-pr-hive/packages", "http://localhost:5400/v3/index.json"], GetPackageSources(nugetConfig));
+        Assert.Equal(["/tmp/aspire-pr-hive/packages"], GetPackageSources(nugetConfig));
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(nugetConfig, "/tmp/aspire-pr-hive/packages"));
-        Assert.Equal(["*"], GetPackagePatternsForSource(nugetConfig, "http://localhost:5400/v3/index.json"));
     }
 
     [Fact]
@@ -695,7 +691,6 @@ public class CSharpCliManagedAppHostModuleGeneratorTests : IDisposable
             CacheIdentity: "test-cache",
             Sources: [],
             SensitiveSourceValues: sensitiveSourceValues ?? [],
-            PackageSourceMappingEnabled: false,
             PackageSourceMappings: [],
             DisabledPackageSourceKeys: [],
             ReservedPackageSourceKeys: [],
@@ -705,10 +700,10 @@ public class CSharpCliManagedAppHostModuleGeneratorTests : IDisposable
     private static string[] GetPackageSources(XDocument doc)
     {
         return doc.Root!
-            .Element("packageSources")!
+            .Element("packageSources")?
             .Elements("add")
             .Select(e => e.Attribute("value")!.Value)
-            .ToArray();
+            .ToArray() ?? [];
     }
 
     private static string[] GetPackagePatternsForSource(XDocument doc, string source)

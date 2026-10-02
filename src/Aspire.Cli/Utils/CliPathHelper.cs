@@ -15,7 +15,6 @@ internal static class CliPathHelper
 {
     internal const string AspireHomeEnvironmentVariable = AspireHomeDirectory.EnvironmentVariable;
     internal const string NuGetPackagesEnvironmentVariable = "NUGET_PACKAGES";
-    internal const string NuGetFallbackPackagesEnvironmentVariable = "NUGET_FALLBACK_PACKAGES";
 
     /// <summary>
     /// Name of the directory under <c>ASPIRE_HOME</c> that holds NuGet package caches keyed by
@@ -98,22 +97,6 @@ internal static class CliPathHelper
         }
 
         return Path.GetFullPath(path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar));
-    }
-
-    internal static IReadOnlyList<string>? GetNuGetFallbackPackagesEnvironmentPaths(IEnvironment environment)
-    {
-        var value = environment.GetEnvironmentVariable(NuGetFallbackPackagesEnvironmentVariable);
-        if (string.IsNullOrEmpty(value))
-        {
-            return null;
-        }
-
-        return value
-            .Split(';', StringSplitOptions.RemoveEmptyEntries)
-            .Select(static path => Path.IsPathRooted(path)
-                ? Path.GetFullPath(path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar))
-                : path)
-            .ToArray();
     }
 
     /// <summary>
@@ -443,7 +426,9 @@ internal static class CliPathHelper
         var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var socketPath = BackchannelConstants.ComputeCliSocketPath(homeDirectory, socketPrefix);
         var socketDirectory = Path.GetDirectoryName(socketPath)!;
-        Directory.CreateDirectory(socketDirectory);
+        // CliPathHelper chooses CLI socket paths; SocketPermissionHelper shares permission
+        // enforcement and path validation with hosting consumers that also accept configured paths.
+        SocketPermissionHelper.CreateDirectory(socketDirectory, repairExisting: true);
 
         if (Interlocked.CompareExchange(ref s_socketDirectorySwept, 1, 0) == 0)
         {

@@ -152,6 +152,23 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         return defaultSdkVersion;
     }
 
+    private FileInfo ResolveAppHostFile(DirectoryInfo directory)
+    {
+        // Restore source aliases use the same file-based workload identity as DCP.
+        var appHostPath = FileSystemHelper.FindFirstFile(
+            directory.FullName,
+            recurseLimit: 0,
+            patterns: _resolvedLanguage.DetectionPatterns);
+        if (appHostPath is not null)
+        {
+            return new FileInfo(appHostPath);
+        }
+
+        var appHostFileName = _resolvedLanguage.AppHostFileName
+            ?? throw new InvalidOperationException($"The {_resolvedLanguage.DisplayName} AppHost file name is not configured.");
+        return new FileInfo(Path.Combine(directory.FullName, appHostFileName));
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // DETECTION
     // ═══════════════════════════════════════════════════════════════
@@ -304,11 +321,18 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
     /// Builds the AppHost server project and generates SDK code.
     /// </summary>
     /// <returns><see langword="true"/> if the code was generated successfully; otherwise, <see langword="false"/>.</returns>
-    internal async Task<bool> BuildAndGenerateSdkAsync(DirectoryInfo directory, string? packageSourceOverride = null, CancellationToken cancellationToken = default)
+    internal Task<bool> BuildAndGenerateSdkAsync(DirectoryInfo directory, string? packageSourceOverride = null, CancellationToken cancellationToken = default)
+        => BuildAndGenerateSdkAsync(ResolveAppHostFile(directory), packageSourceOverride, cancellationToken);
+
+    internal Task<bool> BuildAndGenerateSdkAsync(FileInfo appHostFile, string? packageSourceOverride = null, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(appHostFile);
+
+        var directory = appHostFile.Directory!;
         var config = LoadConfiguration(directory);
-        return await BuildAndGenerateSdkAsync(
+        return BuildAndGenerateSdkAsync(
             directory,
+            appHostFile,
             config,
             config.Channel,
             packageSourceOverride,
@@ -318,6 +342,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
 
     private async Task<bool> BuildAndGenerateSdkAsync(
         DirectoryInfo directory,
+        FileInfo appHostFile,
         AspireConfigFile config,
         string? requestedChannel,
         string? packageSourceOverride = null,
@@ -325,7 +350,10 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         OutputCollector? outputCollector = null,
         CancellationToken cancellationToken = default)
     {
-        var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
+        var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(
+            directory.FullName,
+            appHostFile,
+            cancellationToken);
 
         // Step 1: Use the supplied config as the source of truth. Update uses an
         // in-memory config here so a failed generation does not leave
@@ -373,7 +401,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         // code directory (.aspire/modules) may not exist yet and dependency files reference it.
         await GenerateCodeViaRpcAsync(
             directory.FullName,
-            appHostFile: null,
+            appHostFile,
             rpcClient,
             integrations,
             targetSdkVersion: config.SdkVersion,
@@ -407,6 +435,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         var config = LoadConfiguration(directory);
         var success = await BuildAndGenerateSdkAsync(
             directory,
+            appHostFile,
             config,
             config.Channel,
             outputCollector: outputCollector,
@@ -481,7 +510,10 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             }
 
             // Step 2: Build/prepare the AppHost server (dependency install happens after server starts)
-            var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
+            var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(
+                directory.FullName,
+                appHostFile,
+                cancellationToken);
 
             // Load config - source of truth for SDK version and packages
             var config = LoadConfiguration(directory);
@@ -1134,7 +1166,10 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         try
         {
             // Step 1: Load config - source of truth for SDK version and packages
-            var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
+            var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(
+                directory.FullName,
+                appHostFile,
+                cancellationToken);
             var config = LoadConfiguration(directory);
             var integrations = await GetIntegrationReferencesAsync(config, directory, cancellationToken);
             var sdkVersion = GetPrepareSdkVersion(config);
@@ -1520,6 +1555,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         var requestedChannel = context.RequestedChannel ?? config.Channel;
         var regenerateSuccess = await BuildAndGenerateSdkAsync(
             directory,
+            context.AppHostFile,
             config,
             requestedChannel,
             context.Source,
@@ -1553,6 +1589,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             _logger,
             (updatedConfig, requestedChannel, ct) => BuildAndGenerateSdkAsync(
                 directory,
+                context.AppHostFile,
                 updatedConfig,
                 requestedChannel,
                 packageSourceOverridePattern: null,
@@ -1571,7 +1608,10 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             return RunningInstanceResult.NoRunningInstance; // No directory, nothing to check
         }
 
-        var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
+        var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(
+            directory.FullName,
+            appHostFile,
+            cancellationToken);
         var genericAppHostPath = appHostServerProject.GetInstanceIdentifier();
 
         // Find matching sockets for this AppHost
@@ -1740,10 +1780,8 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
     }
 
     /// <summary>
-    /// Emits a single pre-flight warning when the installed CLI version doesn't match the SDK
-    /// version pinned in <c>aspire.config.json</c>. This is a best-effort heuristic — we keep it
-    /// purely informational and let code-generation try first so that benign skew (e.g. a
-    /// daily-build CLI against a stable SDK) doesn't block valid scenarios.
+    /// Emits an informational pre-flight warning when the installed CLI is older than the
+    /// SDK used for code generation, or when unparseable versions differ.
     /// </summary>
     private void WarnIfCliSdkVersionSkew(string appPath, string? targetSdkVersion = null)
     {
@@ -1751,22 +1789,21 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         {
             var cliVersion = _executionContext.IdentitySdkVersion;
 
-            // When the caller is actively updating TO a version that matches the CLI,
-            // the on-disk config is stale and about to be overwritten — skip the warning.
-            if (targetSdkVersion is not null && !IsKnownIncompatibleSkew(cliVersion, targetSdkVersion))
+            // During an update the on-disk config is stale. Compare against the SDK that
+            // code generation will actually use, not the version about to be overwritten.
+            var sdkVersion = targetSdkVersion;
+            if (sdkVersion is null)
+            {
+                var configDir = ConfigurationHelper.GetConfigRootDirectory(new DirectoryInfo(appPath));
+                sdkVersion = AspireConfigFile.Load(configDir.FullName)?.SdkVersion;
+            }
+
+            if (string.IsNullOrWhiteSpace(sdkVersion))
             {
                 return;
             }
 
-            var configDir = ConfigurationHelper.GetConfigRootDirectory(new DirectoryInfo(appPath));
-            var config = AspireConfigFile.Load(configDir.FullName);
-            var configuredSdkVersion = config?.SdkVersion;
-            if (string.IsNullOrWhiteSpace(configuredSdkVersion))
-            {
-                return;
-            }
-
-            if (!IsKnownIncompatibleSkew(cliVersion, configuredSdkVersion))
+            if (!ShouldWarnAboutCliSdkVersionSkew(cliVersion, sdkVersion))
             {
                 return;
             }
@@ -1775,7 +1812,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
                 System.Globalization.CultureInfo.CurrentCulture,
                 ErrorStrings.CodegenVersionSkewWarning,
                 cliVersion,
-                configuredSdkVersion);
+                sdkVersion);
             _interactionService.DisplayMessage(KnownEmojis.Warning, $"[yellow]{Markup.Escape(message)}[/]", allowMarkup: true);
         }
         catch (Exception ex)
@@ -1785,21 +1822,10 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
     }
 
     /// <summary>
-    /// Returns <see langword="true"/> when the supplied CLI and SDK versions look mismatched in a
-    /// way that is worth warning about. We deliberately tolerate metadata-only differences
-    /// (build suffixes, +commit hashes) and only flag a skew when the parsed major/minor/patch
-    /// numbers disagree.
+    /// Returns <see langword="true"/> when the CLI has lower SemVer precedence than the SDK,
+    /// ignoring build metadata. Unparseable versions fall back to case-insensitive inequality.
     /// </summary>
-    /// <summary>
-    /// Returns <see langword="true"/> when the supplied CLI and SDK versions differ in a way that
-    /// is known to produce ABI incompatibilities — specifically when they differ in
-    /// <see cref="SemVersion.Major"/>, <see cref="SemVersion.Minor"/>, <see cref="SemVersion.Patch"/>,
-    /// or in their prerelease identifiers (e.g. <c>13.4.0-preview.1.26218.1</c> vs
-    /// <c>13.4.0-preview.1.26227.1</c>, which was the exact reproduction case in
-    /// <see href="https://github.com/microsoft/aspire/issues/16709"/>). Build metadata
-    /// (everything after <c>+</c>) is ignored per the SemVer spec.
-    /// </summary>
-    internal static bool IsKnownIncompatibleSkew(string cliVersion, string sdkVersion)
+    internal static bool ShouldWarnAboutCliSdkVersionSkew(string cliVersion, string sdkVersion)
     {
         if (!SemVersion.TryParse(NormalizeVersion(cliVersion), SemVersionStyles.Any, out var cli) ||
             !SemVersion.TryParse(NormalizeVersion(sdkVersion), SemVersionStyles.Any, out var sdk))
@@ -1807,10 +1833,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             return !string.Equals(cliVersion, sdkVersion, StringComparison.OrdinalIgnoreCase);
         }
 
-        // Compare full precedence, which covers Major/Minor/Patch *and* prerelease identifiers
-        // but (per the SemVer spec) ignores build metadata. NormalizeVersion already strips '+'
-        // suffixes defensively for parsers that include them in precedence.
-        return SemVersion.ComparePrecedence(cli, sdk) != 0;
+        return SemVersion.ComparePrecedence(cli, sdk) < 0;
     }
 
     internal static string NormalizeVersion(string version)

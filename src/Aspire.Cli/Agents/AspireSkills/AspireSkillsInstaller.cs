@@ -10,7 +10,6 @@ using Aspire.Cli.Configuration;
 using Aspire.Cli.Interaction;
 using Aspire.Cli.Resources;
 using Aspire.Cli.Telemetry;
-using Aspire.Cli.Utils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -31,7 +30,7 @@ internal sealed class AspireSkillsInstaller(
     AspireCliTelemetry telemetry,
     ILogger<AspireSkillsInstaller> logger) : IAspireSkillsInstaller
 {
-    internal const string Version = "0.0.2";
+    internal const string Version = "0.0.3";
     internal const string GitHubRepository = "microsoft/aspire-skills";
     internal const string ExpectedSourceRepository = $"https://github.com/{GitHubRepository}";
     internal const string ExpectedWorkflowPath = ".github/workflows/publish.yml";
@@ -1065,8 +1064,8 @@ internal sealed class AspireSkillsInstaller(
 
     private static bool HasLegacyCacheLayout(string versionCacheDirectory)
     {
-        return Directory.Exists(Path.Combine(versionCacheDirectory, "skills")) ||
-            File.Exists(Path.Combine(versionCacheDirectory, "skill-manifest.json")) ||
+        return Directory.Exists(Path.Combine(versionCacheDirectory, AspireSkillsBundleLayout.SkillsDirectoryName)) ||
+            File.Exists(Path.Combine(versionCacheDirectory, AspireSkillsBundleLayout.ManifestFileName)) ||
             File.Exists(Path.Combine(versionCacheDirectory, ArchiveSha512FileName)) ||
             File.Exists(Path.Combine(versionCacheDirectory, GitHubArchiveSha256FileName)) ||
             File.Exists(Path.Combine(versionCacheDirectory, GitHubAttestationVerifiedFileName)) ||
@@ -1077,8 +1076,8 @@ internal sealed class AspireSkillsInstaller(
     {
         // Older CLIs stored extracted files directly in the version directory. Remove only
         // those known entries so digest-addressed children created by newer CLIs remain intact.
-        TryDeleteDirectory(Path.Combine(versionCacheDirectory, "skills"));
-        TryDeleteFile(Path.Combine(versionCacheDirectory, "skill-manifest.json"));
+        TryDeleteDirectory(Path.Combine(versionCacheDirectory, AspireSkillsBundleLayout.SkillsDirectoryName));
+        TryDeleteFile(Path.Combine(versionCacheDirectory, AspireSkillsBundleLayout.ManifestFileName));
         TryDeleteFile(Path.Combine(versionCacheDirectory, ArchiveSha512FileName));
         TryDeleteFile(Path.Combine(versionCacheDirectory, GitHubArchiveSha256FileName));
         TryDeleteFile(Path.Combine(versionCacheDirectory, GitHubAttestationVerifiedFileName));

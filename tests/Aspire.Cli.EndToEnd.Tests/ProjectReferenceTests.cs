@@ -74,8 +74,8 @@ public sealed class ProjectReferenceTests(ITestOutputHelper output)
         File.WriteAllText(configPath, config.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
         var integrationDirectory = Directory.CreateDirectory(Path.Combine(workDir, "MyIntegration"));
-        // The project deliberately clears ambient sources and opts into the CLI-provided source hint.
-        // Without the hint, its package restore cannot reach Custom.RestoreProbe.
+        // The project deliberately clears ambient sources. Its project file uses the CLI-provided
+        // source and alias hints to construct an invocation-scoped mapped feed.
         File.WriteAllText(Path.Combine(integrationDirectory.FullName, "NuGet.Config"), """
             <?xml version="1.0" encoding="utf-8"?>
             <configuration>
@@ -89,12 +89,60 @@ public sealed class ProjectReferenceTests(ITestOutputHelper output)
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
                 <TargetFramework>net10.0</TargetFramework>
+                <_AspireIntegrationNuGetConfig>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)AspireIntegration.NuGet.Config'))</_AspireIntegrationNuGetConfig>
+                <!--
+                  NuGet computes the project's source locations before the config below is applied,
+                  so the source still has to be added here. The injected config supplies the alias
+                  mapping that makes this source eligible under the ambient mapping policy.
+                -->
                 <RestoreAdditionalProjectSources>$(RestoreAdditionalProjectSources);$(AspireIntegrationPackageSources)</RestoreAdditionalProjectSources>
               </PropertyGroup>
               <ItemGroup>
                 <PackageReference Include="Aspire.Hosting" Version="$(AspireIntegrationHostingVersion)" />
                 <PackageReference Include="Custom.RestoreProbe" Version="1.0.0" />
               </ItemGroup>
+              <!--
+                This is an intentionally unsupported NuGet escape hatch. It demonstrates that a
+                sufficiently motivated project can add a mapped feed without replacing its normally
+                discovered configuration.
+              -->
+              <Target Name="WriteAspireIntegrationNuGetConfig"
+                      BeforeTargets="_GenerateRestoreProjectSpec">
+                <Error Condition="'$(AspireIntegrationPackageSources)' == ''"
+                       Text="AspireIntegrationPackageSources was not provided." />
+                <Error Condition="'$(AspireIntegrationPackageSourceAlias)' == ''"
+                       Text="AspireIntegrationPackageSourceAlias was not provided." />
+                <PropertyGroup>
+                  <_AspireIntegrationPackageSource>$([System.String]::Copy('$(AspireIntegrationPackageSources)').Split(';').GetValue(0))</_AspireIntegrationPackageSource>
+                  <_AspireIntegrationNuGetConfigContent><![CDATA[
+            <configuration>
+              <packageSources>
+                <add key="$(AspireIntegrationPackageSourceAlias)" value="$(_AspireIntegrationPackageSource)" />
+              </packageSources>
+              <packageSourceMapping>
+                <packageSource key="$(AspireIntegrationPackageSourceAlias)">
+                  <package pattern="*" />
+                </packageSource>
+              </packageSourceMapping>
+            </configuration>
+                  ]]></_AspireIntegrationNuGetConfigContent>
+                </PropertyGroup>
+                <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(_AspireIntegrationNuGetConfig)'))" />
+                <WriteLinesToFile File="$(_AspireIntegrationNuGetConfig)"
+                                  Lines="$(_AspireIntegrationNuGetConfigContent)"
+                                  Overwrite="true" />
+              </Target>
+              <Target Name="ApplyAspireIntegrationNuGetConfig"
+                      AfterTargets="_GenerateRestoreProjectSpec"
+                      DependsOnTargets="WriteAspireIntegrationNuGetConfig">
+                <ItemGroup>
+                  <_RestoreGraphEntry Update="@(_RestoreGraphEntry)"
+                                      Condition="'%(_RestoreGraphEntry.Type)' == 'ProjectSpec' and
+                                                 '%(_RestoreGraphEntry.ProjectUniqueName)' == '$(MSBuildProjectFullPath)'">
+                    <ConfigFilePaths>$(_AspireIntegrationNuGetConfig);%(_RestoreGraphEntry.ConfigFilePaths)</ConfigFilePaths>
+                  </_RestoreGraphEntry>
+                </ItemGroup>
+              </Target>
             </Project>
             """);
         File.WriteAllText(Path.Combine(integrationDirectory.FullName, "MyIntegrationExtensions.cs"), """
@@ -118,6 +166,8 @@ public sealed class ProjectReferenceTests(ITestOutputHelper output)
 
         await auto.RunCommandAsync(
             "test -f .nuget-packages/custom.restoreprobe/1.0.0/.nupkg.metadata && " +
+            "test -f MyIntegration/obj/AspireIntegration.NuGet.Config && " +
+            "grep -q 'packageSource key=\"aspire-apphost-' MyIntegration/obj/AspireIntegration.NuGet.Config && " +
             "grep -q addMyService .aspire/modules/aspire.mts && " +
             "grep -q addRedis .aspire/modules/aspire.mts",
             counter);

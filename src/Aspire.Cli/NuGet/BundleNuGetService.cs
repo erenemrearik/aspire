@@ -16,12 +16,22 @@ using NuGet.ProjectModel;
 
 namespace Aspire.Cli.NuGet;
 
+internal sealed record NuGetSourceInfo(
+    string Name,
+    string Identity,
+    bool IsEnabled,
+    bool HasCredentials,
+    bool HasClientCertificates);
+
+internal sealed record NuGetPackageSourceMapping(
+    string SourceKey,
+    IReadOnlyList<string> Patterns);
+
 internal sealed record NuGetSettingsInfo(
     IReadOnlyList<string> ConfigPaths,
     string CacheIdentity,
     IReadOnlyList<NuGetSourceInfo> Sources,
     IReadOnlyList<string> SensitiveSourceValues,
-    bool PackageSourceMappingEnabled,
     IReadOnlyList<NuGetPackageSourceMapping> PackageSourceMappings,
     IReadOnlyList<string> DisabledPackageSourceKeys,
     IReadOnlyList<string> ReservedPackageSourceKeys,
@@ -180,7 +190,7 @@ internal sealed class BundleNuGetService : INuGetService
         return manifestPath;
     }
 
-    internal Task<NuGetSettingsInfo> GetNuGetSettingsAsync(
+    internal NuGetSettingsInfo GetNuGetSettings(
         string workingDirectory,
         CancellationToken cancellationToken)
     {
@@ -194,20 +204,18 @@ internal sealed class BundleNuGetService : INuGetService
                 $"The NuGet source identity key must be {NuGetSourceIdentity.KeySizeInBytes} bytes.");
         }
 
-        return Task.FromResult(_nuGetClient.GetSettings(workingDirectory, sourceIdentityKey));
+        return _nuGetClient.GetSettings(workingDirectory, sourceIdentityKey);
     }
 
-    internal Task WriteNuGetConfigOverlayAsync(
-        NuGetConfigOverlayRequest overlay,
+    internal void WriteNuGetConfigOverlay(
+        NuGetConfigOverlay overlay,
         string outputPath,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(overlay);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
         cancellationToken.ThrowIfCancellationRequested();
-
         _nuGetClient.WriteConfigOverlay(overlay, outputPath);
-        return Task.CompletedTask;
     }
 
     private static bool TryValidatePackageManifest(string manifestPath, ILogger logger)

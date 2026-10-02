@@ -7,6 +7,21 @@ namespace Aspire.Cli.Tests.Packaging;
 
 public class PackageSourceOverrideMappingsTests(ITestOutputHelper outputHelper)
 {
+    [Theory]
+    [InlineData("Aspire*", "Aspire.Hosting.Redis", true)]
+    [InlineData("aspire*", "Aspire.Hosting.Redis", true)]
+    [InlineData("Aspire.Hosting.Redis", "aspire.hosting.redis", true)]
+    [InlineData("Aspire.Hosting.Redis", "Aspire.Hosting.PostgreSQL", false)]
+    [InlineData("Aspire*", "CommunityToolkit.Aspire.Hosting.Redis", false)]
+    [InlineData("*", "CommunityToolkit.Aspire.Hosting.Redis", true)]
+    public void MatchesPackage_UsesNuGetMappingPatternSemantics(
+        string packagePattern,
+        string packageName,
+        bool expected)
+    {
+        Assert.Equal(expected, PackageSourceOverrideMappings.MatchesPackage(packagePattern, packageName));
+    }
+
     [Fact]
     public void CredentialBearingSourceOverride_IsRejected()
     {

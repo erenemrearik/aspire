@@ -3,7 +3,6 @@
 
 #pragma warning disable ASPIREPIPELINES003
 #pragma warning disable ASPIRECONTAINERRUNTIME001
-#pragma warning disable ASPIREDOTNETPROJECT001
 
 using System.Text.RegularExpressions;
 using Aspire.Hosting.ApplicationModel;

@@ -4,7 +4,6 @@
 #pragma warning disable ASPIRECOMPUTE002
 #pragma warning disable ASPIREPIPELINES001
 #pragma warning disable ASPIREAZURE003
-#pragma warning disable ASPIREDOTNETPROJECT001
 
 using System.Text.Json.Nodes;
 using Aspire.Hosting.ApplicationModel;

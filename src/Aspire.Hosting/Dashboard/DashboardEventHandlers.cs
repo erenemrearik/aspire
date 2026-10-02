@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 #pragma warning disable ASPIRECERTIFICATES001 // Type is for evaluation purposes only
+#pragma warning disable ASPIREPROJECTS001 // ProjectLaunchDefaultsAnnotation is experimental.
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -186,9 +187,12 @@ internal sealed class DashboardEventHandlers(IConfiguration configuration,
 
     private void ConfigureAspireDashboardResource(IResource dashboardResource)
     {
-        // The dashboard resource can be visible during development. We don't want people to be able to stop the dashboard from inside the dashboard.
-        // Exclude the lifecycle commands from the dashboard resource so they're not accidently clicked during development.
-        dashboardResource.Annotations.Add(new ExcludeLifecycleCommandsAnnotation());
+        // The built-in dashboard can be visible during development. Prevent it from stopping itself,
+        // but preserve lifecycle and rebuild commands when the dashboard is supplied as a .NET project.
+        if (!dashboardResource.HasAnnotationOfType<ProjectLaunchDefaultsAnnotation>())
+        {
+            dashboardResource.Annotations.Add(new ExcludeLifecycleCommandsAnnotation());
+        }
 
         // Add the ContentView icon to the dashboard resource
         dashboardResource.Annotations.Add(new ResourceIconAnnotation("ContentView"));

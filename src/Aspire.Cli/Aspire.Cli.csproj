@@ -4,7 +4,7 @@
     <OutputType>Exe</OutputType>
     <RuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
     <ToolPackageRuntimeIdentifiers>$(RuntimeIdentifiers)</ToolPackageRuntimeIdentifiers>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -116,17 +116,17 @@
                                     Trim="true" />
   </ItemGroup>
 
-    <Target Name="ConfigureTrimming"
-          BeforeTargets="PrepareForILLink">
+  <Target Name="ConfigureTrimming"
+          AfterTargets="_PrepareTrimConfiguration">
     <!-- Single warn the following assemblies (produces IL2104 and IL3053), which have known warnings, so the warnings can be suppressed. -->
     <!-- These can be removed once NuGet completely removes its dependencies on Newtonsoft.Json - https://github.com/NuGet/NuGet.Client/pull/7601. Tracked by https://github.com/microsoft/aspire/issues/20342 -->
     <ItemGroup>
-      <ManagedAssemblyToLink Condition="'%(Filename)' == 'Microsoft.CSharp'">
+      <ResolvedFileToPublish Condition="'%(Filename)' == 'Microsoft.CSharp'">
         <TrimmerSingleWarn>true</TrimmerSingleWarn>
-      </ManagedAssemblyToLink>
-      <ManagedAssemblyToLink Condition="'%(Filename)' == 'System.Linq.Expressions'">
+      </ResolvedFileToPublish>
+      <ResolvedFileToPublish Condition="'%(Filename)' == 'System.Linq.Expressions'">
         <TrimmerSingleWarn>true</TrimmerSingleWarn>
-      </ManagedAssemblyToLink>
+      </ResolvedFileToPublish>
     </ItemGroup>
   </Target>
 
@@ -196,10 +196,10 @@
     <Compile Include="$(SharedDir)FileUploadHelpers.cs" Link="Utils\FileUploadHelpers.cs" />
     <Compile Include="$(SharedDir)AspireHomeDirectory.cs" Link="Utils\AspireHomeDirectory.cs" />
     <Compile Include="$(SharedDir)DirectoryHelper.cs" Link="Utils\DirectoryHelper.cs" />
+    <Compile Include="$(SharedDir)SocketPermissionHelper.cs" Link="Utils\SocketPermissionHelper.cs" />
+    <Compile Include="$(SharedDir)SocketDirectoryNames.cs" Link="Utils\SocketDirectoryNames.cs" />
     <Compile Include="$(SharedDir)KnownAspNetCoreConfigNames.cs" Link="Utils\KnownAspNetCoreConfigNames.cs" />
     <Compile Include="$(SharedDir)KnownConfigNames.cs" Link="Utils\KnownConfigNames.cs" />
-    <Compile Include="$(SharedDir)NuGetConfigContracts.cs" Link="NuGet\NuGetConfigContracts.cs" />
-    <Compile Include="$(SharedDir)NuGetSourceIdentity.cs" Link="Packaging\NuGetSourceIdentity.cs" />
     <Compile Include="$(SharedDir)IntegrationPackageProbeManifest.cs" Link="Utils\IntegrationPackageProbeManifest.cs" />
     <Compile Include="$(SharedDir)DashboardConfigNames.cs" Link="Utils\DashboardConfigNames.cs" />
     <Compile Include="$(SharedDir)KnownContainerRuntimes.cs" Link="Utils\KnownContainerRuntimes.cs" />
@@ -380,7 +380,7 @@
     <EmbeddedResource Include="$(SharedDir)Mcp\Resources\aspire-32.png" Link="Mcp\Resources\aspire-32.png" />
     <EmbeddedResource Include="$(SharedDir)Mcp\Resources\aspire-48.png" Link="Mcp\Resources\aspire-48.png" />
     <EmbeddedResource Include="$(SharedDir)Mcp\Resources\aspire-64.png" Link="Mcp\Resources\aspire-64.png" />
-    <EmbeddedResource Include="Agents\AspireSkills\Embedded\aspire-skills-v0.0.2.tgz" LogicalName="aspire-skills.bundle.tgz">
+    <EmbeddedResource Include="Agents\AspireSkills\Embedded\aspire-skills-v0.0.3.tgz" LogicalName="aspire-skills.bundle.tgz">
       <WithCulture>false</WithCulture>
     </EmbeddedResource>
     <EmbeddedResource Include="Agents\AspireSkills\Embedded\aspire-skills.metadata.json" LogicalName="aspire-skills.metadata.json">

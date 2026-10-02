@@ -17,7 +17,6 @@ using Aspire.Cli.Resources;
 using Aspire.Cli.Telemetry;
 using Aspire.Cli.Tests.TestServices;
 using Aspire.Cli.Tests.Utils;
-using Aspire.Cli.Utils;
 using Aspire.Hosting;
 using Aspire.Hosting.Backchannel;
 using Aspire.Hosting.Utils;
@@ -714,6 +713,43 @@ public class GuestAppHostProjectTests : IDisposable
         Assert.Equal("// transport.ts", convertedFiles["transport.ts"]);
     }
 
+    [Fact]
+    public async Task BuildAndGenerateSdkAsync_SelectedLegacyAppHost_UsesLegacyLayoutWhenModernSiblingExists()
+    {
+        var legacyAppHostPath = Path.Combine(_workspace.WorkspaceRoot.FullName, LegacyTypeScriptAppHost.LegacyAppHostFileName);
+        await File.WriteAllTextAsync(legacyAppHostPath, "import { aspire } from './.modules/aspire.js';");
+        await File.WriteAllTextAsync(
+            Path.Combine(_workspace.WorkspaceRoot.FullName, LegacyTypeScriptAppHost.ModernAppHostFileName),
+            "import { aspire } from './.aspire/modules/aspire.mjs';");
+
+        var projectFactory = new TestAppHostServerProjectFactory
+        {
+            CreateAsyncCallback = (path, _) =>
+                Task.FromResult<IAppHostServerProject>(new FakeSucceedingAppHostServerProject(path))
+        };
+        var interactionService = new TestInteractionService();
+        var project = CreateGuestAppHostProject(
+            interactionService: interactionService,
+            appHostServerProjectFactory: projectFactory,
+            serverSessionFactory: new FakeAppHostServerSessionFactory());
+
+        var success = await project.BuildAndGenerateSdkAsync(
+            new FileInfo(legacyAppHostPath),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(success);
+        Assert.Equal(legacyAppHostPath, projectFactory.AppHostFile?.FullName);
+        Assert.True(Directory.Exists(Path.Combine(
+            _workspace.WorkspaceRoot.FullName,
+            LanguageInfo.LegacyGeneratedFolderName)));
+        Assert.False(Directory.Exists(Path.Combine(
+            _workspace.WorkspaceRoot.FullName,
+            LanguageInfo.GeneratedFolderName)));
+        Assert.Contains(
+            interactionService.DisplayedMessages,
+            message => Markup.Remove(message.Message) == ErrorStrings.LegacyTypeScriptAppHostWarning);
+    }
+
     /// <summary>
     /// Regression test for issue #17077: <c>aspire update</c> must not leave
     /// <c>aspire.config.json</c> advanced to newer package versions when guest SDK
@@ -801,6 +837,9 @@ public class GuestAppHostProjectTests : IDisposable
         var originalConfig = await File.ReadAllBytesAsync(configPath);
         var appHostPath = Path.Combine(_workspace.WorkspaceRoot.FullName, "apphost.ts");
         await File.WriteAllTextAsync(appHostPath, "// test apphost");
+        await File.WriteAllTextAsync(
+            Path.Combine(_workspace.WorkspaceRoot.FullName, "apphost.mts"),
+            "// another valid AppHost that must not replace the command target");
         var installScriptPath = Path.Combine(_workspace.WorkspaceRoot.FullName, OperatingSystem.IsWindows() ? "install.cmd" : "install.sh");
         await File.WriteAllTextAsync(installScriptPath, OperatingSystem.IsWindows()
             ? "@echo off\r\ncopy /y package.after-install.json package.json >nul\r\nif errorlevel 1 exit /b 1\r\necho installed> install.marker\r\n"
@@ -811,7 +850,7 @@ public class GuestAppHostProjectTests : IDisposable
             Language = "test/runtime",
             DisplayName = "Test runtime",
             CodeGenLanguage = "TypeScript",
-            DetectionPatterns = ["apphost.ts"],
+            DetectionPatterns = ["apphost.mts", "apphost.ts"],
             Execute = new CommandSpec { Command = "unused", Args = [] },
             InstallDependencies = new CommandSpec
             {
@@ -890,6 +929,7 @@ public class GuestAppHostProjectTests : IDisposable
         var result = await project.UpdatePackagesAsync(context, CancellationToken.None);
 
         Assert.True(result.UpdatesApplied);
+        Assert.Equal(appHostPath, factory.AppHostFile?.FullName);
         Assert.Equal(["confirm", "regenerate", "apply"], events);
         var updatedManifest = JsonNode.Parse(await File.ReadAllTextAsync(manifestPath))!;
         var expectedManifest = JsonNode.Parse(installedManifest)!;
@@ -1808,11 +1848,8 @@ public class GuestAppHostProjectTests : IDisposable
 
     /// <summary>
     /// Regression test for https://github.com/microsoft/aspire/issues/18103:
-    /// During <c>aspire update</c>, the code-generation step calls
-    /// <c>WarnIfCliSdkVersionSkew</c> which reads the SDK version from disk. At that
-    /// point the in-memory config has already been updated to the CLI's version, but
-    /// the file hasn't been saved yet. The method should not emit a version-skew warning
-    /// when the update is actively aligning versions.
+    /// During <c>aspire update</c>, the on-disk SDK version is stale. Code generation
+    /// should not warn when the target SDK is no newer than the CLI.
     /// </summary>
     /// <remarks>
     /// The test drives <see cref="GuestAppHostProject.UpdatePackagesAsync"/> to demonstrate
@@ -1822,10 +1859,12 @@ public class GuestAppHostProjectTests : IDisposable
     /// succeeds. The assertion validates that the skew-warning method does not emit a spurious
     /// warning for the stale on-disk version when the update is aligning versions to the CLI.
     /// </remarks>
-    [Fact]
-    public async Task UpdatePackagesAsync_DoesNotEmitStaleVersionSkewWarningDuringUpdate()
+    [Theory]
+    [InlineData("13.5.4", "13.5.4")]
+    [InlineData("13.6.0", "13.5.4")]
+    [InlineData("13.6.0-pr.19847.g8be64f3a", "13.5.4")]
+    public async Task UpdatePackagesAsync_DoesNotEmitStaleVersionSkewWarningDuringUpdate(string cliVersion, string updateTargetVersion)
     {
-        var cliVersion = VersionHelper.GetDefaultSdkVersion();
         var staleVersion = "1.0.0";
 
         var configPath = Path.Combine(_workspace.WorkspaceRoot.FullName, AspireConfigFile.FileName);
@@ -1839,96 +1878,6 @@ public class GuestAppHostProjectTests : IDisposable
         var appHostPath = Path.Combine(_workspace.WorkspaceRoot.FullName, "apphost.ts");
         await File.WriteAllTextAsync(appHostPath, "// test apphost");
 
-        // Return the CLI version as the latest available, so aspire update would align them.
-        var fakeCache = new FakeNuGetPackageCache
-        {
-            GetPackagesAsyncCallback = (_, packageId, _, _, _, _, _) =>
-                Task.FromResult<IEnumerable<Aspire.Shared.NuGetPackageCli>>(
-                [
-                    new Aspire.Shared.NuGetPackageCli { Id = packageId, Version = cliVersion, Source = "test" }
-                ])
-        };
-
-        var implicitChannel = PackageChannel.CreateImplicitChannel(fakeCache, new TestFeatures(), NullLogger.Instance);
-
-        var interactionService = new TestInteractionService
-        {
-            ConfirmCallback = (_, _) => true
-        };
-
-        var factory = new TestAppHostServerProjectFactory
-        {
-            CreateAsyncCallback = (appPath, _) =>
-                Task.FromResult<IAppHostServerProject>(new FakeSucceedingAppHostServerProject(appPath))
-        };
-
-        IAppHostServerSessionFactory sessionFactory = new FakeAppHostServerSessionFactory();
-
-        var project = CreateGuestAppHostProject(
-            interactionService: interactionService,
-            appHostServerProjectFactory: factory,
-            serverSessionFactory: sessionFactory);
-
-        var context = new UpdatePackagesContext
-        {
-            AppHostFile = new FileInfo(appHostPath),
-            Channel = implicitChannel,
-            ConfirmBinding = PromptBinding.CreateDefault<bool>(false),
-            NuGetConfigDirBinding = PromptBinding.CreateDefault<string?>(null),
-        };
-
-        // UpdatePackagesAsync will go through BuildAndGenerateSdkAsync → GenerateCodeViaRpcAsync
-        // which calls WarnIfCliSdkVersionSkew reading the stale on-disk config.
-        // It should NOT warn because the update is aligning versions to match the CLI.
-        await project.UpdatePackagesAsync(context, CancellationToken.None);
-
-        Assert.Empty(interactionService.DisplayedErrors);
-        Assert.Collection(interactionService.DisplayedMessages,
-            m =>
-            {
-                Assert.Equal("package", m.Emoji.Name);
-                Assert.Equal($"Aspire SDK {staleVersion} to {cliVersion}", Markup.Remove(m.Message));
-            },
-            m =>
-            {
-                Assert.Equal("package", m.Emoji.Name);
-                Assert.Equal($"Aspire.Hosting {staleVersion} to {cliVersion}", Markup.Remove(m.Message));
-            },
-            m =>
-            {
-                Assert.Equal("warning", m.Emoji.Name);
-                Assert.Equal(ErrorStrings.LegacyTypeScriptAppHostWarning, Markup.Remove(m.Message));
-            },
-            m =>
-            {
-                Assert.Equal("package", m.Emoji.Name);
-                Assert.Equal(UpdateCommandStrings.RegeneratedSdkCode, m.Message);
-            });
-    }
-
-    /// <summary>
-    /// Verifies that <c>WarnIfCliSdkVersionSkew</c> emits the
-    /// <see cref="ErrorStrings.CodegenVersionSkewWarning"/> when the on-disk SDK version
-    /// genuinely differs from the CLI version and the update target does NOT align them.
-    /// </summary>
-    [Fact]
-    public async Task UpdatePackagesAsync_EmitsVersionSkewWarningWhenTargetDiffersFromCli()
-    {
-        var staleVersion = "1.0.0";
-        var updateTargetVersion = "2.0.0"; // Different from CLI version — legitimate skew
-
-        var configPath = Path.Combine(_workspace.WorkspaceRoot.FullName, AspireConfigFile.FileName);
-        await File.WriteAllTextAsync(configPath, $$"""
-            {
-              "sdk": { "version": "{{staleVersion}}" },
-              "packages": { "Aspire.Hosting": "{{staleVersion}}" }
-            }
-            """);
-
-        var appHostPath = Path.Combine(_workspace.WorkspaceRoot.FullName, "apphost.ts");
-        await File.WriteAllTextAsync(appHostPath, "// test apphost");
-
-        // Return a version that does NOT match the CLI version — the skew is genuine.
         var fakeCache = new FakeNuGetPackageCache
         {
             GetPackagesAsyncCallback = (_, packageId, _, _, _, _, _) =>
@@ -1956,7 +1905,8 @@ public class GuestAppHostProjectTests : IDisposable
         var project = CreateGuestAppHostProject(
             interactionService: interactionService,
             appHostServerProjectFactory: factory,
-            serverSessionFactory: sessionFactory);
+            serverSessionFactory: sessionFactory,
+            identityVersion: cliVersion);
 
         var context = new UpdatePackagesContext
         {
@@ -1966,15 +1916,9 @@ public class GuestAppHostProjectTests : IDisposable
             NuGetConfigDirBinding = PromptBinding.CreateDefault<string?>(null),
         };
 
-        await project.UpdatePackagesAsync(context, CancellationToken.None);
+        var result = await project.UpdatePackagesAsync(context, CancellationToken.None);
 
-        var cliVersion = VersionHelper.GetDefaultSdkVersion();
-        var expectedWarning = string.Format(
-            System.Globalization.CultureInfo.CurrentCulture,
-            ErrorStrings.CodegenVersionSkewWarning,
-            cliVersion,
-            staleVersion);
-
+        Assert.True(result.UpdatesApplied);
         Assert.Empty(interactionService.DisplayedErrors);
         Assert.Collection(interactionService.DisplayedMessages,
             m =>
@@ -1990,7 +1934,102 @@ public class GuestAppHostProjectTests : IDisposable
             m =>
             {
                 Assert.Equal("warning", m.Emoji.Name);
-                Assert.Contains(expectedWarning, m.Message);
+                Assert.Equal(ErrorStrings.LegacyTypeScriptAppHostWarning, Markup.Remove(m.Message));
+            },
+            m =>
+            {
+                Assert.Equal("package", m.Emoji.Name);
+                Assert.Equal(UpdateCommandStrings.RegeneratedSdkCode, m.Message);
+            });
+    }
+
+    /// <summary>
+    /// Verifies that <c>WarnIfCliSdkVersionSkew</c> emits the
+    /// <see cref="ErrorStrings.CodegenVersionSkewWarning"/> for an SDK update target
+    /// newer than the CLI, even when the on-disk SDK is older than or equal to the CLI.
+    /// </summary>
+    [Theory]
+    [InlineData("13.5.0", "13.4.0", "13.6.0")]
+    [InlineData("13.5.0", "13.5.0", "13.6.0")]
+    [InlineData("13.4.0", "13.5.0", "13.6.0")]
+    [InlineData("13.6.0-pr.19847.g8be64f3a", "13.5.4", "13.6.0")]
+    public async Task UpdatePackagesAsync_EmitsVersionSkewWarningWhenTargetIsNewerThanCli(
+        string cliVersion, string staleVersion, string updateTargetVersion)
+    {
+        var configPath = Path.Combine(_workspace.WorkspaceRoot.FullName, AspireConfigFile.FileName);
+        await File.WriteAllTextAsync(configPath, $$"""
+            {
+              "sdk": { "version": "{{staleVersion}}" },
+              "packages": { "Aspire.Hosting": "{{staleVersion}}" }
+            }
+            """);
+
+        var appHostPath = Path.Combine(_workspace.WorkspaceRoot.FullName, "apphost.ts");
+        await File.WriteAllTextAsync(appHostPath, "// test apphost");
+
+        var fakeCache = new FakeNuGetPackageCache
+        {
+            GetPackagesAsyncCallback = (_, packageId, _, _, _, _, _) =>
+                Task.FromResult<IEnumerable<Aspire.Shared.NuGetPackageCli>>(
+                [
+                    new Aspire.Shared.NuGetPackageCli { Id = packageId, Version = updateTargetVersion, Source = "test" }
+                ])
+        };
+
+        var implicitChannel = PackageChannel.CreateImplicitChannel(fakeCache, new TestFeatures(), NullLogger.Instance);
+
+        var interactionService = new TestInteractionService
+        {
+            ConfirmCallback = (_, _) => true
+        };
+
+        var factory = new TestAppHostServerProjectFactory
+        {
+            CreateAsyncCallback = (appPath, _) =>
+                Task.FromResult<IAppHostServerProject>(new FakeSucceedingAppHostServerProject(appPath))
+        };
+
+        IAppHostServerSessionFactory sessionFactory = new FakeAppHostServerSessionFactory();
+
+        var project = CreateGuestAppHostProject(
+            interactionService: interactionService,
+            appHostServerProjectFactory: factory,
+            serverSessionFactory: sessionFactory,
+            identityVersion: cliVersion);
+
+        var context = new UpdatePackagesContext
+        {
+            AppHostFile = new FileInfo(appHostPath),
+            Channel = implicitChannel,
+            ConfirmBinding = PromptBinding.CreateDefault<bool>(false),
+            NuGetConfigDirBinding = PromptBinding.CreateDefault<string?>(null),
+        };
+
+        var result = await project.UpdatePackagesAsync(context, CancellationToken.None);
+
+        var expectedWarning = string.Format(
+            System.Globalization.CultureInfo.CurrentCulture,
+            ErrorStrings.CodegenVersionSkewWarning,
+            cliVersion,
+            updateTargetVersion);
+
+        Assert.True(result.UpdatesApplied);
+        Assert.Empty(interactionService.DisplayedErrors);
+        Assert.Collection(interactionService.DisplayedMessages,
+            m =>
+            {
+                Assert.Equal("package", m.Emoji.Name);
+                Assert.Equal($"Aspire SDK {staleVersion} to {updateTargetVersion}", Markup.Remove(m.Message));
+            },
+            m =>
+            {
+                Assert.Equal("package", m.Emoji.Name);
+                Assert.Equal($"Aspire.Hosting {staleVersion} to {updateTargetVersion}", Markup.Remove(m.Message));
+            },
+            m =>
+            {
+                Assert.Equal("warning", m.Emoji.Name);
+                Assert.Equal(expectedWarning, Markup.Remove(m.Message));
             },
             m =>
             {
@@ -2029,7 +2068,8 @@ public class GuestAppHostProjectTests : IDisposable
         string languageId = "typescript/nodejs",
         IEnvironment? environment = null,
         DirectoryInfo? homeDirectory = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        string? identityVersion = null)
     {
         var effectiveConfiguration = configuration ?? _configuration;
 
@@ -2046,6 +2086,7 @@ public class GuestAppHostProjectTests : IDisposable
             new DirectoryInfo(AppContext.BaseDirectory),
             identityChannel: identityChannel,
             logFilePath: logFilePath,
+            identityVersion: identityVersion,
             identityOverridden: identityOverridden,
             homeDirectory: homeDirectory);
 

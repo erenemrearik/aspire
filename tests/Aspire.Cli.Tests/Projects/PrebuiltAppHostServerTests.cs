@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -27,7 +28,6 @@ namespace Aspire.Cli.Tests.Projects;
 
 public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
 {
-    private const string InternalNuGetServiceIndexSource = "https://packagefeedproxy.microsoft.io/nuget/v3/index.json";
     private const string NuGetOrgSource = "https://api.nuget.org/v3/index.json";
     private static readonly byte[] s_sourceIdentityKey = new byte[NuGetSourceIdentity.KeySizeInBytes];
 
@@ -87,10 +87,10 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public void GetIntegrationBuildFailureMessage_ExplainsAPackageDowngrade()
+    public void GetIntegrationBuildFailureMessage_ExplainsAnAspireHostingPackageDowngrade()
     {
         var output = new OutputCollector();
-        // Localized MSBuild output: the error code is the only stable part to match on.
+        // MSBuild localizes the diagnostic text, but the error code and package ID remain stable.
         output.AppendOutput("IntegrationRestore.csproj : error NU1605: Advertencia como error: Degradación del paquete detectada: Aspire.Hosting de 13.6.0-dev a 13.5.0.");
 
         var message = PrebuiltAppHostServer.GetIntegrationBuildFailureMessage(output);
@@ -100,12 +100,101 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
+    public void GetIntegrationBuildFailureMessage_FallsBackForAnUnrelatedPackageDowngrade()
+    {
+        var output = new OutputCollector();
+        output.AppendOutput("IntegrationRestore.csproj : error NU1605: Advertencia como error: Degradación del paquete detectada: Conflict.Dependency de 2.0.0 a 1.0.0.");
+        output.AppendOutput("IntegrationRestore -> Aspire.Hosting (>= 13.6.0)");
+
+        Assert.Equal(ErrorStrings.IntegrationBuildFailed, PrebuiltAppHostServer.GetIntegrationBuildFailureMessage(output));
+    }
+
+    [Fact]
     public void GetIntegrationBuildFailureMessage_FallsBackForOtherFailures()
     {
         var output = new OutputCollector();
         output.AppendOutput("Program.cs(3,1): error CS0103: The name 'Foo' does not exist in the current context");
 
         Assert.Equal(ErrorStrings.IntegrationBuildFailed, PrebuiltAppHostServer.GetIntegrationBuildFailureMessage(output));
+    }
+
+    [Fact]
+    public async Task DotNetRestore_PackageDowngradeIncludesAspireHostingOnTheDiagnosticLine()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var feedDirectory = workspace.CreateDirectory("feed");
+        var packagesDirectory = workspace.CreateDirectory("packages");
+        var projectDirectory = workspace.CreateDirectory("project");
+
+        CreateDependencyPackage(feedDirectory, "Aspire.Hosting", "1.0.0");
+        CreateDependencyPackage(feedDirectory, "Aspire.Hosting", "2.0.0");
+        CreateDependencyPackage(
+            feedDirectory,
+            "Conflict.Requirement",
+            "1.0.0",
+            dependencyId: "Aspire.Hosting",
+            dependencyVersion: "[2.0.0]");
+
+        var projectPath = Path.Combine(projectDirectory.FullName, "PackageDowngrade.csproj");
+        await File.WriteAllTextAsync(
+            projectPath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <NuGetAudit>false</NuGetAudit>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="Conflict.Requirement" Version="1.0.0" />
+                <PackageReference Include="Aspire.Hosting" Version="1.0.0" />
+              </ItemGroup>
+            </Project>
+            """);
+        var nuGetConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config");
+        await File.WriteAllTextAsync(
+            nuGetConfigPath,
+            $$"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="test" value="{{feedDirectory.FullName}}" />
+              </packageSources>
+            </configuration>
+            """);
+
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            WorkingDirectory = projectDirectory.FullName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.Environment.Remove("MSBuildSDKsPath");
+        startInfo.ArgumentList.Add("restore");
+        startInfo.ArgumentList.Add(projectPath);
+        startInfo.ArgumentList.Add("--configfile");
+        startInfo.ArgumentList.Add(nuGetConfigPath);
+        startInfo.ArgumentList.Add("--packages");
+        startInfo.ArgumentList.Add(packagesDirectory.FullName);
+        startInfo.ArgumentList.Add("--nologo");
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start dotnet restore.");
+        // Read both streams concurrently to avoid deadlock when a pipe buffer fills.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        var output = $"{await stdoutTask}{Environment.NewLine}{await stderrTask}";
+        var outputLines = output.Split(
+            [Environment.NewLine],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        Assert.True(process.ExitCode != 0, $"Expected dotnet restore to fail with NU1605:{Environment.NewLine}{output}");
+        Assert.True(
+            outputLines.Any(static line =>
+                line.Contains("NU1605", StringComparison.Ordinal) &&
+                line.Contains(" Aspire.Hosting ", StringComparison.OrdinalIgnoreCase)),
+            $"Expected one NU1605 diagnostic line to contain the exact Aspire.Hosting package ID:{Environment.NewLine}{output}");
     }
 
     [Fact]
@@ -323,6 +412,9 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var feedDirectory = workspace.CreateDirectory("feed");
         CreateDependencyPackage(feedDirectory, "Shared.Dependency", "1.0.0");
         CreateDependencyPackage(feedDirectory, "Shared.Dependency", "2.0.0");
+        // This package is used only by the referenced project so the test cannot pass merely because
+        // the generated root happened to populate the shared package cache before graph evaluation.
+        CreateDependencyPackage(feedDirectory, "Project.Dependency", "1.0.0");
         CreateDependencyPackage(
             feedDirectory,
             "Direct.Integration",
@@ -341,10 +433,60 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
                 <TargetFramework>net10.0</TargetFramework>
+                <_AspireIntegrationNuGetConfig>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)AspireIntegration.NuGet.Config'))</_AspireIntegrationNuGetConfig>
+                <!--
+                  NuGet computes the project's source locations before the config below is applied,
+                  so the source still has to be added here. The injected config supplies the alias
+                  mapping that makes this source eligible under the ambient mapping policy.
+                -->
+                <RestoreAdditionalProjectSources>$(RestoreAdditionalProjectSources);$(AspireIntegrationPackageSources)</RestoreAdditionalProjectSources>
               </PropertyGroup>
               <ItemGroup>
+                <PackageReference Include="Project.Dependency" Version="1.0.0" />
                 <PackageReference Include="Shared.Dependency" Version="2.0.0" />
               </ItemGroup>
+              <!--
+                This is an intentionally unsupported NuGet escape hatch. It proves that a project
+                can use Aspire's source and alias hints to add mapping configuration while retaining
+                the config paths NuGet discovered for that project.
+              -->
+              <Target Name="WriteAspireIntegrationNuGetConfig"
+                      BeforeTargets="_GenerateRestoreProjectSpec">
+                <Error Condition="'$(AspireIntegrationPackageSources)' == ''"
+                       Text="AspireIntegrationPackageSources was not provided." />
+                <Error Condition="'$(AspireIntegrationPackageSourceAlias)' == ''"
+                       Text="AspireIntegrationPackageSourceAlias was not provided." />
+                <PropertyGroup>
+                  <_AspireIntegrationPackageSource>$([System.String]::Copy('$(AspireIntegrationPackageSources)').Split(';').GetValue(0))</_AspireIntegrationPackageSource>
+                  <_AspireIntegrationNuGetConfigContent><![CDATA[
+            <configuration>
+              <packageSources>
+                <add key="$(AspireIntegrationPackageSourceAlias)" value="$(_AspireIntegrationPackageSource)" />
+              </packageSources>
+              <packageSourceMapping>
+                <packageSource key="$(AspireIntegrationPackageSourceAlias)">
+                  <package pattern="*" />
+                </packageSource>
+              </packageSourceMapping>
+            </configuration>
+                  ]]></_AspireIntegrationNuGetConfigContent>
+                </PropertyGroup>
+                <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(_AspireIntegrationNuGetConfig)'))" />
+                <WriteLinesToFile File="$(_AspireIntegrationNuGetConfig)"
+                                  Lines="$(_AspireIntegrationNuGetConfigContent)"
+                                  Overwrite="true" />
+              </Target>
+              <Target Name="ApplyAspireIntegrationNuGetConfig"
+                      AfterTargets="_GenerateRestoreProjectSpec"
+                      DependsOnTargets="WriteAspireIntegrationNuGetConfig">
+                <ItemGroup>
+                  <_RestoreGraphEntry Update="@(_RestoreGraphEntry)"
+                                      Condition="'%(_RestoreGraphEntry.Type)' == 'ProjectSpec' and
+                                                 '%(_RestoreGraphEntry.ProjectUniqueName)' == '$(MSBuildProjectFullPath)'">
+                    <ConfigFilePaths>$(_AspireIntegrationNuGetConfig);%(_RestoreGraphEntry.ConfigFilePaths)</ConfigFilePaths>
+                  </_RestoreGraphEntry>
+                </ItemGroup>
+              </Target>
               <Target Name="RejectInheritedRuntimeIdentifier"
                       BeforeTargets="Build"
                       Condition="'$(RuntimeIdentifier)' != ''">
@@ -355,30 +497,42 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
 
         var generatedProjectDirectory = workspace.CreateDirectory("generated-project");
         var restoreDirectory = workspace.CreateDirectory("integration-restore");
-        await File.WriteAllTextAsync(
-            Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config"),
-            """
-            <configuration>
-              <packageSources>
-                <clear />
-              </packageSources>
-            </configuration>
-            """);
-        var executionContext = workspace.CreateExecutionContext(
-            nugetServiceIndexOverride: InternalNuGetServiceIndexSource);
-        var (server, _) = CreatePackageReferenceServer(
-            workspace,
-            MockPackagingServiceFactory.Create(),
-            executionContext);
+        // NuGet merges package sources and source mappings independently. Clear both sections so
+        // user-level settings cannot leak into the restore, then declare a single ambient source for
+        // framework reference packs that the local SDK may not carry. CI cannot reach nuget.org, so
+        // honor the same service index override the CLI uses. Mapping that source to '*' enables
+        // package-source mapping for every project in the graph, which is what requires the referenced
+        // project to map the test feed through the alias hint rather than merely listing it.
+        var configuredNuGetServiceIndex = Environment.GetEnvironmentVariable(AspireCliIdentityEnvVars.NuGetServiceIndex);
+        var ambientServiceIndex = string.IsNullOrWhiteSpace(configuredNuGetServiceIndex)
+            ? PackageSources.NuGetOrg
+            : configuredNuGetServiceIndex;
+        new XDocument(
+            new XElement("configuration",
+                new XElement("packageSources",
+                    new XElement("clear"),
+                    new XElement("add",
+                        new XAttribute("key", "ambient"),
+                        new XAttribute("value", ambientServiceIndex))),
+                new XElement("packageSourceMapping",
+                    new XElement("clear"),
+                    new XElement("packageSource",
+                        new XAttribute("key", "ambient"),
+                        new XElement("package", new XAttribute("pattern", "*"))))))
+            .Save(Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config"));
+        var (server, _) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.DiscoverAmbient);
         var restorePlan = await server.ResolveIntegrationRestorePlanAsync(
-            "13.4.0",
+            VersionHelper.GetDefaultTemplateVersion(),
             requestedChannel: null,
             packageSourceOverride: feedDirectory.FullName,
             packageSourceOverridePattern: "Direct.Integration",
             TestContext.Current.CancellationToken);
-        var restoreConfiguration = await restorePlan.ApplyProjectRestoreConfigurationAsync(
+        var restoreConfiguration = restorePlan.ApplyProjectRestoreConfiguration(
             IntegrationClosureBuilder.GetAppHostIntegrationPolicyDirectory(workspace.WorkspaceRoot),
             TestContext.Current.CancellationToken);
+        var integrationPackageSources = IntegrationClosureBuilder.CreateRestoreAdditionalProjectSourcesValue(
+            existingValue: null,
+            restoreConfiguration.PackageSourceHints);
 
         var generatedProjectPath = Path.Combine(generatedProjectDirectory.FullName, "IntegrationRestore.csproj");
         var projectContent = PrebuiltAppHostServer.GenerateIntegrationProjectFile(
@@ -411,8 +565,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             .Elements("add")
             .Select(static source => source.Attribute("value")!.Value)
             .ToArray();
-        Assert.Contains(feedDirectory.FullName, configuredSources);
-        Assert.Contains(InternalNuGetServiceIndexSource, configuredSources);
+        Assert.Equal([feedDirectory.FullName], configuredSources);
+        Assert.Equal(["*"], GetPackagePatternsForKey(restoreConfig, "ambient"));
+        Assert.Equal(
+            ["Direct.Integration", "*"],
+            GetPackagePatternsForSource(restoreConfig, feedDirectory.FullName));
 
         var startInfo = new ProcessStartInfo("dotnet")
         {
@@ -422,6 +579,16 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             UseShellExecute = false
         };
         startInfo.Environment.Remove("MSBuildSDKsPath");
+        // The referenced project restores into the default global packages folder. Isolate it so a
+        // package cached by an earlier run cannot satisfy restore without the test feed being eligible.
+        startInfo.Environment["NUGET_PACKAGES"] = workspace.CreateDirectory("project-packages").FullName;
+        if (integrationPackageSources is not null)
+        {
+            startInfo.Environment[PrebuiltAppHostServer.IntegrationPackageSourcesPropertyName] = integrationPackageSources;
+        }
+        Assert.NotNull(restoreConfiguration.PackageSourceAlias);
+        startInfo.Environment[PrebuiltAppHostServer.IntegrationPackageSourceAliasPropertyName] =
+            restoreConfiguration.PackageSourceAlias;
         startInfo.ArgumentList.Add("build");
         startInfo.ArgumentList.Add(generatedProjectPath);
         startInfo.ArgumentList.Add("--nologo");
@@ -431,12 +598,22 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var stderrTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
         await process.WaitForExitAsync(TestContext.Current.CancellationToken);
         var output = $"{await stdoutTask}{Environment.NewLine}{await stderrTask}";
+        var projectNuGetConfigPath = Path.Combine(
+            projectIntegrationDirectory.FullName,
+            "obj",
+            "AspireIntegration.NuGet.Config");
+        Assert.True(File.Exists(projectNuGetConfigPath), output);
+        var projectNuGetConfig = XDocument.Load(projectNuGetConfigPath);
+        var projectSource = Assert.Single(projectNuGetConfig.Descendants("packageSources").Elements("add"));
+        Assert.Equal(restoreConfiguration.PackageSourceAlias, projectSource.Attribute("key")?.Value);
+        Assert.Equal(feedDirectory.FullName, projectSource.Attribute("value")?.Value);
 
         if (shouldSucceed)
         {
             Assert.True(process.ExitCode == 0, output);
             using var assets = JsonDocument.Parse(await File.ReadAllTextAsync(
                 Path.Combine(restoreDirectory.FullName, "obj", IntegrationClosureBuilder.ProjectAssetsFileName)));
+            Assert.True(assets.RootElement.GetProperty("libraries").TryGetProperty("Project.Dependency/1.0.0", out _));
             Assert.True(assets.RootElement.GetProperty("libraries").TryGetProperty("Shared.Dependency/2.0.0", out _));
             Assert.False(assets.RootElement.GetProperty("libraries").TryGetProperty("Shared.Dependency/1.0.0", out _));
 
@@ -628,7 +805,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
         var executionContext = CreateContextWithIdentityChannel(identityChannel, identityVersion);
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService, executionContext);
+        var (server, nuGetClient) = CreatePackageReferenceServer(
+            workspace,
+            NuGetSettingsMode.Isolated,
+            packagingService,
+            executionContext);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -639,7 +820,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 [IntegrationReference.FromPackage("Aspire.Hosting.Redis", identityVersion)]);
 
             Assert.True(result.Success);
-            Assert.Equal([packageSource.FullName, NuGetOrgSource], GetConfiguredPackageSources(nuGetClient));
+            Assert.Equal([packageSource.FullName], GetConfiguredPackageSources(nuGetClient));
             Assert.Contains(("Aspire.Hosting.Redis", $"[{identityVersion}]"), nuGetClient.LastRestorePackages!);
         }
         finally
@@ -668,7 +849,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
         var executionContext = CreateContextWithIdentityChannel(identityChannel, identityVersion);
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService, executionContext);
+        var (server, nuGetClient) = CreatePackageReferenceServer(
+            workspace,
+            NuGetSettingsMode.Isolated,
+            packagingService,
+            executionContext);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -715,7 +900,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 [stableChannel, identityPackageChannel])
         };
         var executionContext = CreateContextWithIdentityChannel(identityChannel, identityVersion);
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService, executionContext);
+        var (server, nuGetClient) = CreatePackageReferenceServer(
+            workspace,
+            NuGetSettingsMode.Isolated,
+            packagingService,
+            executionContext);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -846,7 +1035,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public async Task CreateRestoreOverlay_StableIdentity_StableRequested_UsesAmbientPolicy()
+    public async Task CreateRestoreOverlay_StableIdentity_StableRequested_GeneratesAmbientPolicy()
     {
         // Stable uses the same ambient NuGet source policy as an omitted channel.
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
@@ -856,7 +1045,9 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
 
         using var result = await CreateRestoreOverlayAsync(server, "stable");
 
-        Assert.Null(result.PolicyOverlayFile);
+        var overlayFile = Assert.IsType<FileInfo>(result.PolicyOverlayFile);
+        var doc = XDocument.Load(overlayFile.FullName);
+        Assert.Empty(doc.Descendants("packageSources").Elements("add"));
     }
 
     [Fact]
@@ -912,7 +1103,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         const string channelSource = "https://pkgs.dev.azure.com/fake/v3/index.json";
         var mappings = new[]
         {
-            new PackageMapping(PackageMapping.AllPackages, channelSource)
+            new PackageMapping("Aspire*", channelSource)
         };
         var stagingChannel = PackageChannel.CreateExplicitChannel(
             name: "staging",
@@ -943,7 +1134,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             $"globalPackagesFolder must not be under the policy overlay directory '{overlayDirectory}'. Got: {gpfValue}");
         // The cache subdirectory must be keyed by the resolved feed URL so two different staging
         // feeds (e.g. two darc builds or an overrideStagingFeed setting) get distinct caches.
-        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(result.OverlayCacheIdentity);
+        var sourcePolicyIdentity = IntegrationRestorePlanResolver.CreateGlobalPackagesFolderIdentity(
+            [channelSource],
+            mappings);
+        var expectedIdentity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+            sourcePolicyIdentity,
+            result.OverlayCacheIdentity!);
+        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(expectedIdentity);
         Assert.NotNull(expectedCacheKey);
         var expectedCachePath = Path.Combine(
             CliPathHelper.GetStagingNuGetPackagesDirectory(executionContext.AspireHomeDirectory),
@@ -995,12 +1192,73 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             $"globalPackagesFolder must not be under the policy overlay directory '{overlayDirectory}'. Got: {gpfValue}");
         // The cache key is derived from the resolved staging feed URL so the same CLI talking to
         // a different overrideStagingFeed gets a different cache bucket.
-        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(result.OverlayCacheIdentity);
+        var sourcePolicyIdentity = IntegrationRestorePlanResolver.CreateGlobalPackagesFolderIdentity(
+            [overrideStagingFeed],
+            [new PackageMapping("Aspire*", overrideStagingFeed)]);
+        var expectedIdentity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+            sourcePolicyIdentity,
+            result.OverlayCacheIdentity!);
+        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(expectedIdentity);
         Assert.NotNull(expectedCacheKey);
         var expectedCachePath = Path.Combine(
             CliPathHelper.GetStagingNuGetPackagesDirectory(executionContext.AspireHomeDirectory),
             expectedCacheKey);
         Assert.Equal(expectedCachePath, gpfValue);
+    }
+
+    [Fact]
+    public async Task CreateRestoreOverlay_ReusedAmbientAliasWithDifferentSourceUrls_UsesDifferentGlobalPackagesFolders()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+
+        const string sourceAlias = "staging";
+        const string firstSource = "https://packages.example.com/first/v3/index.json";
+        const string secondSource = "https://packages.example.com/second/v3/index.json";
+        var executionContext = CreateContextWithIdentityChannel(PackageChannelNames.Local);
+        var settingsClient = new NuGetClient(
+            new TestFeatures(),
+            new TestEnvironment(),
+            NullLogger<NuGetClient>.Instance);
+
+        PrebuiltAppHostServer CreateServer(string source)
+        {
+            var channel = PackageChannel.CreateExplicitChannel(
+                name: PackageChannelNames.Staging,
+                quality: PackageChannelQuality.Both,
+                mappings: [new PackageMapping("Aspire*", source)],
+                nuGetPackageCache: new FakeNuGetPackageCache(),
+                features: new TestFeatures(),
+                NullLogger.Instance,
+                configureGlobalPackagesFolder: true);
+            var packagingService = new TestPackagingService
+            {
+                GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
+            };
+            var nuGetClient = new FakeNuGetClient
+            {
+                GetSettingsCallback = (_, sourceIdentityKey) => CreateNuGetSettingsInfo(
+                    sources: [(sourceAlias, source, true)],
+                    packageSourceMappings: [(sourceAlias, ["Aspire*"])],
+                    sourceIdentityKey: sourceIdentityKey),
+                WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
+            };
+
+            return CreatePrebuiltAppHostServer(
+                workspace,
+                packagingService: packagingService,
+                executionContext: executionContext,
+                nuGetClient: nuGetClient);
+        }
+
+        using var firstResult = await CreateRestoreOverlayAsync(
+            CreateServer(firstSource),
+            PackageChannelNames.Staging);
+        using var secondResult = await CreateRestoreOverlayAsync(
+            CreateServer(secondSource),
+            PackageChannelNames.Staging);
+
+        Assert.Equal(firstResult.OverlayCacheIdentity, secondResult.OverlayCacheIdentity);
+        Assert.NotEqual(firstResult.GlobalPackagesFolder, secondResult.GlobalPackagesFolder);
     }
 
     [Theory]
@@ -1144,18 +1402,48 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public void ResolveNuGetConfigSources_AvoidsDormantReservedSourceKeys()
+    public void ResolveNuGetConfigSources_UsesWorkloadIdAndAvoidsDormantReservedAdditionalSourceKeys()
     {
+        const string workloadId = "apphost-0123456789abcdef";
         var sources = IntegrationRestorePlan.ResolveNuGetConfigSources(
             [
                 new PackageMapping("Aspire*", "https://example.com/staging"),
+                new PackageMapping("Contoso.*", "https://example.com/contoso"),
                 new PackageMapping("*", "https://example.com/fallback")
             ],
+            workloadId,
             ambientSources: [],
-            reservedPackageSourceKeys: ["aspire-0", "aspire-2"],
+            reservedPackageSourceKeys:
+            [
+                $"aspire-{workloadId}-0",
+                $"aspire-{workloadId}-2"
+            ],
             s_sourceIdentityKey);
 
-        Assert.Equal(["aspire-1", "aspire-3"], sources.Select(static source => source.Key));
+        Assert.Equal(
+            [
+                $"aspire-{workloadId}",
+                $"aspire-{workloadId}-1",
+                $"aspire-{workloadId}-3"
+            ],
+            sources.Select(static source => source.Key));
+    }
+
+    [Fact]
+    public void ResolveNuGetConfigSources_RejectsConflictingPrimaryGeneratedSourceKey()
+    {
+        const string workloadId = "apphost-0123456789abcdef";
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            IntegrationRestorePlan.ResolveNuGetConfigSources(
+                [new PackageMapping("Aspire*", "https://example.com/staging")],
+                workloadId,
+                ambientSources: [],
+                reservedPackageSourceKeys: [$"aspire-{workloadId}"],
+                s_sourceIdentityKey));
+
+        Assert.Equal(
+            $"The generated NuGet source key 'aspire-{workloadId}' conflicts with an existing NuGet configuration key.",
+            exception.Message);
     }
 
     [Theory]
@@ -1168,6 +1456,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         const string source = "https://example.com/private";
         var sources = IntegrationRestorePlan.ResolveNuGetConfigSources(
             [new PackageMapping("Aspire*", source)],
+            "apphost-0123456789abcdef",
             ambientSources:
             [
                 CreateNuGetSourceInfo("anonymous", source, isEnabled: false),
@@ -1190,6 +1479,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         const string source = "https://example.com/private";
         var sources = IntegrationRestorePlan.ResolveNuGetConfigSources(
             [new PackageMapping("Aspire*", source)],
+            "apphost-0123456789abcdef",
             ambientSources:
             [
                 CreateNuGetSourceInfo("enabled", source, isEnabled: true),
@@ -1214,7 +1504,6 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 CreateNuGetSourceInfo("unrelated", "https://example.com/unrelated", isEnabled: false)
             ],
             SensitiveSourceValues: [],
-            PackageSourceMappingEnabled: false,
             PackageSourceMappings: [],
             DisabledPackageSourceKeys: ["private", "unrelated"],
             ReservedPackageSourceKeys: ["Private", "unrelated"],
@@ -1232,7 +1521,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public async Task CreateRestoreOverlay_WithPackageSourceOverride_MapsAspireToOverrideAndAddsNuGetOrgFallback()
+    public async Task CreateRestoreOverlay_WithPackageSourceOverride_MapsAspireToOverrideWithoutAddingNuGetOrg()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var packageSourceOverride = Path.Combine(workspace.WorkspaceRoot.FullName, "aspire-packages");
@@ -1250,7 +1539,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var overlayFile = Assert.IsType<FileInfo>(result.PolicyOverlayFile);
         var doc = XDocument.Load(overlayFile.FullName);
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(doc, packageSourceOverride));
-        Assert.Equal([PackageMapping.AllPackages], GetPackagePatternsForSource(doc, NuGetOrgSource));
+        Assert.Empty(GetPackagePatternsForSource(doc, NuGetOrgSource));
     }
 
     [Fact]
@@ -1280,7 +1569,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var doc = XDocument.Load(overlayFile.FullName);
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(doc, packageSourceOverride));
         Assert.Empty(GetPackagePatternsForSource(doc, channelSource));
-        Assert.Equal([PackageMapping.AllPackages], GetPackagePatternsForSource(doc, NuGetOrgSource));
+        Assert.Empty(GetPackagePatternsForSource(doc, NuGetOrgSource));
     }
 
     [Fact]
@@ -1309,7 +1598,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var doc = XDocument.Load(overlayFile.FullName);
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(doc, packageSourceOverride));
         Assert.Equal(["CommunityToolkit*"], GetPackagePatternsForSource(doc, channelSource));
-        Assert.Equal([PackageMapping.AllPackages], GetPackagePatternsForSource(doc, NuGetOrgSource));
+        Assert.Empty(GetPackagePatternsForSource(doc, NuGetOrgSource));
         var gpf = doc.Descendants("config")
             .SelectMany(c => c.Elements("add"))
             .FirstOrDefault(a => string.Equals(a.Attribute("key")?.Value, "globalPackagesFolder", StringComparison.OrdinalIgnoreCase));
@@ -1323,9 +1612,18 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         Assert.False(
             gpfValue!.StartsWith(overlayDirectory, StringComparison.Ordinal),
             $"globalPackagesFolder must not be under the policy overlay directory '{overlayDirectory}'. Got: {gpfValue}");
-        // The cache key is derived from the --source override, not the channel's own mappings,
-        // so users running multiple overrides against the same CLI get distinct cache buckets.
-        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(result.OverlayCacheIdentity);
+        // The cache key includes both the --source override and the retained channel mappings,
+        // so any selected source-policy change gets a distinct cache bucket.
+        var sourcePolicyIdentity = IntegrationRestorePlanResolver.CreateGlobalPackagesFolderIdentity(
+            [packageSourceOverride, channelSource],
+            [
+                new PackageMapping("Aspire*", packageSourceOverride),
+                new PackageMapping("CommunityToolkit*", channelSource)
+            ]);
+        var expectedIdentity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+            sourcePolicyIdentity,
+            result.OverlayCacheIdentity!);
+        var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(expectedIdentity);
         Assert.NotNull(expectedCacheKey);
         var expectedCachePath = Path.Combine(
             CliPathHelper.GetStagingNuGetPackagesDirectory(executionContext.AspireHomeDirectory),
@@ -1356,7 +1654,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var doc = XDocument.Load(overlayFile.FullName);
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(doc, packageSourceOverride));
         Assert.Empty(GetPackagePatternsForSource(doc, channelSource));
-        Assert.Equal([PackageMapping.AllPackages], GetPackagePatternsForSource(doc, NuGetOrgSource));
+        Assert.Empty(GetPackagePatternsForSource(doc, NuGetOrgSource));
     }
 
     [Theory]
@@ -1394,7 +1692,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var doc = XDocument.Load(overlayFile.FullName);
         Assert.Equal([packageId, PackageMapping.AllPackages], GetPackagePatternsForSource(doc, packageSourceOverride));
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(doc, channelSource));
-        Assert.Equal([PackageMapping.AllPackages], GetPackagePatternsForSource(doc, NuGetOrgSource));
+        Assert.Empty(GetPackagePatternsForSource(doc, NuGetOrgSource));
     }
 
     [Fact]
@@ -1419,7 +1717,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public async Task CreateRestoreOverlay_WithPackageSourceOverride_UsesChannelAllPackagesMappingAsFallback()
+    public async Task CreateRestoreOverlay_WithPackageSourceOverride_IgnoresChannelAllPackagesFallback()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var packageSourceOverride = Path.Combine(workspace.WorkspaceRoot.FullName, "aspire-packages");
@@ -1440,12 +1738,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var overlayFile = Assert.IsType<FileInfo>(result.PolicyOverlayFile);
         var doc = XDocument.Load(overlayFile.FullName);
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(doc, packageSourceOverride));
-        Assert.Equal([PackageMapping.AllPackages], GetPackagePatternsForSource(doc, channelSource));
+        Assert.Empty(GetPackagePatternsForSource(doc, channelSource));
         Assert.Empty(GetPackagePatternsForSource(doc, NuGetOrgSource));
     }
 
     [Fact]
-    public async Task CreateRestoreOverlay_WithPackageSourceOverride_WhenChannelLookupFails_StillCreatesOverridePolicyWithFallback()
+    public async Task CreateRestoreOverlay_WithPackageSourceOverride_WhenChannelLookupFails_StillCreatesOverridePolicy()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var packageSourceOverride = Path.Combine(workspace.WorkspaceRoot.FullName, "aspire-packages");
@@ -1463,7 +1761,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var overlayFile = Assert.IsType<FileInfo>(result.PolicyOverlayFile);
         var doc = XDocument.Load(overlayFile.FullName);
         Assert.Equal(["Aspire*"], GetPackagePatternsForSource(doc, packageSourceOverride));
-        Assert.Equal([PackageMapping.AllPackages], GetPackagePatternsForSource(doc, NuGetOrgSource));
+        Assert.Empty(GetPackagePatternsForSource(doc, NuGetOrgSource));
     }
 
     [Fact]
@@ -1506,11 +1804,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         Assert.NotNull(sources);
         Assert.Contains(packageSourceOverride, sources);
         Assert.DoesNotContain(channelSource, sources);
-        Assert.Contains(NuGetOrgSource, sources);
+        Assert.DoesNotContain(NuGetOrgSource, sources);
     }
 
     [Fact]
-    public async Task ResolveAdditionalSources_WithPackageSourceOverrideAndMatchedChannelNonAspireMapping_KeepsChannelSourceAndAddsNuGetOrgFallback()
+    public async Task ResolveAdditionalSources_WithPackageSourceOverrideAndMatchedChannelNonAspireMapping_KeepsChannelSourceWithoutAddingNuGetOrg()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var packageSourceOverride = Path.Combine(workspace.WorkspaceRoot.FullName, "aspire-packages");
@@ -1528,12 +1826,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         Assert.NotNull(sources);
         Assert.Contains(packageSourceOverride, sources);
         Assert.Contains(channelSource, sources);
-        // The policy adds NuGet.org as the catch-all when the channel does not provide one.
-        Assert.Contains(NuGetOrgSource, sources);
+        Assert.DoesNotContain(NuGetOrgSource, sources);
     }
 
     [Fact]
-    public async Task ResolveAdditionalSources_WithPackageSourceOverrideAndMatchedChannelAllPackagesMapping_OmitsNuGetOrgFallback()
+    public async Task ResolveAdditionalSources_WithPackageSourceOverrideAndMatchedChannelAllPackagesMapping_IgnoresChannelFallback()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var packageSourceOverride = Path.Combine(workspace.WorkspaceRoot.FullName, "aspire-packages");
@@ -1550,9 +1847,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
 
         Assert.NotNull(sources);
         Assert.Contains(packageSourceOverride, sources);
-        Assert.Contains(channelSource, sources);
-        // The channel's catch-all remains authoritative, so NuGet.org is not added as another
-        // co-eligible source.
+        Assert.DoesNotContain(channelSource, sources);
         Assert.DoesNotContain(NuGetOrgSource, sources);
     }
 
@@ -1627,7 +1922,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var executionContext = CreateContextWithIdentityChannel("daily");
         var mappings = new[]
         {
-            new PackageMapping(PackageMapping.AllPackages, "https://pkgs.dev.azure.com/fake/v3/index.json")
+            new PackageMapping("Aspire*", "https://pkgs.dev.azure.com/fake/v3/index.json")
         };
         var dailyChannel = PackageChannel.CreateExplicitChannel(
             "daily", PackageChannelQuality.Both, mappings, new FakeNuGetPackageCache(), new TestFeatures(), NullLogger.Instance);
@@ -1654,7 +1949,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         // Returning a daily channel verifies that source resolution does not substitute it.
         var mappings = new[]
         {
-            new PackageMapping(PackageMapping.AllPackages, "https://pkgs.dev.azure.com/fake/v3/index.json")
+            new PackageMapping("Aspire*", "https://pkgs.dev.azure.com/fake/v3/index.json")
         };
         var dailyChannel = PackageChannel.CreateExplicitChannel(
             "daily", PackageChannelQuality.Both, mappings, new FakeNuGetPackageCache(), new TestFeatures(), NullLogger.Instance);
@@ -1692,13 +1987,16 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         TestDotNetCliRunner? dotNetCliRunner = null,
         IPackagingService? packagingService = null,
         CliExecutionContext? executionContext = null,
-        BundleNuGetService? nugetService = null)
+        FakeNuGetClient? nuGetClient = null)
     {
         executionContext ??= TestExecutionContextFactory.CreateTestContext();
-
-        nugetService ??= new BundleNuGetService(
+        nuGetClient ??= CreateIsolatedNuGetClient();
+        var nugetService = new BundleNuGetService(
             NullLogger<BundleNuGetService>.Instance,
-            CreatePolicyWritingFakeNuGetClient());
+            nuGetClient)
+        {
+            SourceIdentityKeyFactory = static () => s_sourceIdentityKey
+        };
 
         return new PrebuiltAppHostServer(
             appPath ?? workspace.WorkspaceRoot.FullName,
@@ -1723,7 +2021,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         // channel a project's aspire.config.json would resolve to when it requests that name.
         var mappings = new[]
         {
-            new PackageMapping(PackageMapping.AllPackages, "https://pkgs.dev.azure.com/fake/v3/index.json")
+            new PackageMapping("Aspire*", "https://pkgs.dev.azure.com/fake/v3/index.json")
         };
         var channel = PackageChannel.CreateExplicitChannel(
             channelName, PackageChannelQuality.Both, mappings, new FakeNuGetPackageCache(), new TestFeatures(), NullLogger.Instance);
@@ -1852,7 +2150,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -1888,7 +2186,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         using var cancellation = new CancellationTokenSource();
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
         nuGetClient.RestoreCallback = (_, _, _, _, _, _, _, _, _, cancellationToken) =>
         {
             cancellation.Cancel();
@@ -1915,7 +2213,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var packageSourceOverride = workspace.CreateDirectory(
             Path.Combine("aspire-pr-hive", "packages")).FullName;
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -1930,7 +2228,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 packageSourceOverride: packageSourceOverride);
 
             Assert.True(result.Success);
-            Assert.Equal([packageSourceOverride, NuGetOrgSource], GetConfiguredPackageSources(nuGetClient));
+            Assert.Equal([packageSourceOverride], GetConfiguredPackageSources(nuGetClient));
             Assert.Contains(("Aspire.Hosting.CodeGeneration.TypeScript", "[13.4.0-pr.17141.gf142085f]"), nuGetClient.LastRestorePackages!);
             Assert.Contains(("CommunityToolkit.Aspire.Hosting.Redis", "1.0.0"), nuGetClient.LastRestorePackages!);
             Assert.NotEmpty(nuGetClient.LastNuGetConfigPaths!);
@@ -1942,12 +2240,42 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public async Task PrepareAsync_WithPackageSourceOverride_AddsNuGetOrgFallbackSource()
+    public async Task PrepareAsync_WithExactPackageSourceOverridePattern_PinsOnlyMatchingPackage()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var packageSourceOverride = workspace.CreateDirectory("integration-packages").FullName;
+        const string selectedPackage = "CommunityToolkit.Aspire.Hosting.Redis";
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
+        var workingDirectory = GetWorkingDirectory(server);
+
+        try
+        {
+            var result = await server.PrepareAsync(
+                "13.4.0",
+                [
+                    IntegrationReference.FromPackage("Aspire.Hosting.Redis", "13.4.0"),
+                    IntegrationReference.FromPackage(selectedPackage, "1.0.0")
+                ],
+                packageSourceOverride: packageSourceOverride,
+                packageSourceOverridePattern: selectedPackage);
+
+            Assert.True(result.Success);
+            Assert.Contains(("Aspire.Hosting.Redis", "13.4.0"), nuGetClient.LastRestorePackages!);
+            Assert.Contains((selectedPackage, "[1.0.0]"), nuGetClient.LastRestorePackages!);
+        }
+        finally
+        {
+            DeleteWorkingDirectory(workingDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task PrepareAsync_WithPackageSourceOverride_DoesNotAddNuGetOrgFallbackSource()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var packageSourceOverride = workspace.CreateDirectory(
             Path.Combine("aspire-pr-hive", "packages")).FullName;
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -1962,7 +2290,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 packageSourceOverride: packageSourceOverride);
 
             Assert.True(result.Success);
-            Assert.Equal([packageSourceOverride, NuGetOrgSource], GetConfiguredPackageSources(nuGetClient));
+            Assert.Equal([packageSourceOverride], GetConfiguredPackageSources(nuGetClient));
         }
         finally
         {
@@ -1996,7 +2324,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2010,7 +2338,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 ]);
 
             Assert.True(result.Success);
-            Assert.Equal([packageSource.FullName, NuGetOrgSource], GetConfiguredPackageSources(nuGetClient));
+            Assert.Equal([packageSource.FullName], GetConfiguredPackageSources(nuGetClient));
             Assert.Contains(("Aspire.Hosting.CodeGeneration.TypeScript", "[13.4.0-pr.17141.gf142085f]"), nuGetClient.LastRestorePackages!);
             Assert.Contains(("CommunityToolkit.Aspire.Hosting.Redis", "1.0.0"), nuGetClient.LastRestorePackages!);
             Assert.NotEmpty(nuGetClient.LastNuGetConfigPaths!);
@@ -2045,7 +2373,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2059,7 +2387,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 ]);
 
             Assert.True(result.Success);
-            Assert.Contains(packageSourceUri, GetConfiguredPackageSources(nuGetClient));
+            Assert.Equal([packageSourceUri], GetConfiguredPackageSources(nuGetClient));
             Assert.Contains(("Aspire.Hosting.CodeGeneration.TypeScript", "[13.4.0-pr.17141.gf142085f]"), nuGetClient.LastRestorePackages!);
             Assert.Contains(("CommunityToolkit.Aspire.Hosting.Redis", "1.0.0"), nuGetClient.LastRestorePackages!);
             Assert.NotEmpty(nuGetClient.LastNuGetConfigPaths!);
@@ -2099,7 +2427,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2111,8 +2439,9 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 packageSourceOverride: explicitPackageSource.FullName);
 
             Assert.True(result.Success);
-            Assert.Equal([explicitPackageSource.FullName, channelSource], GetConfiguredPackageSources(nuGetClient));
+            Assert.Equal([explicitPackageSource.FullName], GetConfiguredPackageSources(nuGetClient));
             Assert.DoesNotContain(hivePackageSource.FullName, GetConfiguredPackageSources(nuGetClient));
+            Assert.DoesNotContain(channelSource, GetConfiguredPackageSources(nuGetClient));
             Assert.Contains(("Aspire.Hosting.CodeGeneration.TypeScript", "[13.4.0-pr.17141.gf142085f]"), nuGetClient.LastRestorePackages!);
         }
         finally
@@ -2144,7 +2473,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2185,7 +2514,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromException<IEnumerable<PackageChannel>>(
                 new InvalidOperationException("simulated packaging service failure"))
         };
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2235,7 +2564,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
 
         var workingDirectory = GetWorkingDirectory(server);
 
@@ -2248,11 +2577,9 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             Assert.True(result.Success);
             Assert.NotNull(nuGetClient.LastRestorePackages);
             // The override was not applied (Directory.Exists check failed), so the source list
-            // is just the channel's raw Aspire mapping with no NuGet.org fallback appended (the
-            // fallback only fires on the override path), and no exact-pin is emitted. Contrast
-            // with PrepareAsync_WithHiveBackedChannel_UsesLocalAspireSourceAsOverride where the
-            // existing local directory promotes the channel source to an override and adds the
-            // NuGet.org fallback + exact-pinning.
+            // is just the channel's raw Aspire mapping and no exact-pin is emitted. Contrast with
+            // PrepareAsync_WithHiveBackedChannel_UsesLocalAspireSourceAsOverride where the
+            // existing local directory promotes the channel source to an override and exact-pins it.
             Assert.Equal([missingPackageSource], GetConfiguredPackageSources(nuGetClient));
             Assert.DoesNotContain(NuGetOrgSource, GetConfiguredPackageSources(nuGetClient));
             Assert.Contains(("Aspire.Hosting.CodeGeneration.TypeScript", "13.4.0-pr.17141.gf142085f"), nuGetClient.LastRestorePackages);
@@ -2299,7 +2626,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         };
 
         XDocument? policyOverlay = null;
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
         nuGetClient.RestoreCallback = (_, _, _, _, _, configPaths, _, _, _, _) =>
         {
             // Read the temp NuGet.config while it still exists; PrepareAsync deletes it
@@ -2324,7 +2651,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             // The overlay's complete mapping policy makes only the override eligible for Aspire packages.
             Assert.Equal(["Aspire*"], GetPackagePatternsForSource(policyOverlay!, packageSourceOverride));
             Assert.Empty(GetPackagePatternsForSource(policyOverlay!, channelSource));
-            Assert.Equal([PackageMapping.AllPackages], GetPackagePatternsForSource(policyOverlay!, NuGetOrgSource));
+            Assert.Empty(GetPackagePatternsForSource(policyOverlay!, NuGetOrgSource));
         }
         finally
         {
@@ -2349,7 +2676,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             }
             """);
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
         nuGetClient.RestoreCallback = (_, _, _, _, _, _, _, _, _, _) =>
             Task.FromException(new InvalidOperationException("simulated restore failure"));
 
@@ -2385,7 +2712,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         const string packageSourceOverride = "/tmp/aspire-pr-hive/packages";
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated);
         nuGetClient.RestoreCallback = (_, _, _, _, _, _, _, _, _, _) =>
             Task.FromException(new InvalidOperationException("simulated restore failure"));
 
@@ -2572,18 +2899,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             },
             WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
         };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient)
-        {
-            SourceIdentityKeyFactory = static () => s_sourceIdentityKey
-        };
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
             packagingService: packagingService,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -2606,11 +2927,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             Assert.Equal([false, false], noRestoreValues);
             Assert.All(processOptions, options =>
             {
-                Assert.False(options.SuppressLogging);
+                Assert.True(options.SuppressLogging);
                 Assert.NotNull(options.EnvironmentVariableFilter);
                 Assert.True(options.EnvironmentVariableFilter(CliPathHelper.NuGetPackagesEnvironmentVariable));
                 Assert.True(options.EnvironmentVariableFilter(PrebuiltAppHostServer.IntegrationHostingVersionPropertyName));
                 Assert.True(options.EnvironmentVariableFilter(PrebuiltAppHostServer.IntegrationPackageSourcesPropertyName));
+                Assert.True(options.EnvironmentVariableFilter(PrebuiltAppHostServer.IntegrationPackageSourceAliasPropertyName));
                 Assert.False(options.EnvironmentVariableFilter("PATH"));
                 Assert.Equal(
                     "13.4.0-pr.17141.gf142085f",
@@ -2618,6 +2940,9 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 Assert.Equal(
                     channelSource,
                     options.EnvironmentVariables?[PrebuiltAppHostServer.IntegrationPackageSourcesPropertyName]);
+                Assert.Equal(
+                    "private",
+                    options.EnvironmentVariables?[PrebuiltAppHostServer.IntegrationPackageSourceAliasPropertyName]);
                 Assert.False(options.EnvironmentVariables?.ContainsKey("RestoreAdditionalProjectSources"));
                 Assert.Equal(
                     generatedPolicyOverlay?
@@ -2748,8 +3073,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             Assert.NotNull(buildOptions.EnvironmentVariableFilter);
             Assert.True(buildOptions.EnvironmentVariableFilter(
                 PrebuiltAppHostServer.IntegrationPackageSourcesPropertyName));
+            Assert.True(buildOptions.EnvironmentVariableFilter(
+                PrebuiltAppHostServer.IntegrationPackageSourceAliasPropertyName));
             Assert.False(buildOptions.EnvironmentVariables?.ContainsKey(
                 PrebuiltAppHostServer.IntegrationPackageSourcesPropertyName));
+            Assert.False(buildOptions.EnvironmentVariables?.ContainsKey(
+                PrebuiltAppHostServer.IntegrationPackageSourceAliasPropertyName));
             Assert.DoesNotContain(
                 buildOptions.EnvironmentVariables?.Values ?? [],
                 value => value.Contains(credentialMarker, StringComparison.Ordinal));
@@ -2769,9 +3098,10 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         ProcessInvocationOptions? buildOptions = null;
         var dotNetCliRunner = new TestDotNetCliRunner
         {
-            BuildAsyncCallback = (_, _, options, _) =>
+            BuildAsyncCallback = (projectFilePath, _, options, _) =>
             {
                 buildOptions = options;
+                WriteDependencyGraphSpec(projectFilePath, (projectFilePath.FullName, credentialBearingSource));
                 options.StandardErrorCallback?.Invoke(
                     $"NU1301: Unable to load the service index for source {credentialBearingSource}.");
                 return 1;
@@ -2788,26 +3118,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             """);
 
         var layout = CreateBundleLayout(workspace);
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        var nuGetClient = new FakeNuGetClient
-        {
-            GetSettingsCallback = settingsClient.GetSettings,
-            WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
-        };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient)
-        {
-            SourceIdentityKeyFactory = static () => s_sourceIdentityKey
-        };
+        var nuGetClient = CreateSettingsAwareNuGetClient();
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -2834,6 +3150,87 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
+    public async Task PrepareAsync_WithCredentialBearingAmbientSourceAlias_RedactsLogsWithoutOmittingHint()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        const string credentialMarker = "credential-marker";
+        const string sourceAlias = $"https://user:{credentialMarker}@packages.example.com";
+        const string source = "https://packages.example.com/v3/index.json";
+        ProcessInvocationOptions? buildOptions = null;
+        var dotNetCliRunner = new TestDotNetCliRunner
+        {
+            BuildAsyncCallback = (projectFilePath, _, options, _) =>
+            {
+                buildOptions = options;
+                WriteDependencyGraphSpec(projectFilePath, (projectFilePath.FullName, source));
+                options.StandardErrorCallback?.Invoke(
+                    $"NU1301: Unable to load the service index for source {sourceAlias}.");
+                return 1;
+            }
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config"),
+            $$"""
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="{{sourceAlias}}" value="{{source}}" />
+              </packageSources>
+            </configuration>
+            """);
+
+        var layout = CreateBundleLayout(workspace);
+        var nuGetClient = CreateSettingsAwareNuGetClient();
+        var channel = PackageChannel.CreateExplicitChannel(
+            name: "daily",
+            quality: PackageChannelQuality.Both,
+            mappings: [new PackageMapping("Aspire*", source)],
+            nuGetPackageCache: new FakeNuGetPackageCache(),
+            features: new TestFeatures(),
+            logger: NullLogger.Instance);
+        var packagingService = new TestPackagingService
+        {
+            GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([channel])
+        };
+        var server = CreatePrebuiltAppHostServer(
+            workspace,
+            layout: layout,
+            dotNetCliRunner: dotNetCliRunner,
+            nuGetClient: nuGetClient,
+            packagingService: packagingService);
+        var workingDirectory = GetWorkingDirectory(server);
+
+        try
+        {
+            var result = await server.PrepareAsync(
+                "13.4.0",
+                [
+                    IntegrationReference.FromPackage("Aspire.Hosting.Redis", "13.4.0"),
+                    IntegrationReference.FromProject("MyIntegration", "/path/to/MyIntegration.csproj")
+                ],
+                requestedChannel: "daily");
+
+            Assert.False(result.Success);
+            Assert.NotNull(buildOptions);
+            Assert.True(buildOptions.SuppressLogging);
+            Assert.Equal(
+                source,
+                buildOptions.EnvironmentVariables?[PrebuiltAppHostServer.IntegrationPackageSourcesPropertyName]);
+            Assert.Equal(
+                sourceAlias,
+                buildOptions.EnvironmentVariables?[PrebuiltAppHostServer.IntegrationPackageSourceAliasPropertyName]);
+            var output = string.Join(Environment.NewLine, result.Output!.GetLines().Select(static line => line.Line));
+            Assert.DoesNotContain(credentialMarker, output);
+            Assert.Contains("packages.example.com", output);
+        }
+        finally
+        {
+            server.Dispose();
+            DeleteWorkingDirectory(workingDirectory);
+        }
+    }
+
+    [Fact]
     public async Task PrepareAsync_WithPackageReferencesAndNoMappings_InvalidatesCacheWhenAmbientNuGetConfigChanges()
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
@@ -2846,12 +3243,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             </configuration>
             """);
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace);
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        nuGetClient.GetSettingsCallback = settingsClient.GetSettings;
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.DiscoverAmbient);
 
         var workingDirectory = GetWorkingDirectory(server);
         try
@@ -2921,16 +3313,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         {
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([dailyChannel])
         };
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(
+            workspace,
+            NuGetSettingsMode.DiscoverAmbient,
+            packagingService);
         XDocument? restoreOverlay = null;
         string[]? restoreConfigPaths = null;
         string? policyOverlayPath = null;
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        nuGetClient.GetSettingsCallback = settingsClient.GetSettings;
-        nuGetClient.WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay;
         nuGetClient.RestoreCallback = (_, _, _, _, _, configPaths, _, _, _, _) =>
         {
             restoreConfigPaths = [.. configPaths];
@@ -3010,24 +3399,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([dailyChannel])
         };
         var layout = CreateBundleLayout(workspace);
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        var nuGetClient = new FakeNuGetClient
-        {
-            GetSettingsCallback = settingsClient.GetSettings,
-            WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
-        };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient);
+        var nuGetClient = CreateSettingsAwareNuGetClient();
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
             packagingService: packagingService,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
         var integrations = new[]
         {
@@ -3098,24 +3476,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([dailyChannel])
         };
         var layout = CreateBundleLayout(workspace);
-        var settingsClient = new NuGetClient(
-            new TestFeatures(),
-            new TestEnvironment(),
-            NullLogger<NuGetClient>.Instance);
-        var nuGetClient = new FakeNuGetClient
-        {
-            GetSettingsCallback = settingsClient.GetSettings,
-            WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
-        };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient);
+        var nuGetClient = CreateSettingsAwareNuGetClient();
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
             packagingService: packagingService,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
         var integrations = new[]
         {
@@ -3145,14 +3512,19 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         const string channelSource = "https://feed.blob.core.windows.net/packages/index.json?sig=secret-sig";
+        const string derivedResource =
+            "https://feed.blob.core.windows.net/packages/v3-flatcontainer/package/index.json?sig=secret-sig";
         var buildCalled = false;
+        ProcessInvocationOptions? buildOptions = null;
         var dotNetCliRunner = new TestDotNetCliRunner
         {
-            BuildAsyncCallback = (_, _, options, _) =>
+            BuildAsyncCallback = (projectFilePath, _, options, _) =>
             {
                 buildCalled = true;
+                buildOptions = options;
+                WriteDependencyGraphSpec(projectFilePath, (projectFilePath.FullName, channelSource));
                 options.StandardErrorCallback?.Invoke(
-                    $"NU1301: Unable to load the service index for source {channelSource}.");
+                    $"NU1301: Unable to load the package resource {derivedResource}.");
                 return 1;
             }
         };
@@ -3185,10 +3557,221 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
 
             Assert.False(result.Success);
             Assert.True(buildCalled);
+            Assert.NotNull(buildOptions);
+            Assert.True(buildOptions.SuppressLogging);
             Assert.NotNull(result.Output);
             var output = string.Join(Environment.NewLine, result.Output.GetLines().Select(static line => line.Line));
-            Assert.Contains("https://feed.blob.core.windows.net/packages/index.json", output);
+            Assert.Contains(
+                "https://feed.blob.core.windows.net/packages/v3-flatcontainer/package/index.json?***",
+                output);
             Assert.DoesNotContain("secret-sig", output);
+        }
+        finally
+        {
+            server.Dispose();
+            DeleteWorkingDirectory(workingDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task PrepareAsync_WithCredentialBearingReferencedProjectSource_RedactsProjectRestoreFailure()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        const string referencedProjectSource = "https://packages.example.com/v3/index.json?token=child-secret";
+        ProcessInvocationOptions? buildOptions = null;
+        var dotNetCliRunner = new TestDotNetCliRunner
+        {
+            BuildAsyncCallback = (projectFilePath, _, options, _) =>
+            {
+                buildOptions = options;
+                WriteDependencyGraphSpec(
+                    projectFilePath,
+                    (projectFilePath.FullName, PackageSources.NuGetOrg),
+                    ("/path/to/MyIntegration.csproj", referencedProjectSource));
+                options.StandardErrorCallback?.Invoke(
+                    $"NU1301: Unable to load the service index for source {referencedProjectSource}.");
+                return 1;
+            }
+        };
+        var server = CreatePrebuiltAppHostServer(workspace, dotNetCliRunner: dotNetCliRunner);
+        var workingDirectory = GetWorkingDirectory(server);
+
+        try
+        {
+            var result = await server.PrepareAsync(
+                "13.4.0",
+                [
+                    IntegrationReference.FromPackage("Aspire.Hosting.Redis", "13.4.0"),
+                    IntegrationReference.FromProject("MyIntegration", "/path/to/MyIntegration.csproj")
+                ]);
+
+            Assert.False(result.Success);
+            Assert.NotNull(buildOptions);
+            Assert.True(buildOptions.SuppressLogging);
+            Assert.NotNull(result.Output);
+            var output = string.Join(Environment.NewLine, result.Output.GetLines().Select(static line => line.Line));
+            Assert.Contains("https://packages.example.com/v3/index.json", output);
+            Assert.DoesNotContain("child-secret", output);
+        }
+        finally
+        {
+            server.Dispose();
+            DeleteWorkingDirectory(workingDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task PrepareAsync_WhenDependencyGraphSpecIsStale_OmitsRawProjectRestoreFailure()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        const string unverifiedSource = "https://packages.example.com/v3/index.json?token=unverified-secret";
+        var staleGraphWasDeletedBeforeBuild = false;
+        string? dependencyGraphSpecPath = null;
+        var dotNetCliRunner = new TestDotNetCliRunner
+        {
+            BuildAsyncCallback = (_, _, options, _) =>
+            {
+                staleGraphWasDeletedBeforeBuild = !File.Exists(dependencyGraphSpecPath);
+                options.StandardErrorCallback?.Invoke(
+                    $"NU1301: Unable to load the service index for source {unverifiedSource}.");
+                return 1;
+            }
+        };
+        var server = CreatePrebuiltAppHostServer(workspace, dotNetCliRunner: dotNetCliRunner);
+        var workingDirectory = GetWorkingDirectory(server);
+        var restoreDirectory = Path.Combine(workingDirectory, IntegrationClosureBuilder.IntegrationRestoreFolderName);
+        var generatedProjectFile = new FileInfo(
+            Path.Combine(restoreDirectory, PrebuiltAppHostServer.IntegrationProjectFileName));
+        var intermediateOutputPath = Path.Combine(restoreDirectory, "obj");
+        dependencyGraphSpecPath = Path.Combine(
+            intermediateOutputPath,
+            $"{generatedProjectFile.Name}.nuget.dgspec.json");
+        WriteDependencyGraphSpec(
+            generatedProjectFile,
+            JsonSerializer.Serialize(new
+            {
+                projects = new Dictionary<string, object>
+                {
+                    [generatedProjectFile.FullName] = new
+                    {
+                        restore = new
+                        {
+                            sources = new Dictionary<string, object>
+                            {
+                                [PackageSources.NuGetOrg] = new { }
+                            }
+                        }
+                    }
+                }
+            }),
+            intermediateOutputPath);
+
+        try
+        {
+            var result = await server.PrepareAsync(
+                "13.4.0",
+                [
+                    IntegrationReference.FromPackage("Aspire.Hosting.Redis", "13.4.0"),
+                    IntegrationReference.FromProject("MyIntegration", "/path/to/MyIntegration.csproj")
+                ]);
+
+            Assert.False(result.Success);
+            Assert.True(staleGraphWasDeletedBeforeBuild);
+            Assert.NotNull(result.Output);
+            Assert.Equal(
+                [(OutputLineStream.StdErr, ErrorStrings.IntegrationBuildFailed)],
+                result.Output.GetLines());
+        }
+        finally
+        {
+            server.Dispose();
+            DeleteWorkingDirectory(workingDirectory);
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{")]
+    public async Task PrepareAsync_WhenDependencyGraphSpecIsUnavailable_OmitsRawProjectRestoreFailure(
+        string? dependencyGraphSpecContent)
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        const string unverifiedSource = "https://packages.example.com/v3/index.json?token=unverified-secret";
+        var dotNetCliRunner = new TestDotNetCliRunner
+        {
+            BuildAsyncCallback = (projectFilePath, _, options, _) =>
+            {
+                if (dependencyGraphSpecContent is not null)
+                {
+                    WriteDependencyGraphSpec(projectFilePath, dependencyGraphSpecContent);
+                }
+                options.StandardErrorCallback?.Invoke(
+                    $"NU1301: Unable to load the service index for source {unverifiedSource}.");
+                return 1;
+            }
+        };
+        var server = CreatePrebuiltAppHostServer(workspace, dotNetCliRunner: dotNetCliRunner);
+        var workingDirectory = GetWorkingDirectory(server);
+
+        try
+        {
+            var result = await server.PrepareAsync(
+                "13.4.0",
+                [
+                    IntegrationReference.FromPackage("Aspire.Hosting.Redis", "13.4.0"),
+                    IntegrationReference.FromProject("MyIntegration", "/path/to/MyIntegration.csproj")
+                ]);
+
+            Assert.False(result.Success);
+            Assert.NotNull(result.Output);
+            Assert.Equal(
+                [(OutputLineStream.StdErr, ErrorStrings.IntegrationBuildFailed)],
+                result.Output.GetLines());
+        }
+        finally
+        {
+            server.Dispose();
+            DeleteWorkingDirectory(workingDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task PrepareAsync_WhenDependencyGraphSpecIsUnavailable_PreservesPackageDowngradeSummary()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var dotNetCliRunner = new TestDotNetCliRunner
+        {
+            BuildAsyncCallback = (_, _, options, _) =>
+            {
+                options.StandardErrorCallback?.Invoke(
+                    "error NU1605: Warning As Error: Detected package downgrade: Aspire.Hosting from 13.5.0 to 13.4.0.");
+                return 1;
+            }
+        };
+        var server = CreatePrebuiltAppHostServer(workspace, dotNetCliRunner: dotNetCliRunner);
+        var workingDirectory = GetWorkingDirectory(server);
+
+        try
+        {
+            var result = await server.PrepareAsync(
+                "13.4.0",
+                [
+                    IntegrationReference.FromPackage("Aspire.Hosting.Redis", "13.4.0"),
+                    IntegrationReference.FromProject("MyIntegration", "/path/to/MyIntegration.csproj")
+                ]);
+
+            Assert.False(result.Success);
+            Assert.NotNull(result.Output);
+            Assert.Equal(
+                [
+                    (
+                        OutputLineStream.StdErr,
+                        string.Format(
+                            CultureInfo.CurrentCulture,
+                            ErrorStrings.IntegrationBuildPackageDowngradeFailed,
+                            VersionHelper.GetDefaultTemplateVersion()))
+                ],
+                result.Output.GetLines());
         }
         finally
         {
@@ -3223,7 +3806,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             GetChannelsAsyncCallback = _ => Task.FromResult<IEnumerable<PackageChannel>>([prChannel])
         };
 
-        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, packagingService);
+        var (server, nuGetClient) = CreatePackageReferenceServer(workspace, NuGetSettingsMode.Isolated, packagingService);
         nuGetClient.RestoreCallback = (_, _, _, _, _, _, _, _, _, _) =>
             Task.FromException(new InvalidOperationException("simulated restore failure"));
 
@@ -3312,15 +3895,23 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             Assert.True(string.IsNullOrEmpty(
                 generatedProject.Descendants(ns + "RestoreAdditionalProjectSources").FirstOrDefault()?.Value));
             Assert.NotNull(restoreOverlay);
-            Assert.Equal(2, restoreOverlay.Descendants("packageSources").Elements("add").Count());
+            Assert.Single(restoreOverlay.Descendants("packageSources").Elements("add"));
             Assert.Equal(["Aspire*"], GetPackagePatternsForSource(restoreOverlay, packageSourceOverride));
-            Assert.Equal([PackageMapping.AllPackages], GetPackagePatternsForSource(restoreOverlay, NuGetOrgSource));
+            Assert.Empty(GetPackagePatternsForSource(restoreOverlay, NuGetOrgSource));
             Assert.Equal(
                 "13.4.0-pr.17166.ga49d604d",
                 buildOptions?.EnvironmentVariables?[PrebuiltAppHostServer.IntegrationHostingVersionPropertyName]);
             Assert.Equal(
                 packageSourceOverride,
                 buildOptions?.EnvironmentVariables?[PrebuiltAppHostServer.IntegrationPackageSourcesPropertyName]);
+            Assert.Equal(
+                restoreOverlay
+                    .Descendants("packageSources")
+                    .Elements("add")
+                    .Single()
+                    .Attribute("key")?
+                    .Value,
+                buildOptions?.EnvironmentVariables?[PrebuiltAppHostServer.IntegrationPackageSourceAliasPropertyName]);
             Assert.False(buildOptions?.EnvironmentVariables?.ContainsKey("RestoreAdditionalProjectSources"));
 
             Assert.Collection(
@@ -3366,7 +3957,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         IReadOnlyList<string>? restoreSources = null;
         string? restoreWorkingDirectory = null;
         string? temporaryNuGetConfigContent = null;
-        var nuGetClient = CreatePolicyWritingFakeNuGetClient();
+        var nuGetClient = CreateIsolatedNuGetClient();
         nuGetClient.RestoreCallback = (_, _, _, _, sources, configPaths, workingDirectory, _, _, _) =>
         {
             restoreSources = sources;
@@ -3374,10 +3965,6 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             temporaryNuGetConfigContent = File.ReadAllText(configPaths[0]);
             return Task.CompletedTask;
         };
-
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient);
 
         var stagingChannel = PackageChannel.CreateExplicitChannel(
             PackageChannelNames.Staging,
@@ -3401,7 +3988,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             layout: layout,
             packagingService: packagingService,
             executionContext: executionContext,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -3610,12 +4197,6 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             },
             WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
         };
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            nuGetClient)
-        {
-            SourceIdentityKeyFactory = static () => s_sourceIdentityKey
-        };
         var closureFiles = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["MyIntegration.dll"] = "integration-v1"
@@ -3634,7 +4215,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             layout: layout,
             dotNetCliRunner: dotNetCliRunner,
             packagingService: packagingService,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
         var workingDirectory = GetWorkingDirectory(server);
 
         try
@@ -4109,27 +4690,25 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         return CreatePrebuiltAppHostServer(workspace, layout: layout, dotNetCliRunner: dotNetCliRunner);
     }
 
-    private static (PrebuiltAppHostServer Server, FakeNuGetClient NuGetClient) CreatePackageReferenceServer(TemporaryWorkspace workspace)
-    {
-        return CreatePackageReferenceServer(workspace, MockPackagingServiceFactory.Create());
-    }
-
     private static (PrebuiltAppHostServer Server, FakeNuGetClient NuGetClient) CreatePackageReferenceServer(
         TemporaryWorkspace workspace,
-        IPackagingService packagingService,
+        NuGetSettingsMode settingsMode,
+        IPackagingService? packagingService = null,
         CliExecutionContext? executionContext = null)
     {
         var layout = CreateBundleLayout(workspace);
-        var nuGetClient = CreatePolicyWritingFakeNuGetClient();
-        var nugetService = new BundleNuGetService(
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<BundleNuGetService>.Instance,
-            nuGetClient);
+        var nuGetClient = settingsMode switch
+        {
+            NuGetSettingsMode.Isolated => CreateIsolatedNuGetClient(),
+            NuGetSettingsMode.DiscoverAmbient => CreateSettingsAwareNuGetClient(),
+            _ => throw new ArgumentOutOfRangeException(nameof(settingsMode))
+        };
 
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
-            packagingService: packagingService,
-            nugetService: nugetService,
+            packagingService: packagingService ?? MockPackagingServiceFactory.Create(),
+            nuGetClient: nuGetClient,
             executionContext: executionContext);
 
         return (server, nuGetClient);
@@ -4149,7 +4728,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         return new LayoutConfiguration { LayoutPath = layoutRoot.FullName };
     }
 
-    private static FakeNuGetClient CreatePolicyWritingFakeNuGetClient()
+    private static FakeNuGetClient CreateIsolatedNuGetClient()
     {
         var settingsClient = new NuGetClient(
             new TestFeatures(),
@@ -4157,6 +4736,19 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             NullLogger<NuGetClient>.Instance);
         return new FakeNuGetClient
         {
+            WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
+        };
+    }
+
+    private static FakeNuGetClient CreateSettingsAwareNuGetClient()
+    {
+        var settingsClient = new NuGetClient(
+            new TestFeatures(),
+            new TestEnvironment(),
+            NullLogger<NuGetClient>.Instance);
+        return new FakeNuGetClient
+        {
+            GetSettingsCallback = settingsClient.GetSettings,
             WriteConfigOverlayCallback = settingsClient.WriteConfigOverlay
         };
     }
@@ -4261,6 +4853,44 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     {
         var document = XDocument.Load(Path.Combine(restoreDirectory.FullName, "Directory.Build.props"));
         return document.Descendants("BaseIntermediateOutputPath").Single().Value;
+    }
+
+    private static void WriteDependencyGraphSpec(
+        FileInfo generatedProjectFile,
+        params (string ProjectPath, string Source)[] projectSources)
+    {
+        var projects = projectSources.ToDictionary(
+            static entry => entry.ProjectPath,
+            static entry => new
+            {
+                restore = new
+                {
+                    sources = new Dictionary<string, object>
+                    {
+                        [entry.Source] = new { }
+                    }
+                }
+            },
+            StringComparer.Ordinal);
+        var intermediateOutputPath = GetIntermediateOutputPath(generatedProjectFile.Directory!);
+        WriteDependencyGraphSpec(generatedProjectFile, JsonSerializer.Serialize(new { projects }), intermediateOutputPath);
+    }
+
+    private static void WriteDependencyGraphSpec(FileInfo generatedProjectFile, string content)
+    {
+        var intermediateOutputPath = GetIntermediateOutputPath(generatedProjectFile.Directory!);
+        WriteDependencyGraphSpec(generatedProjectFile, content, intermediateOutputPath);
+    }
+
+    private static void WriteDependencyGraphSpec(
+        FileInfo generatedProjectFile,
+        string content,
+        string intermediateOutputPath)
+    {
+        Directory.CreateDirectory(intermediateOutputPath);
+        File.WriteAllText(
+            Path.Combine(intermediateOutputPath, $"{generatedProjectFile.Name}.nuget.dgspec.json"),
+            content);
     }
 
     private static void WriteProjectAssetsFile(
@@ -4509,7 +5139,6 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 .Where(NuGetSourceIdentity.HasCredentialMaterial)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray(),
-            mappingArray.Length > 0,
             mappingArray
                 .Select(static mapping => new NuGetPackageSourceMapping(mapping.SourceKey, mapping.Patterns))
                 .ToArray(),
@@ -4524,15 +5153,13 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
         var layout = CreateBundleLayout(workspace);
         var executionContext = TestExecutionContextFactory.CreateTestContext();
-        var nugetService = new BundleNuGetService(
-            NullLogger<BundleNuGetService>.Instance,
-            new FakeNuGetClient());
+        var nuGetClient = CreateIsolatedNuGetClient();
 
         var server = CreatePrebuiltAppHostServer(
             workspace,
             layout: layout,
             executionContext: executionContext,
-            nugetService: nugetService);
+            nuGetClient: nuGetClient);
 
         var startInfo = server.CreateStartInfo(123);
 
@@ -4562,12 +5189,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     private static string[] GetPatterns(
         IReadOnlyList<NuGetPackageSourceMapping> mappings,
         string sourceKey)
-        => mappings
+        => [.. mappings
             .SingleOrDefault(mapping => string.Equals(
                 mapping.SourceKey,
                 sourceKey,
                 StringComparison.OrdinalIgnoreCase))
-            ?.Patterns ?? [];
+            ?.Patterns ?? []];
 
     private static string[] GetPackagePatternsForKey(XDocument doc, string sourceKey)
     {
@@ -4587,6 +5214,12 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
+
+    private enum NuGetSettingsMode
+    {
+        Isolated,
+        DiscoverAmbient
     }
 
     private sealed class FixedLayoutDiscovery(LayoutConfiguration layout) : ILayoutDiscovery

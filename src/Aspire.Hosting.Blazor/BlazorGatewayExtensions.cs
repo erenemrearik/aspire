@@ -12,7 +12,6 @@ using Microsoft.Extensions.Logging;
 
 #pragma warning disable ASPIREDOCKERFILEBUILDER001 // DockerfileBuilder is experimental
 #pragma warning disable ASPIRECSHARPAPPS001 // AddCSharpApp is experimental
-#pragma warning disable ASPIREDOTNETPROJECT001 // AddDotnetProject is experimental
 
 namespace Aspire.Hosting;
 
@@ -85,7 +84,6 @@ public static class BlazorGatewayExtensions
     /// <ats-param name="builder">The distributed application builder.</ats-param>
     /// <ats-param name="name">The name of the gateway resource.</ats-param>
     /// <ats-returns>The gateway resource builder.</ats-returns>
-    [Experimental("ASPIREDOTNETPROJECT001", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
     [AspireExport]
     public static IResourceBuilder<DotnetProjectResource> AddDotnetProjectBlazorGateway(
         this IDistributedApplicationBuilder builder,
@@ -190,7 +188,6 @@ public static class BlazorGatewayExtensions
     /// <ats-param name="otlpPrefix">The URL path prefix for telemetry proxy routes. The default is <c>"_otlp"</c>.</ats-param>
     /// <ats-param name="proxyTelemetry"><see langword="true"/> to expose the telemetry proxy for the client app; otherwise, <see langword="false"/>.</ats-param>
     /// <ats-returns>The gateway resource builder.</ats-returns>
-    [Experimental("ASPIREDOTNETPROJECT001", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
     [AspireExport("withDotnetProjectBlazorClientApp", MethodName = "withBlazorClientApp")]
     public static IResourceBuilder<DotnetProjectResource> WithBlazorClientApp(
         this IResourceBuilder<DotnetProjectResource> gateway,
