@@ -88,7 +88,70 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Recordings.
+        ///   Looks up a localized string similar to No existing recordings.
+        /// </summary>
+        public static string DashboardRunSelectNoRecordings {
+            get {
+                return ResourceManager.GetString("DashboardRunSelectNoRecordings", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to a moment ago.
+        /// </summary>
+        public static string DashboardRunSelectMomentAgo {
+            get {
+                return ResourceManager.GetString("DashboardRunSelectMomentAgo", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to 1 minute ago.
+        /// </summary>
+        public static string DashboardRunSelectMinuteAgo {
+            get {
+                return ResourceManager.GetString("DashboardRunSelectMinuteAgo", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} minutes ago.
+        /// </summary>
+        public static string DashboardRunSelectMinutesAgo {
+            get {
+                return ResourceManager.GetString("DashboardRunSelectMinutesAgo", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0}h ago.
+        /// </summary>
+        public static string DashboardRunSelectHoursAgo {
+            get {
+                return ResourceManager.GetString("DashboardRunSelectHoursAgo", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to 1 day ago.
+        /// </summary>
+        public static string DashboardRunSelectDayAgo {
+            get {
+                return ResourceManager.GetString("DashboardRunSelectDayAgo", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0} days ago.
+        /// </summary>
+        public static string DashboardRunSelectDaysAgo {
+            get {
+                return ResourceManager.GetString("DashboardRunSelectDaysAgo", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Past recordings.
         /// </summary>
         public static string DashboardRunSelectRecordings {
             get {
@@ -97,7 +160,7 @@ namespace Aspire.Dashboard.Resources {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Pin recording.
+        ///   Looks up a localized string similar to Protect from deletion.
         /// </summary>
         public static string DashboardRunSelectPin {
             get {
@@ -106,7 +169,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Unpin recording.
+        ///   Looks up a localized string similar to Allow deletion.
         /// </summary>
         public static string DashboardRunSelectUnpin {
             get {
@@ -133,7 +196,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Switch between the live view and read-only recordings of previous runs. Pin a recording to keep it from being automatically deleted..
+        ///   Looks up a localized string similar to Switch between the live view and read-only recordings of previous runs. Protect a recording from deletion to keep it when older recordings are automatically removed..
         /// </summary>
         public static string DashboardRunSelectHelpTooltip {
             get {

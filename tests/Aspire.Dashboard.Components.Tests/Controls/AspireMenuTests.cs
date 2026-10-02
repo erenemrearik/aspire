@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Aspire.Dashboard.Components.Tests.Shared;
@@ -83,6 +83,8 @@ public class AspireMenuTests : DashboardTestContext
         var actionContainer = Assert.Single(menuHost.FindAll("span.aspire-menu-secondary-action-container[slot='end']"));
         Assert.NotNull(actionContainer.QuerySelector("fluent-button[aria-label='Pin run']"));
         Assert.Equal("false", pinButton.GetAttribute("aria-pressed"));
+        Assert.Null(pinButton.GetAttribute("title"));
+        Assert.Equal("Pin run", menuHost.Find($"fluent-tooltip[anchor='{pinId}']").TextContent.Trim());
         var indicatorIcon = Assert.Single(menuHost.FindAll("span[slot='indicator'] svg"));
         Assert.Contains("fill: var(--colorBrandForeground1)", indicatorIcon.GetAttribute("style"), StringComparison.Ordinal);
         var secondaryActionIcon = Assert.Single(pinButton.QuerySelectorAll("svg"));
@@ -99,6 +101,7 @@ public class AspireMenuTests : DashboardTestContext
             var unpinButton = menuHost.Find("fluent-button[aria-label='Unpin run']");
             Assert.Equal(pinId, unpinButton.Id);
             Assert.Equal("true", unpinButton.GetAttribute("aria-pressed"));
+            Assert.Equal("Unpin run", menuHost.Find($"fluent-tooltip[anchor='{pinId}']").TextContent.Trim());
             Assert.Contains(JSInterop.Invocations, invocation =>
                 invocation.Identifier == "focusElement" && invocation.Arguments.Single() is string id && id == pinId);
         });

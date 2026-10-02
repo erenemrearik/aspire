@@ -2,13 +2,16 @@
     <AspireMenuButton Text="@ButtonText"
                       Title="@RunSelectTitle"
                       aria-label="@RunSelectAccessibleLabel"
-                      IconStart="@s_historyIcon"
+                      Icon="@(SelectedRunIsCurrent ? s_historyIcon : null)"
+                      IconColor="@(SelectedRunIsCurrent ? Color.Custom : Color.Primary)"
+                      IconCustomColor="@(SelectedRunIsCurrent ? "currentColor" : null)"
+                      IconStart="@(SelectedRunIsCurrent ? null : s_historyIcon)"
                       IconStartClass="application-run-status"
-                      IconStartColor="@(SelectedRunIsCurrent ? Color.Custom : Color.Warning)"
-                      IconStartCustomColor="@(SelectedRunIsCurrent ? "currentColor" : null)"
+                      IconStartColor="Color.Warning"
                       ItemsProvider="@LoadRuns"
                       ButtonAppearance="ButtonAppearance.Default"
                       ButtonClass="application-run-select-button"
                       HideIcon="true"
-                      RestoreFocusOnItemClick="true" />
+                      RestoreFocusOnItemClick="true"
+                      UseFluentTooltips="true" />
 </div>

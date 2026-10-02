@@ -38,6 +38,11 @@ public class MenuButtonItem
     /// doesn't label the menu as a whole and can appear multiple times.
     /// </summary>
     public bool IsGroupHeader { get; set; }
+    /// <summary>
+    /// Whether the item is non-interactive placeholder text shown under a group header when the group
+    /// has no items (e.g. "No existing recordings").
+    /// </summary>
+    public bool IsEmptyGroupText { get; set; }
     public List<MenuButtonItem>? NestedMenuItems { get; set; }
     public string? Text { get; set; }
     public string? Tooltip { get; set; }

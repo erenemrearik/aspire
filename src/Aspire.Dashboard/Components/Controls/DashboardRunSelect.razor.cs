@@ -18,23 +18,23 @@ public partial class DashboardRunSelect : ComponentBase
     private const string DashboardRunsHelpUrl = "https://aka.ms/aspire/run-persistence";
 
     private static readonly Icon s_checkmarkIcon = new Icons.Regular.Size16.Checkmark();
-    private static readonly Icon s_historyIcon = new Icons.Regular.Size16.History();
+    private static readonly Icon s_historyIcon = new Icons.Regular.Size24.History();
     private static readonly Icon s_liveIcon = new Icons.Filled.Size12.Play();
     private static readonly Icon s_helpIcon = new Icons.Regular.Size16.QuestionCircle();
-    private static readonly Icon s_pinIcon = new Icons.Regular.Size16.Pin();
-    private static readonly Icon s_pinnedIcon = new Icons.Filled.Size16.Pin();
+    private static readonly Icon s_keepIcon = new Icons.Regular.Size16.LockOpen();
+    private static readonly Icon s_keptIcon = new Icons.Filled.Size16.LockClosed();
     private readonly string _runMenuItemIdPrefix = $"dashboard-run-{Guid.NewGuid():N}";
 
-    private string RunSelectTitle => Loc[nameof(LayoutResources.DashboardRunSelectTitle)];
-    // The button names the menu while the live view is shown, and the recording's date otherwise. The
-    // accessible label always states what is being viewed so "Recordings" isn't mistaken for the selection.
-    private string ButtonText => SelectedRunIsCurrent
-        ? Loc[nameof(LayoutResources.DashboardRunSelectRecordings)]
-        : SelectedRunText;
+    // The button is icon-only while the live view is shown, and shows how long ago the recording started
+    // otherwise, with the full date in its tooltip. The accessible label always states what is being viewed.
+    private string RunSelectTitle => SelectedRunIsCurrent
+        ? Loc[nameof(LayoutResources.DashboardRunSelectTitle)]
+        : FormatRunDate(SelectedRunStartedAtUtc);
+    private string? ButtonText => SelectedRunIsCurrent ? null : FormatRunAge(SelectedRunStartedAtUtc);
     private string RunSelectAccessibleLabel => Loc[nameof(LayoutResources.DashboardRunSelectAccessibleLabel), SelectedRunText];
     private string SelectedRunText => SelectedRunIsCurrent
         ? Loc[nameof(LayoutResources.DashboardRunSelectCurrent)]
-        : FormatHelpers.FormatDateTime(TimeProvider, SelectedRunStartedAtUtc.UtcDateTime);
+        : FormatRunDate(SelectedRunStartedAtUtc);
 
     [Parameter, EditorRequired]
     public required string SelectedRunId { get; set; }
@@ -71,16 +71,7 @@ public partial class DashboardRunSelect : ComponentBase
             if (!run.IsCurrent && !hasRecordings)
             {
                 hasRecordings = true;
-                if (menuItems.Count > 0)
-                {
-                    menuItems.Add(new MenuButtonItem { IsDivider = true });
-                }
-                menuItems.Add(new MenuButtonItem
-                {
-                    Id = $"{_runMenuItemIdPrefix}-recordings-header",
-                    IsGroupHeader = true,
-                    Text = Loc[nameof(LayoutResources.DashboardRunSelectRecordings)]
-                });
+                AddRecordingsHeader(menuItems);
             }
 
             var isCompatible = run.IsCompatible;
@@ -96,8 +87,10 @@ public partial class DashboardRunSelect : ComponentBase
                 StartIcon = run.IsCurrent ? s_liveIcon : null,
                 StartIconColor = Color.Success,
                 IsDisabled = !isCompatible,
-                Tooltip = isCompatible ? null : Loc[nameof(LayoutResources.DashboardRunSelectIncompatibleTooltip)].Value,
-                SecondaryActionIcon = run.IsPinned ? s_pinnedIcon : s_pinIcon,
+                Tooltip = !isCompatible
+                    ? Loc[nameof(LayoutResources.DashboardRunSelectIncompatibleTooltip)].Value
+                    : run.IsCurrent ? null : FormatRunDate(run.StartedAtUtc),
+                SecondaryActionIcon = run.IsPinned ? s_keptIcon : s_keepIcon,
                 SecondaryActionAriaLabel = Loc[run.IsPinned
                     ? nameof(LayoutResources.DashboardRunSelectUnpin)
                     : nameof(LayoutResources.DashboardRunSelectPin)],
@@ -112,6 +105,18 @@ public partial class DashboardRunSelect : ComponentBase
             menuItems.Add(menuItem);
         }
 
+        // Keep the section visible when there's nothing recorded so users learn that recordings exist.
+        if (!hasRecordings)
+        {
+            AddRecordingsHeader(menuItems);
+            menuItems.Add(new MenuButtonItem
+            {
+                Id = $"{_runMenuItemIdPrefix}-no-recordings",
+                IsEmptyGroupText = true,
+                Text = Loc[nameof(LayoutResources.DashboardRunSelectNoRecordings)]
+            });
+        }
+
         menuItems.Add(new MenuButtonItem { IsDivider = true });
         menuItems.Add(MenuButtonItem.CreateExternalLink(
             Loc[nameof(LayoutResources.DashboardRunSelectHelp)],
@@ -120,6 +125,20 @@ public partial class DashboardRunSelect : ComponentBase
             tooltip: Loc[nameof(LayoutResources.DashboardRunSelectHelpTooltip)]));
 
         return menuItems;
+    }
+
+    private void AddRecordingsHeader(List<MenuButtonItem> menuItems)
+    {
+        if (menuItems.Count > 0)
+        {
+            menuItems.Add(new MenuButtonItem { IsDivider = true });
+        }
+        menuItems.Add(new MenuButtonItem
+        {
+            Id = $"{_runMenuItemIdPrefix}-recordings-header",
+            IsGroupHeader = true,
+            Text = Loc[nameof(LayoutResources.DashboardRunSelectRecordings)]
+        });
     }
 
     internal static List<DashboardRunDescriptor> GetSortedRuns(IReadOnlyList<DashboardRunDescriptor> storedRuns)
@@ -175,9 +194,31 @@ public partial class DashboardRunSelect : ComponentBase
             return Loc[nameof(LayoutResources.DashboardRunSelectCurrent)];
         }
 
-        // Recordings always show their date, unlike the header button, so recordings from different
-        // days remain distinguishable in the list.
-        return FormatHelpers.FormatDateTime(TimeProvider, run.StartedAtUtc.UtcDateTime);
+        return FormatRunAge(run.StartedAtUtc);
+    }
+
+    private string FormatRunDate(DateTimeOffset startedAtUtc) => FormatHelpers.FormatDateTime(TimeProvider, startedAtUtc.UtcDateTime);
+
+    private string FormatRunAge(DateTimeOffset startedAtUtc) => FormatRunAge(startedAtUtc, TimeProvider.GetUtcNow(), Loc);
+
+    internal static string FormatRunAge(DateTimeOffset startedAtUtc, DateTimeOffset utcNow, IStringLocalizer<LayoutResources> loc)
+    {
+        // Clamp so a start time slightly in the future (clock skew between processes) reads as "a moment ago".
+        var age = utcNow - startedAtUtc;
+        if (age < TimeSpan.Zero)
+        {
+            age = TimeSpan.Zero;
+        }
+
+        return age switch
+        {
+            { TotalMinutes: < 1 } => loc[nameof(LayoutResources.DashboardRunSelectMomentAgo)],
+            { TotalMinutes: < 2 } => loc[nameof(LayoutResources.DashboardRunSelectMinuteAgo)],
+            { TotalHours: < 1 } => loc[nameof(LayoutResources.DashboardRunSelectMinutesAgo), (int)age.TotalMinutes],
+            { TotalDays: < 1 } => loc[nameof(LayoutResources.DashboardRunSelectHoursAgo), (int)age.TotalHours],
+            { TotalDays: < 2 } => loc[nameof(LayoutResources.DashboardRunSelectDayAgo)],
+            _ => loc[nameof(LayoutResources.DashboardRunSelectDaysAgo), (int)age.TotalDays]
+        };
     }
 
     internal static string? FormatRunDuration(DashboardRunDescriptor run)

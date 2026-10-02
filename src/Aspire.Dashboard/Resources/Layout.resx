@@ -189,14 +189,38 @@
   <data name="DashboardRunSelectCurrent" xml:space="preserve">
     <value>Live view</value>
   </data>
+  <data name="DashboardRunSelectMomentAgo" xml:space="preserve">
+    <value>a moment ago</value>
+  </data>
+  <data name="DashboardRunSelectMinuteAgo" xml:space="preserve">
+    <value>1 minute ago</value>
+  </data>
+  <data name="DashboardRunSelectMinutesAgo" xml:space="preserve">
+    <value>{0} minutes ago</value>
+    <comment>{0} is the number of minutes</comment>
+  </data>
+  <data name="DashboardRunSelectHoursAgo" xml:space="preserve">
+    <value>{0}h ago</value>
+    <comment>{0} is the number of hours</comment>
+  </data>
+  <data name="DashboardRunSelectDayAgo" xml:space="preserve">
+    <value>1 day ago</value>
+  </data>
+  <data name="DashboardRunSelectDaysAgo" xml:space="preserve">
+    <value>{0} days ago</value>
+    <comment>{0} is the number of days</comment>
+  </data>
   <data name="DashboardRunSelectRecordings" xml:space="preserve">
-    <value>Recordings</value>
+    <value>Past recordings</value>
+  </data>
+  <data name="DashboardRunSelectNoRecordings" xml:space="preserve">
+    <value>No existing recordings</value>
   </data>
   <data name="DashboardRunSelectPin" xml:space="preserve">
-    <value>Pin recording</value>
+    <value>Protect from deletion</value>
   </data>
   <data name="DashboardRunSelectUnpin" xml:space="preserve">
-    <value>Unpin recording</value>
+    <value>Allow deletion</value>
   </data>
   <data name="DashboardRunSelectIncompatibleTooltip" xml:space="preserve">
     <value>This recording can't be viewed because it was created by an incompatible version of the dashboard.</value>
@@ -205,7 +229,7 @@
     <value>Learn about recordings</value>
   </data>
   <data name="DashboardRunSelectHelpTooltip" xml:space="preserve">
-    <value>Switch between the live view and read-only recordings of previous runs. Pin a recording to keep it from being automatically deleted.</value>
+    <value>Switch between the live view and read-only recordings of previous runs. Protect a recording from deletion to keep it when older recordings are automatically removed.</value>
   </data>
   <data name="NavMenuLandmark" xml:space="preserve">
     <value>Main navigation</value>

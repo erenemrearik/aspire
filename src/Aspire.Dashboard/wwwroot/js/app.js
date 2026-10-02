@@ -123,6 +123,63 @@ document.addEventListener("cancel", function (event) {
     }
 }, true);
 
+// AspireTooltip renders fluent-tooltip as manual popovers so they don't light-dismiss open menus.
+// beforetoggle doesn't bubble, so listen in the capture phase.
+// https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/beforetoggle_event
+document.addEventListener("beforetoggle", function (event) {
+    const target = event.target;
+    if (event.newState !== "open" || !(target instanceof HTMLElement)) {
+        return;
+    }
+
+    // A menu opening hides tooltips, e.g. the tooltip of the button that was just clicked to open it.
+    if (target.matches("fluent-menu-list")) {
+        hideAspireTooltips(null);
+        return;
+    }
+
+    if (!target.matches("fluent-tooltip.aspire-tooltip")) {
+        return;
+    }
+
+    const tooltip = target;
+    const anchor = document.getElementById(tooltip.getAttribute("anchor") ?? "");
+
+    // Don't cover a menu with the tooltip of the button that opened it.
+    if (anchor?.getAttribute("aria-expanded") === "true") {
+        event.preventDefault();
+        return;
+    }
+
+    // Opening a menu focuses an item, which would immediately show that item's tooltip. Menu item tooltips are
+    // shown on hover only, like the title attribute they replace. Screen readers still announce them through
+    // the aria-describedby that fluent-tooltip sets on the item.
+    if (anchor?.matches("fluent-menu-item") && !anchor.matches(":hover")) {
+        event.preventDefault();
+        return;
+    }
+
+    // fluent-tooltip names its anchor (anchor-name: --<anchor id>) when it connects, but fluent-menu later
+    // renames its trigger to --anchor-<trigger id>. Follow the anchor's current name so the tooltip isn't
+    // positioned at the viewport origin.
+    const anchorName = anchor?.style.anchorName;
+    if (anchorName) {
+        tooltip.style.positionAnchor = anchorName;
+    }
+
+    // Manual popovers don't close each other. Keep a single tooltip visible, e.g. when a menu item's tooltip
+    // is shown because the item has focus while the pointer hovers another item or the item's action button.
+    hideAspireTooltips(tooltip);
+}, true);
+
+function hideAspireTooltips(except) {
+    for (const tooltip of document.querySelectorAll("fluent-tooltip.aspire-tooltip:popover-open")) {
+        if (tooltip !== except) {
+            tooltip.hidePopover();
+        }
+    }
+}
+
 // Register a global click event listener to handle copy/open button clicks.
 // Required because an "onclick" attribute is denied by CSP.
 document.addEventListener("click", function (e) {

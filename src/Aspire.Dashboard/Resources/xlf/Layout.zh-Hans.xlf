@@ -12,29 +12,64 @@
         <target state="new">Live view</target>
         <note />
       </trans-unit>
+      <trans-unit id="DashboardRunSelectDayAgo">
+        <source>1 day ago</source>
+        <target state="new">1 day ago</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="DashboardRunSelectDaysAgo">
+        <source>{0} days ago</source>
+        <target state="new">{0} days ago</target>
+        <note>{0} is the number of days</note>
+      </trans-unit>
       <trans-unit id="DashboardRunSelectHelp">
         <source>Learn about recordings</source>
         <target state="new">Learn about recordings</target>
         <note />
       </trans-unit>
       <trans-unit id="DashboardRunSelectHelpTooltip">
-        <source>Switch between the live view and read-only recordings of previous runs. Pin a recording to keep it from being automatically deleted.</source>
-        <target state="new">Switch between the live view and read-only recordings of previous runs. Pin a recording to keep it from being automatically deleted.</target>
+        <source>Switch between the live view and read-only recordings of previous runs. Protect a recording from deletion to keep it when older recordings are automatically removed.</source>
+        <target state="new">Switch between the live view and read-only recordings of previous runs. Protect a recording from deletion to keep it when older recordings are automatically removed.</target>
         <note />
+      </trans-unit>
+      <trans-unit id="DashboardRunSelectHoursAgo">
+        <source>{0}h ago</source>
+        <target state="new">{0}h ago</target>
+        <note>{0} is the number of hours</note>
       </trans-unit>
       <trans-unit id="DashboardRunSelectIncompatibleTooltip">
         <source>This recording can't be viewed because it was created by an incompatible version of the dashboard.</source>
         <target state="new">This recording can't be viewed because it was created by an incompatible version of the dashboard.</target>
         <note />
       </trans-unit>
+      <trans-unit id="DashboardRunSelectMinuteAgo">
+        <source>1 minute ago</source>
+        <target state="new">1 minute ago</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="DashboardRunSelectMinutesAgo">
+        <source>{0} minutes ago</source>
+        <target state="new">{0} minutes ago</target>
+        <note>{0} is the number of minutes</note>
+      </trans-unit>
+      <trans-unit id="DashboardRunSelectMomentAgo">
+        <source>a moment ago</source>
+        <target state="new">a moment ago</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="DashboardRunSelectNoRecordings">
+        <source>No existing recordings</source>
+        <target state="new">No existing recordings</target>
+        <note />
+      </trans-unit>
       <trans-unit id="DashboardRunSelectPin">
-        <source>Pin recording</source>
-        <target state="new">Pin recording</target>
+        <source>Protect from deletion</source>
+        <target state="new">Protect from deletion</target>
         <note />
       </trans-unit>
       <trans-unit id="DashboardRunSelectRecordings">
-        <source>Recordings</source>
-        <target state="new">Recordings</target>
+        <source>Past recordings</source>
+        <target state="new">Past recordings</target>
         <note />
       </trans-unit>
       <trans-unit id="DashboardRunSelectTitle">
@@ -43,8 +78,8 @@
         <note />
       </trans-unit>
       <trans-unit id="DashboardRunSelectUnpin">
-        <source>Unpin recording</source>
-        <target state="new">Unpin recording</target>
+        <source>Allow deletion</source>
+        <target state="new">Allow deletion</target>
         <note />
       </trans-unit>
       <trans-unit id="ExtensionsPageDescription">
