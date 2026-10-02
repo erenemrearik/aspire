@@ -13,6 +13,8 @@
 'use strict';
 
 const COOLDOWN_DAYS = 7;
+// The single long-lived branch behind the open auto-sec PR (see auto-sec.md safe-outputs).
+const AUTO_SEC_BRANCH = 'auto-sec/security-updates';
 const DEPENDABOT_LOGIN = 'dependabot[bot]';
 const DEFAULT_BOT_LOGIN = 'aspire-repo-bot[bot]';
 // At most this many reviews are submitted per run. Requests beyond the limit are still
@@ -472,14 +474,16 @@ function pyprojectEntries(text) {
 }
 
 // Directory.Packages.props: <PackageVersion Include="System.Text.Json" Version="9.0.5" />
-// The attributes may appear in either order.
+// Target-framework item groups override an earlier entry with
+//   <PackageVersion Update="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
+// so both forms bind a version. The attributes may appear in either order.
 function packagesPropsEntries(text) {
     const entries = [];
     for (const [element] of String(text ?? '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/<PackageVersion\b[^>]*>/gi)) {
-        const include = xmlAttribute(element, 'Include');
+        const name = xmlAttribute(element, 'Include') ?? xmlAttribute(element, 'Update');
         const version = xmlAttribute(element, 'Version');
-        if (include && version) {
-            entries.push({ name: include, version: version.replace(/^\[|\]$/g, '') });
+        if (name && version) {
+            entries.push({ name, version: version.replace(/^\[|\]$/g, '') });
         }
     }
     return entries;
@@ -1173,6 +1177,45 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
     return results;
 }
 
+/**
+ * Runs in the safe_outputs job before the push handler. gh-aw's push-to-pull-request-branch
+ * needs `target: "*"` on a scheduled run and only filters by label and title prefix, so a
+ * mislabeled PR on another branch would otherwise be pushable. Every requested push must
+ * name an open PR whose head is AUTO_SEC_BRANCH in this repository; any other request
+ * fails the step, which stops the job before the handler pushes anything.
+ */
+async function runPushTargetGate({ github, context, core, fs = require('node:fs'), env = process.env }) {
+    const outputPath = env.GH_AW_AGENT_OUTPUT;
+    const agentOutput = outputPath && fs.existsSync(outputPath) ? JSON.parse(fs.readFileSync(outputPath, 'utf8')) : {};
+    const items = (Array.isArray(agentOutput?.items) ? agentOutput.items : []).filter(item => item?.type === 'push_to_pull_request_branch');
+    const { owner, repo } = context.repo;
+    const fullName = `${owner}/${repo}`.toLowerCase();
+    const violations = [];
+
+    for (const item of items) {
+        const prNumber = Number(item.pull_request_number);
+        if (!Number.isInteger(prNumber) || prNumber <= 0) {
+            violations.push({ pr: null, reason: 'missing-pull-request-number' });
+            continue;
+        }
+        const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+        if (pr.state !== 'open') {
+            violations.push({ pr: prNumber, reason: 'not-open' });
+        } else if (pr.head?.ref !== AUTO_SEC_BRANCH) {
+            violations.push({ pr: prNumber, reason: 'wrong-head-branch' });
+        } else if (String(pr.head?.repo?.full_name ?? '').toLowerCase() !== fullName) {
+            violations.push({ pr: prNumber, reason: 'wrong-head-repository' });
+        }
+    }
+
+    if (violations.length > 0) {
+        core.setFailed(`auto-sec pushes may only target the open ${AUTO_SEC_BRANCH} pull request: ${violations.map(v => `${v.pr === null ? 'unknown' : `#${v.pr}`} ${v.reason}`).join('; ')}`);
+    } else {
+        core.info(`Push target gate passed for ${items.length} request(s).`);
+    }
+    return { requests: items.length, violations };
+}
+
 async function main(argv) {
     const [command, ecosystem, name, version] = argv;
     if (command !== 'lookup' || !ecosystem || !name || !version) {
@@ -1196,6 +1239,7 @@ if (require.main === module) {
 
 module.exports = {
     APPROVED_SOURCE_PREFIXES,
+    AUTO_SEC_BRANCH,
     COOLDOWN_DAYS,
     MAX_APPROVALS,
     MAX_VERSION_CHANGES,
@@ -1218,5 +1262,6 @@ module.exports = {
     parseNuGetConfig,
     readApprovalRequests,
     runApprovalJob,
+    runPushTargetGate,
     selectNuGetSources,
 };

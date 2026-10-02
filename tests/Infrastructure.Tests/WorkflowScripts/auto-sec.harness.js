@@ -6,6 +6,8 @@
 //   { mode: "lookup", ecosystem, name, version, now, responses, nugetConfigText } -> { value, urls }
 //   { mode: "approve", now, staged, agentItems, pr, prOverrides, files, contents, alerts,
 //     malwareNumbers, checkRuns, statuses, reviews, responses, liveHeadSha } -> { value, reviews, summary, info, warnings }
+//   { mode: "push-gate", agentItems, pr, prOverrides } -> { value, info, failures }
+// PRs may carry `head_repo` (defaults to microsoft/aspire).
 // Alerts may carry `vulnerable_version_range` and `advisory_ranges` (every range the
 // advisory lists for the package).
 // `responses` maps a URL to `{ status, body }`; unknown URLs return 404.
@@ -59,7 +61,7 @@ function createGitHub(request, created) {
                         state: pr.state ?? 'open',
                         draft: pr.draft ?? false,
                         user: { login: pr.user_login ?? 'dependabot[bot]' },
-                        head: { sha: pr.head_sha, ref: pr.head_ref },
+                        head: { sha: pr.head_sha, ref: pr.head_ref, repo: { full_name: pr.head_repo ?? 'microsoft/aspire' } },
                         base: { sha: 'base0000000000000000000000000000000000000' },
                         title: pr.title,
                         body: pr.body,
@@ -163,6 +165,25 @@ async function main() {
                     now: new Date(request.now),
                 });
                 result = { value, reviews, summary, info, warnings };
+            } finally {
+                fs.rmSync(outputDir, { recursive: true, force: true });
+            }
+            break;
+        }
+        case 'push-gate': {
+            const info = [];
+            const failures = [];
+            const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-'));
+            const outputPath = path.join(outputDir, 'agent_output.json');
+            fs.writeFileSync(outputPath, JSON.stringify({ items: request.agentItems ?? [] }));
+            try {
+                const value = await gate.runPushTargetGate({
+                    github: createGitHub(request, []),
+                    context: { repo: { owner: 'microsoft', repo: 'aspire' } },
+                    core: { info: message => info.push(message), setFailed: message => failures.push(message) },
+                    env: { GH_AW_AGENT_OUTPUT: outputPath },
+                });
+                result = { value, info, failures };
             } finally {
                 fs.rmSync(outputDir, { recursive: true, force: true });
             }

@@ -453,6 +453,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("app/pyproject.toml", "dependencies = [\"typing_extensions[x] >= 4.12.2, < 5; python_version < '3.11'\"]\n", "typing-extensions", "4.12.2", true)]
     [InlineData("Directory.Packages.props", "<PackageVersion Include=\"A\" Version=\"9.0.4\" />\n<PackageVersion Include=\"B\" Version=\"9.0.5\" />", "A", "9.0.5", false)]
     [InlineData("Directory.Packages.props", "<PackageVersion Version=\"9.0.5\" Include=\"System.Text.Json\" />", "system.text.json", "9.0.5", true)]
+    [InlineData("Directory.Packages.props", "<PackageVersion Include=\"Npgsql\" Version=\"8.0.11\" />\n<PackageVersion Update=\"Npgsql\" Version=\"9.0.4\" />", "npgsql", "9.0.4", true)]
     [InlineData("app/requirements.txt", "jinja2==3.1.6\n", "jinja2", "3.1.6", false)]
     public async Task BindsVersionToItsOwnManifestEntry(string path, string text, string name, string version, bool expected)
     {
@@ -625,6 +626,57 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     }
 
     [Fact]
+    [RequiresTools(["node"])]
+    public async Task PushGateAllowsAutoSecBranchAndIgnoresOtherOutputs()
+    {
+        var result = await RunHarnessAsync(CreatePushGateScenario(new JsonObject()));
+
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Equal(1, result["value"]!["requests"]!.GetValue<int>());
+
+        var noPush = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "push-gate",
+            ["agentItems"] = new JsonArray(new JsonObject { ["type"] = "create_pull_request" }),
+        });
+
+        Assert.Empty(noPush["failures"]!.AsArray());
+        Assert.Equal(0, noPush["value"]!["requests"]!.GetValue<int>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("wrong-head-branch")]
+    [InlineData("wrong-head-repository")]
+    [InlineData("not-open")]
+    [InlineData("missing-pull-request-number")]
+    public async Task PushGateFailsForPullRequestsOutsideAutoSecBranch(string reason)
+    {
+        var pr = new JsonObject();
+        var item = new JsonObject { ["type"] = "push_to_pull_request_branch", ["pull_request_number"] = 202 };
+        switch (reason)
+        {
+            case "wrong-head-branch":
+                pr["head_ref"] = "feature/x";
+                break;
+            case "wrong-head-repository":
+                pr["head_repo"] = "contoso/aspire";
+                break;
+            case "not-open":
+                pr["state"] = "closed";
+                break;
+            case "missing-pull-request-number":
+                item["pull_request_number"] = "abc";
+                break;
+        }
+
+        var result = await RunHarnessAsync(CreatePushGateScenario(pr, item));
+
+        var failure = Assert.Single(result["failures"]!.AsArray());
+        Assert.Contains(reason, failure!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WorkflowRunsEveryTwelveHoursAndKeepsFeedConfigurationProtected()
     {
         var source = ReadWorkflow("auto-sec.md");
@@ -652,6 +704,39 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["head_sha", "pr_number"],
             Regex.Matches(approvalInputs, "^        ([a-z_]+):\r?$", RegexOptions.Multiline).Select(match => match.Groups[1].Value).Order(StringComparer.Ordinal));
         Assert.Contains("covered_alerts: m.coveredAlerts(alerts, ecosystem, updates, headContents)", source, StringComparison.Ordinal);
+
+        // push-to-pull-request-branch has no branch filter, so a deterministic gate step must
+        // run before the safe-output handler to restrict pushes to the auto-sec branch.
+        var gateStep = compiled.IndexOf("name: Restrict pushes to the auto-sec branch", StringComparison.Ordinal);
+        var handlerStep = compiled.IndexOf("name: Process Safe Outputs", StringComparison.Ordinal);
+        Assert.True(gateStep >= 0 && handlerStep > gateStep, "Push gate must run before Process Safe Outputs.");
+        var gateSection = compiled[gateStep..handlerStep];
+        Assert.Contains("GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}", gateSection, StringComparison.Ordinal);
+        Assert.Contains("gate.runPushTargetGate({ github, context, core })", gateSection, StringComparison.Ordinal);
+    }
+
+    private static JsonObject CreatePushGateScenario(JsonObject prOverrides, JsonObject? item = null)
+    {
+        var pr = new JsonObject
+        {
+            ["number"] = 202,
+            ["state"] = "open",
+            ["user_login"] = "github-actions[bot]",
+            ["head_sha"] = HeadSha,
+            ["head_ref"] = "auto-sec/security-updates",
+            ["head_repo"] = "microsoft/aspire",
+        };
+        foreach (var (key, value) in prOverrides)
+        {
+            pr[key] = value?.DeepClone();
+        }
+
+        return new JsonObject
+        {
+            ["mode"] = "push-gate",
+            ["pr"] = pr,
+            ["agentItems"] = new JsonArray(item ?? new JsonObject { ["type"] = "push_to_pull_request_branch", ["pull_request_number"] = 202 }),
+        };
     }
 
     private static JsonObject Response(JsonNode body) => new() { ["status"] = 200, ["body"] = body };

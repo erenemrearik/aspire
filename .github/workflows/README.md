@@ -84,7 +84,9 @@ open Dependabot PRs. Pure code findings are out of scope.
     review)
 - **Remaining alerts** are fixed in a single `[auto-sec]` PR on
   `auto-sec/security-updates`, labeled `auto-sec`. Later runs update that PR
-  instead of opening another one. NuGet bumps are made only when the fixed version
+  instead of opening another one. A deterministic step in the safe-outputs job
+  fails the run if the agent asks to push to any PR other than the open
+  `auto-sec/security-updates` PR from this repository. NuGet bumps are made only when the fixed version
   already restores from an approved dnceng feed that `NuGet.config` package source
   mapping assigns to the package. Otherwise the alert is reported as blocked on
   mirroring.

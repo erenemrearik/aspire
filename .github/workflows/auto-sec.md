@@ -227,6 +227,21 @@ safe-outputs:
     if-no-changes: ignore
     allowed-files: *auto-sec-files
     protected-files: *auto-sec-protected
+  # Runs in the safe_outputs job after its checkout and before the handlers.
+  # push-to-pull-request-branch has no branch filter, so this deterministic gate
+  # fails the job unless every requested push targets the open
+  # auto-sec/security-updates PR in this repository. The condition matches the
+  # job's checkout step, which only runs when a code-writing output was emitted.
+  steps:
+    - name: Restrict pushes to the auto-sec branch
+      if: (!cancelled()) && contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch')
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
+      with:
+        script: |
+          const gate = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/auto-sec/auto-sec.js`);
+          await gate.runPushTargetGate({ github, context, core });
   jobs:
     approve-dependabot-pr:
       name: "Approve Dependabot PR"
