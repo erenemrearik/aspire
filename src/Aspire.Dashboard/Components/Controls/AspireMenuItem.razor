@@ -18,6 +18,12 @@ else if (Item.IsHeader)
         <span class="aspire-menu-header-text" title="@Item.Text">@Item.Text</span>
     </div>
 }
+else if (Item.IsGroupHeader)
+{
+    <div id="@Item.Id" class="aspire-menu-group-header" role="presentation">
+        <span class="aspire-menu-header-text" title="@Item.Text">@Item.Text</span>
+    </div>
+}
 else
 {
     RenderFragment? nestedMenuItems = null;
@@ -29,7 +35,8 @@ else
                 <AspireMenuItem @key="nestedItem.RenderKey"
                                 Item="nestedItem"
                                 OnItemActivated="OnItemActivated"
-                                OnSecondaryActionClicked="OnSecondaryActionClicked" />
+                                OnSecondaryActionClicked="OnSecondaryActionClicked"
+                                OnItemToggled="OnItemToggled" />
             }
         </text>;
     }

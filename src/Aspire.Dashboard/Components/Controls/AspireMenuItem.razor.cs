@@ -19,6 +19,9 @@ public partial class AspireMenuItem
     [Parameter, EditorRequired]
     public required EventCallback<MenuButtonItem> OnSecondaryActionClicked { get; set; }
 
+    [Parameter]
+    public EventCallback<(MenuButtonItem Item, bool IsChecked)> OnItemToggled { get; set; }
+
     private Dictionary<string, object> AdditionalMenuItemAttributes =>
         new(Item.AdditionalAttributes ?? ImmutableDictionary<string, object>.Empty)
         {
@@ -34,6 +37,17 @@ public partial class AspireMenuItem
 
     private Task HandleItemCheckedChanged(bool? isChecked)
     {
+        if (Item.OnCheckedChanged is not null && Item.Role is MenuItemRole.Checkbox)
+        {
+            // The web component also raises its change event when a re-render updates the checked
+            // state, e.g. when toggling one value unchecks an "All" item. Only a change that differs
+            // from the rendered state comes from the user.
+            var newValue = isChecked is true;
+            return newValue == Item.Checked
+                ? Task.CompletedTask
+                : OnItemToggled.InvokeAsync((Item, newValue));
+        }
+
         return isChecked is true && Item.Role is MenuItemRole.Checkbox or MenuItemRole.Radio
             ? OnItemActivated.InvokeAsync(Item)
             : Task.CompletedTask;

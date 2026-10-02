@@ -76,3 +76,17 @@ fluent-menu-item:hover > span[slot="end"] ::deep .aspire-menu-secondary-action,
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* Group headers label a run of related items, so they align with the item text column
+   (after FluentUI's 32px indicator track) and stay quieter than the menu-level header. */
+.aspire-menu-group-header {
+    box-sizing: border-box;
+    padding: 6px 8px 2px 36px;
+    color: var(--colorNeutralForeground3);
+    font-family: var(--fontFamilyBase);
+    font-size: var(--fontSizeBase200);
+    font-weight: var(--fontWeightSemibold);
+    line-height: var(--lineHeightBase200);
+    cursor: default;
+    user-select: none;
+}

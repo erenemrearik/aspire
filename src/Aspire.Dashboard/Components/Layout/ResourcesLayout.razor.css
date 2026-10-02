@@ -84,10 +84,6 @@
     width: 100%;
 }
 
-.resource-pane-filter-popup-container {
-    position: relative;
-}
-
 .resource-pane-states {
     display: flex;
     flex-wrap: wrap;

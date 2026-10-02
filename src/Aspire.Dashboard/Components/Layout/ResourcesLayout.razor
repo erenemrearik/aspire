@@ -46,14 +46,16 @@ else
                         </StartTemplate>
                     </FluentTextInput>
 
-                    <FluentButton id="@FilterButtonId"
-                                  Class="resource-pane-button"
-                                  Appearance="@(NoFiltersSet ? ButtonAppearance.Default : ButtonAppearance.Primary)"
-                                  IconOnly="true"
-                                  IconStart="@(new Icons.Regular.Size16.Filter())"
-                                  OnClick="@(() => _isFilterPopupVisible = !_isFilterPopupVisible)"
-                                  Title="@(NoFiltersSet ? ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesNotFiltered)] : ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesFiltered)])"
-                                  aria-label="@(NoFiltersSet ? ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesNotFiltered)] : ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesFiltered)])" />
+                    var filterTitle = NoFiltersSet ? ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesNotFiltered)] : ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesFiltered)];
+                    <AspireMenuButton MenuButtonId="@FilterButtonId"
+                                      ButtonClass="resource-pane-button"
+                                      ButtonAppearance="@(NoFiltersSet ? ButtonAppearance.Default : ButtonAppearance.Primary)"
+                                      Icon="@(new Icons.Regular.Size16.Filter())"
+                                      IconColor="Color.Custom"
+                                      IconCustomColor="currentColor"
+                                      ItemsProvider="@GetFilterMenuItems"
+                                      Title="@filterTitle"
+                                      aria-label="@filterTitle" />
                 }
 
                 @if (isDesktop)
@@ -81,18 +83,6 @@ else
 
             @if (!showCollapsedPane)
             {
-                <div class="resource-pane-filter-popup-container">
-                    <FluentPopover AnchorId="@FilterButtonId"
-                                   @bind-Opened="_isFilterPopupVisible"
-                                   Class="resources-filter-popup">
-                        <ResourceFilters ResourceStates="@_filter.ResourceStatesToVisibility"
-                                         ResourceTypes="@_filter.ResourceTypesToVisibility"
-                                         ResourceHealthStates="@_filter.ResourceHealthStatusesToVisibility"
-                                         OnAllFilterVisibilityCheckedChangedAsync="@OnAllFilterVisibilityCheckedChangedAsync"
-                                         OnResourceFilterVisibilityChangedAsync="@OnResourceFilterVisibilityChangedAsync" />
-                    </FluentPopover>
-                </div>
-
                 var stateCounts = GetStateCounts();
                 @if (stateCounts.Count > 1)
                 {

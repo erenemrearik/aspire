@@ -32,6 +32,12 @@ public class MenuButtonItem
     /// but ignore <see cref="OnClick"/> and are skipped by keyboard navigation.
     /// </summary>
     public bool IsHeader { get; set; }
+    /// <summary>
+    /// Whether the item is a non-interactive label for a group of related items within the menu
+    /// (e.g. "State" above a set of state filters). Unlike <see cref="IsHeader"/>, a group header
+    /// doesn't label the menu as a whole and can appear multiple times.
+    /// </summary>
+    public bool IsGroupHeader { get; set; }
     public List<MenuButtonItem>? NestedMenuItems { get; set; }
     public string? Text { get; set; }
     public string? Tooltip { get; set; }
@@ -52,6 +58,12 @@ public class MenuButtonItem
     /// checkable role, in which case it drives the reflected <c>aria-checked</c> state.
     /// </summary>
     public bool Checked { get; set; }
+    /// <summary>
+    /// Optional callback for a <see cref="MenuItemRole.Checkbox"/> item that toggles independently.
+    /// When set, the item reports both checking and unchecking, and the menu stays open so several
+    /// items can be toggled in a row. The menu items are regenerated after the callback completes.
+    /// </summary>
+    public Func<bool, Task>? OnCheckedChanged { get; set; }
     public Func<Task>? OnClick { get; set; }
     public bool IsDisabled { get; set; }
     /// <summary>

@@ -33,6 +33,7 @@ namespace Aspire.Dashboard.Components.Layout;
 public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposable
 {
     private const string FilterButtonId = "resourcePaneFilterButton";
+    private static readonly Icon s_checkmarkIcon = new Icons.Regular.Size16.Checkmark();
     internal const int MinimumPaneWidthPx = 200;
     internal const int MaximumPaneWidthPx = 560;
     internal const int DefaultPaneWidthPx = 290;
@@ -55,7 +56,6 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
     private bool _isLoaded;
     private bool _isPaneCollapsed;
     private bool _isDrawerOpen;
-    private bool _isFilterPopupVisible;
     private bool _pendingLandingRedirect;
     private bool _hasLocation;
     private string? _lastLocation;
@@ -733,16 +733,82 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
         }
     }
 
-    private Task OnAllFilterVisibilityCheckedChangedAsync()
+    private List<MenuButtonItem> GetFilterMenuItems()
     {
-        StateHasChanged();
-        return Task.CompletedTask;
+        var items = new List<MenuButtonItem>();
+        AddFilterGroup(items, "types", ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesResourceTypesHeader)], _filter.ResourceTypesToVisibility);
+        AddFilterGroup(items, "states", ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesResourceStatesHeader)], _filter.ResourceStatesToVisibility);
+        AddFilterGroup(items, "health", ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesDetailsHealthStateProperty)], _filter.ResourceHealthStatusesToVisibility);
+        return items;
     }
 
-    private Task OnResourceFilterVisibilityChangedAsync(string resourceType, bool isVisible)
+    private void AddFilterGroup(List<MenuButtonItem> items, string groupId, string header, ConcurrentDictionary<string, bool> values)
     {
-        StateHasChanged();
-        return Task.CompletedTask;
+        if (items.Count > 0)
+        {
+            items.Add(new MenuButtonItem { IsDivider = true, RenderKey = $"{groupId}-divider" });
+        }
+
+        items.Add(new MenuButtonItem
+        {
+            IsGroupHeader = true,
+            Text = header,
+            Id = $"resource-filter-{groupId}-header",
+            RenderKey = $"{groupId}-header"
+        });
+
+        // The menu is regenerated after every toggle and the toggled item is refocused by id, so ids
+        // must be stable across regenerations. Values can contain characters that aren't valid in an
+        // id, so use the item's sorted position instead.
+        // OrderBy doesn't use thread safe APIs on ConcurrentDictionary. Call ToArray first.
+        var sortedValues = values.ToArray().OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).ToList();
+
+        // A menu checkbox can't show an indeterminate state, so "All" is checked only when every value
+        // is visible. Checking it shows every value; unchecking it hides every value.
+        items.Add(CreateFilterMenuItem(
+            id: $"resource-filter-{groupId}-all",
+            renderKey: $"{groupId}-all",
+            text: ControlsStringsLoc[nameof(ControlsStrings.LabelAll)],
+            isChecked: sortedValues.All(pair => pair.Value),
+            onCheckedChanged: isChecked =>
+            {
+                foreach (var key in values.Keys)
+                {
+                    values[key] = isChecked;
+                }
+            }));
+
+        for (var i = 0; i < sortedValues.Count; i++)
+        {
+            var (key, isVisible) = sortedValues[i];
+            items.Add(CreateFilterMenuItem(
+                id: $"resource-filter-{groupId}-{i}",
+                renderKey: $"{groupId}:{key}",
+                text: string.IsNullOrEmpty(key) ? ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourceFilterOptionEmpty)] : key,
+                isChecked: isVisible,
+                onCheckedChanged: isChecked => values[key] = isChecked));
+        }
+    }
+
+    private MenuButtonItem CreateFilterMenuItem(string id, string renderKey, string text, bool isChecked, Action<bool> onCheckedChanged)
+    {
+        return new MenuButtonItem
+        {
+            Id = id,
+            RenderKey = renderKey,
+            Text = text,
+            Icon = s_checkmarkIcon,
+            Role = MenuItemRole.Checkbox,
+            Checked = isChecked,
+            OnCheckedChanged = value =>
+            {
+                onCheckedChanged(value);
+
+                // The toggle comes from the menu component, so re-render the pane to apply the filter.
+                StateHasChanged();
+                return Task.CompletedTask;
+            }
+        };
     }
 
     private bool NoFiltersSet =>
