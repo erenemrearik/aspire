@@ -70,7 +70,7 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
-        ///   Looks up a localized string similar to Select view: {0}.
+        ///   Looks up a localized string similar to Recordings, viewing {0}.
         /// </summary>
         public static string DashboardRunSelectAccessibleLabel {
             get {

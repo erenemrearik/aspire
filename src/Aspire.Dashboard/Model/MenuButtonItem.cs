@@ -47,6 +47,12 @@ public class MenuButtonItem
     /// </summary>
     public string? Description { get; set; }
     public Icon? Icon { get; set; }
+    /// <summary>
+    /// Optional icon displayed inline before the text, in addition to the
+    /// <see cref="Icon"/> that indicates its checked state.
+    /// </summary>
+    public Icon? StartIcon { get; set; }
+    public Color StartIconColor { get; set; } = Color.Primary;
     public Icon? SecondaryActionIcon { get; set; }
     public string? SecondaryActionAriaLabel { get; set; }
     public Func<Task>? OnSecondaryActionClick { get; set; }

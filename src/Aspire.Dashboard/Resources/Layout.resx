@@ -184,7 +184,7 @@
     <value>Live view and recordings</value>
   </data>
   <data name="DashboardRunSelectAccessibleLabel" xml:space="preserve">
-    <value>Select view: {0}</value>
+    <value>Recordings, viewing {0}</value>
   </data>
   <data name="DashboardRunSelectCurrent" xml:space="preserve">
     <value>Live view</value>

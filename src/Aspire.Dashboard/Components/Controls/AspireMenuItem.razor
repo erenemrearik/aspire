@@ -49,12 +49,22 @@ else
                     Role="@Item.Role"
                     Checked="@Item.Checked"
                     AdditionalAttributes="@AdditionalMenuItemAttributes"
-                    Label="@Item.Text"
+                    Label="@(Item.StartIcon is null ? Item.Text : null)"
                     MenuItems="@nestedMenuItems">
         @if (Item.Icon is not null)
         {
             <span slot="@GetIconSlot(Item.Role)">
                 <FluentIcon Value="@Item.Icon" Style="vertical-align: text-bottom;" Width="16px" Color="Color.Primary" />
+            </span>
+        }
+        @if (Item.StartIcon is not null)
+        {
+            @* Rendered inline with the text rather than in the "start" slot: FluentUI only sizes the
+               start column when it computes an extra indent for the whole list, so a slotted icon on a
+               single checkable item would overlap its checkmark indicator. *@
+            <span class="aspire-menu-item-label">
+                <FluentIcon Value="@Item.StartIcon" Width="12px" Color="@Item.StartIconColor" />
+                @Item.Text
             </span>
         }
         @if (Item.Description is not null || Item.SecondaryActionIcon is not null)

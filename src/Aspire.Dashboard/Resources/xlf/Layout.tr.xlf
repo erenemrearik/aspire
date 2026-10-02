@@ -3,8 +3,8 @@
   <file datatype="xml" source-language="en" target-language="tr" original="../Layout.resx">
     <body>
       <trans-unit id="DashboardRunSelectAccessibleLabel">
-        <source>Select view: {0}</source>
-        <target state="new">Select view: {0}</target>
+        <source>Recordings, viewing {0}</source>
+        <target state="new">Recordings, viewing {0}</target>
         <note />
       </trans-unit>
       <trans-unit id="DashboardRunSelectCurrent">

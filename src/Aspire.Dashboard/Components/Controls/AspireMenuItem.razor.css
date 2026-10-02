@@ -19,6 +19,12 @@ span.aspire-menu-secondary-action-container:has(.aspire-menu-item-description) {
     white-space: nowrap;
 }
 
+.aspire-menu-item-label {
+    align-items: center;
+    display: inline-flex;
+    gap: 8px;
+}
+
 ::deep .aspire-menu-secondary-action {
     opacity: 0;
     visibility: hidden;

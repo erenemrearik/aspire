@@ -19,16 +19,22 @@ public partial class DashboardRunSelect : ComponentBase
 
     private static readonly Icon s_checkmarkIcon = new Icons.Regular.Size16.Checkmark();
     private static readonly Icon s_historyIcon = new Icons.Regular.Size16.History();
+    private static readonly Icon s_liveIcon = new Icons.Filled.Size12.Play();
     private static readonly Icon s_helpIcon = new Icons.Regular.Size16.QuestionCircle();
     private static readonly Icon s_pinIcon = new Icons.Regular.Size16.Pin();
     private static readonly Icon s_pinnedIcon = new Icons.Filled.Size16.Pin();
     private readonly string _runMenuItemIdPrefix = $"dashboard-run-{Guid.NewGuid():N}";
 
     private string RunSelectTitle => Loc[nameof(LayoutResources.DashboardRunSelectTitle)];
+    // The button names the menu while the live view is shown, and the recording's date otherwise. The
+    // accessible label always states what is being viewed so "Recordings" isn't mistaken for the selection.
+    private string ButtonText => SelectedRunIsCurrent
+        ? Loc[nameof(LayoutResources.DashboardRunSelectRecordings)]
+        : SelectedRunText;
     private string RunSelectAccessibleLabel => Loc[nameof(LayoutResources.DashboardRunSelectAccessibleLabel), SelectedRunText];
     private string SelectedRunText => SelectedRunIsCurrent
         ? Loc[nameof(LayoutResources.DashboardRunSelectCurrent)]
-        : FormatHelpers.FormatTimeWithOptionalDate(TimeProvider, SelectedRunStartedAtUtc.UtcDateTime);
+        : FormatHelpers.FormatDateTime(TimeProvider, SelectedRunStartedAtUtc.UtcDateTime);
 
     [Parameter, EditorRequired]
     public required string SelectedRunId { get; set; }
@@ -87,6 +93,8 @@ public partial class DashboardRunSelect : ComponentBase
                 Role = MenuItemRole.Radio,
                 Checked = string.Equals(run.RunId, SelectedRunId, StringComparison.Ordinal),
                 Icon = s_checkmarkIcon,
+                StartIcon = run.IsCurrent ? s_liveIcon : null,
+                StartIconColor = Color.Success,
                 IsDisabled = !isCompatible,
                 Tooltip = isCompatible ? null : Loc[nameof(LayoutResources.DashboardRunSelectIncompatibleTooltip)].Value,
                 SecondaryActionIcon = run.IsPinned ? s_pinnedIcon : s_pinIcon,
