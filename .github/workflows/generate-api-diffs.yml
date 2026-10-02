@@ -37,6 +37,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ matrix.target_branch }}
+          persist-credentials: false
 
       - name: Restore and build (main)
         if: ${{ matrix.target_branch == 'main' }}
@@ -69,6 +70,8 @@ jobs:
           # the generated-diff pull request and applies its labels.
           permission-contents: write
           permission-pull-requests: write
+          # Release-branch history can differ from main in workflow files.
+          permission-workflows: write
 
       - name: Create or update pull request
         uses: ./.github/actions/create-pull-request
