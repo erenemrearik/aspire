@@ -43,6 +43,8 @@ function createGitHub(request, created) {
     const getCalls = new Map();
     const pages = {
         files: () => request.files.map(filename => ({ filename, status: 'modified' })),
+        commits: () => (request.commits ?? [{ author_login: 'dependabot[bot]', verified: true }])
+            .map(commit => ({ author: { login: commit.author_login }, commit: { verification: { verified: commit.verified } } })),
         checks: () => request.checkRuns ?? [],
         reviews: () => (request.reviews ?? []).map(review => ({ user: { login: review.user_login }, state: review.state, commit_id: review.commit_id })),
     };
@@ -69,6 +71,7 @@ function createGitHub(request, created) {
                 };
             },
             listFiles: pages.files,
+            listCommits: pages.commits,
             listReviews: pages.reviews,
             createReview: async args => {
                 created.push(args);

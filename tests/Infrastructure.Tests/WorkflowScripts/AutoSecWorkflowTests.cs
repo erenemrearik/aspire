@@ -51,6 +51,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("head-sha-mismatch")]
     [InlineData("actions-allow-list-required")]
     [InlineData("non-manifest-file-changed")]
+    [InlineData("non-dependabot-commit")]
+    [InlineData("non-dependabot-commit-unverified")]
     [InlineData("package-source-changed")]
     [InlineData("package-source-changed-other-org")]
     [InlineData("breaking-change")]
@@ -90,6 +92,15 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 break;
             case "non-manifest-file-changed":
                 scenario["files"]!.AsArray().Add("NuGet.config");
+                break;
+            case "non-dependabot-commit":
+                scenario["commits"] = new JsonArray(
+                    new JsonObject { ["author_login"] = "dependabot[bot]", ["verified"] = true },
+                    new JsonObject { ["author_login"] = "someone", ["verified"] = true });
+                break;
+            case "non-dependabot-commit-unverified":
+                expectedReason = "non-dependabot-commit";
+                scenario["commits"] = new JsonArray(new JsonObject { ["author_login"] = "dependabot[bot]", ["verified"] = false });
                 break;
             case "package-source-changed":
                 scenario["contents"]!["extension/yarn.lock@head"] = "resolved \"https://registry.example.com/lodash\"";

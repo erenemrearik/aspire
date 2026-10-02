@@ -71,7 +71,8 @@ open Dependabot PRs. Pure code findings are out of scope.
 - **Dependabot PRs** that fix an open alert are approved by the Aspire bot App only
   when `.github/workflows/auto-sec/auto-sec.js` re-verifies every gate in the
   `approve_dependabot_pr` safe-output job. The gates are:
-  - only manifest or lock files change
+  - only manifest or lock files change, and every commit is a GitHub-verified
+    commit authored by Dependabot
   - no package source or feed is added (only the dnceng public feeds and sources the
     file already uses are accepted)
   - a changed manifest in the alert's own directory carries the fixed version, and no

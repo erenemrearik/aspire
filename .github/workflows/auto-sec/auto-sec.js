@@ -718,6 +718,14 @@ function evaluateApprovalGates(input) {
     if (files.some(file => !isAllowedManifest(file.filename))) {
         reasons.push('non-manifest-file-changed');
     }
+    // The filename check alone cannot prove the content is a version bump: package.json
+    // scripts, pyproject.toml build hooks, and MSBuild targets are executable. Dependabot
+    // only rewrites version nodes, so require every commit to be a GitHub-verified commit
+    // authored by Dependabot; any pushed-on commit leaves the PR to a human reviewer.
+    const commits = input.commits ?? [];
+    if (!commits.length || commits.some(commit => commit.author_login !== DEPENDABOT_LOGIN || !commit.verified)) {
+        reasons.push('non-dependabot-commit');
+    }
     if (sourceChanges.some(change => change.newSources.length > 0)) {
         reasons.push('package-source-changed');
     }
@@ -1032,6 +1040,8 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
 
     const files = (await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: pr.number, per_page: 100 }))
         .map(file => ({ filename: file.filename, status: file.status }));
+    const commits = (await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number: pr.number, per_page: 100 }))
+        .map(commit => ({ author_login: commit.author?.login ?? '', verified: commit.commit?.verification?.verified === true }));
 
     // Compare full base/head file contents instead of the PR patch: GitHub omits the
     // patch for large lockfiles, and a missing patch must not hide a registry change.
@@ -1099,7 +1109,7 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
         }
     }
 
-    return { pr, expectedHeadSha: request.headSha, files, alerts, checkRuns, statuses, sourceChanges, headContents, versionChanges, packageInfo, reviews, now, botLogin };
+    return { pr, expectedHeadSha: request.headSha, files, commits, alerts, checkRuns, statuses, sourceChanges, headContents, versionChanges, packageInfo, reviews, now, botLogin };
 }
 
 /**
