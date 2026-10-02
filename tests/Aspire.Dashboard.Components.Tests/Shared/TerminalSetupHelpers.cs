@@ -55,6 +55,7 @@ internal static class TerminalSetupHelpers
         FluentUISetupHelpers.SetupFluentUIComponents(context);
         FluentUISetupHelpers.SetupFluentButton(context);
         context.Services.AddSingleton<IDashboardClient>(client);
+        context.Services.TryAddSingleton<IconResolver>();
         context.JSInterop.Setup<string>("Blazor._internal.PageTitle.getAndRemoveExistingTitle", _ => true).SetResult(string.Empty);
         SetupTerminalView(context, pathBase);
         SetupTerminalDock(context, pathBase);
@@ -71,7 +72,7 @@ internal static class TerminalSetupHelpers
     {
         SetupTerminalTitle(context);
         context.Services.TryAddSingleton<TerminalViewSessionRegistry>();
-        FluentUISetupHelpers.SetupFluentList(context);
+        context.JSInterop.SetupVoid("Microsoft.FluentUI.Blazor.Components.Select.Initialize", _ => true).SetVoidResult();
         var module = context.JSInterop.SetupModule(modulePath);
         module.Setup<int>("reconnectTerminal", _ => true).SetResult(2);
         module.SetupVoid("disposeTerminal", _ => true).SetVoidResult();

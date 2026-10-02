@@ -33,7 +33,7 @@ builder.AddSqlServer("sqlserver").WithRepl();
 
 // A multi-replica project that calls `WithTerminal()` so each replica gets its
 // own pseudo-terminal and the dashboard can attach to any of them via
-// `/api/terminal?resource=repl&replica=<i>`. The replica index is forwarded as
+// `/api/terminal?resource=<instance-name>`. The replica index is forwarded as
 // an environment variable so the REPL can stamp it on its banner.
 builder.AddProject<Projects.Terminals_Repl>("repl")
     .WithReplicas(2)

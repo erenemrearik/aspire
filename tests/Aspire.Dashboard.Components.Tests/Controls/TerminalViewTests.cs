@@ -178,6 +178,47 @@ public class TerminalViewTests : DashboardTestContext
         }
     }
 
+    [Theory]
+    [InlineData(null, "shell-instance%20%231%2F%3F%25%2B", "resource:shell-instance #1/?%+")]
+    [InlineData("shell #1/?%+", "shell%20%231%2F%3F%25%2B", "resource:shell #1/?%+")]
+    public async Task NewWindowAction_PassesResourceIdentityAndFontWithoutIconInLaunchUrl(
+        string? windowResourceName, string encodedWindowResourceName, string windowKey)
+    {
+        TerminalSetupHelpers.SetupTerminalView(this);
+        TerminalSetupHelpers.SetupTerminalWindows(this);
+        var cut = Render<TerminalView>(builder => builder
+            .Add(p => p.ResourceName, "shell-instance #1/?%+")
+            .Add(p => p.WindowResourceName, windowResourceName)
+            .Add(p => p.InitialFontSize, 19)
+            .Add(p => p.ShowOpenInWindow, true)
+            .Add(p => p.ResourceIcon, new Microsoft.FluentUI.AspNetCore.Components.Icons.Filled.Size16.Database()));
+
+        var expectedUrl = $"http://localhost/terminal-window/resource/{encodedWindowResourceName}?fontSize=19";
+        Assert.Equal(expectedUrl,
+            cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-url"));
+        Assert.Equal(windowKey,
+            cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-key"));
+        Assert.Equal(windowResourceName ?? "shell-instance #1/?%+", cut.Find(".terminal-title").TextContent);
+        TerminalSetupHelpers.AssertSingleTerminalConnection(this,
+            "ws://localhost/api/terminal?resource=shell-instance%20%231%2F%3F%25%2B");
+
+        cut.Render(builder => builder.Add(p => p.ResourceIcon, new Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Database()));
+        Assert.Equal(expectedUrl,
+            cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-url"));
+
+        cut.Render(builder => builder.Add(p => p.ResourceIcon, null));
+        Assert.Equal(expectedUrl,
+            cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-url"));
+
+        await cut.InvokeAsync(() => cut.Instance.OnTerminalStateChanged(new TerminalToolbarState
+        {
+            TerminalId = 1, Generation = 1, Connected = true, Title = "renamed shell"
+        }));
+        Assert.Equal(expectedUrl,
+            cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-url"));
+        Assert.Equal("renamed shell", cut.Find(".terminal-title").TextContent);
+    }
+
     [Fact]
     public async Task Titlebar_UsesWorkloadMetadataAndHidesDisconnectedProgress()
     {
@@ -532,15 +573,15 @@ public class TerminalViewTests : DashboardTestContext
     }
 
     [Theory]
-    [InlineData("http://localhost:8080/aspire/", "/aspire/Components/Controls/TerminalView.razor.js", "ws://localhost:8080/aspire/api/terminal?resource=app%20%26%20name&replica=2")]
-    [InlineData("https://dashboard.example/nested/aspire/", "/nested/aspire/Components/Controls/TerminalView.razor.js", "wss://dashboard.example/nested/aspire/api/terminal?resource=app%20%26%20name&replica=2")]
+    [InlineData("http://localhost:8080/aspire/", "/aspire/Components/Controls/TerminalView.razor.js", "ws://localhost:8080/aspire/api/terminal?resource=app%20%26%20name")]
+    [InlineData("https://dashboard.example/nested/aspire/", "/nested/aspire/Components/Controls/TerminalView.razor.js", "wss://dashboard.example/nested/aspire/api/terminal?resource=app%20%26%20name")]
     public void Initialization_PreservesPathBaseAndWebSocketScheme(string baseUri, string modulePath, string socketUrl)
     {
         Services.AddSingleton<NavigationManager>(new TestNavigationManager(baseUri));
         var module = TerminalSetupHelpers.SetupTerminalViewModule(this, modulePath);
         var init = module.Setup<int>("initTerminal", _ => true);
         init.SetResult(1);
-        Render<TerminalView>(builder => builder.Add(p => p.ResourceName, "app & name").Add(p => p.ReplicaIndex, 2));
+        Render<TerminalView>(builder => builder.Add(p => p.ResourceName, "app & name"));
         var invocation = Assert.Single(init.Invocations);
         var options = Assert.IsType<TerminalViewOptions>(invocation.Arguments[3]);
         Assert.Equal($"{socketUrl}&viewId={options.ViewId}", invocation.Arguments[1]);
