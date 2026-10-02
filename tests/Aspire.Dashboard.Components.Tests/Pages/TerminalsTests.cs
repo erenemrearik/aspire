@@ -12,6 +12,7 @@ using Aspire.Dashboard.Utils;
 using Aspire.Tests.Shared.DashboardModel;
 using Bunit;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Xunit;
@@ -495,8 +496,21 @@ public class TerminalsTests : DashboardTestContext
             Assert.Empty(cut.FindComponents<TerminalView>());
             Assert.Equal("http://localhost/terminals", Services.GetRequiredService<NavigationManager>().Uri);
         });
-        await updates.Writer.WriteAsync([new(ResourceViewModelChangeType.Upsert, ModelTestHelpers.CreateResource("first"))]);
-        cut.WaitForAssertion(() => Assert.Equal("http://localhost/", Services.GetRequiredService<NavigationManager>().Uri));
+        var navigation = Services.GetRequiredService<NavigationManager>();
+        var redirected = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<LocationChangedEventArgs> onRedirect = (_, args) => redirected.TrySetResult(args.Location);
+        navigation.LocationChanged += onRedirect;
+        try
+        {
+            // Redirecting returns without rendering, so a render-driven wait can miss the navigation.
+            await updates.Writer.WriteAsync([new(ResourceViewModelChangeType.Upsert, ModelTestHelpers.CreateResource("first"))]);
+            Assert.Equal("http://localhost/", await redirected.Task.WaitAsync(DefaultWaitTimeout));
+            Assert.Equal("http://localhost/", navigation.Uri);
+        }
+        finally
+        {
+            navigation.LocationChanged -= onRedirect;
+        }
     }
 
     [Fact]
