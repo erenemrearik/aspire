@@ -749,7 +749,9 @@ public static class MongoDBBuilderExtensions
         // NOTE: A single-member replica set is initialized with a `localhost:<port>` member address (see
         // `MongoDBSingleMemberReplicaSet`), so a client that performs replica set discovery replaces its seed with that
         // address and, from inside the Mongo Express container, ends up connecting to itself. Mongo Express has to use
-        // `directConnection=true`, like the connection strings Aspire gives to applications.
+        // `directConnection=true`, so it is given the same connection string that Aspire gives to applications. The
+        // endpoint in that expression resolves to the server's address on the container network, because it is
+        // evaluated for the Mongo Express container.
         //
         // Mongo Express 1.0.2 only honors `ME_CONFIG_MONGODB_URL` when `ME_CONFIG_MONGODB_SERVER` is unset, and it builds
         // its own URL without any options otherwise, so the individual server, port and credential variables must not be
@@ -758,39 +760,11 @@ public static class MongoDBBuilderExtensions
         // The image's entrypoint also parses this URL to wait for the server before starting Mongo Express. It strips the
         // scheme, then everything from the first '/', then everything up to the first '@', and treats the remainder as
         // `host:port`, e.g.:
-        //   mongodb://admin:p%40ss@mongo:27017/?authSource=admin&directConnection=true  ->  mongo:27017
-        // so the path separator must precede the query, and the credentials must be URI-escaped so that neither contains
-        // a raw '/' or '@'. See https://github.com/mongo-express/mongo-express-docker/blob/master/docker-entrypoint.sh
-        if (resource.PrimaryEndpoint.TargetPort is not int targetPort)
-        {
-            return;
-        }
-
-        var builder = new ReferenceExpressionBuilder();
-        builder.AppendLiteral("mongodb://");
-
-        if (resource.PasswordParameter is { } password)
-        {
-            if (resource.UserNameParameter is { } userName)
-            {
-                builder.Append($"{userName:uri}:{password:uri}@");
-            }
-            else
-            {
-                builder.Append($"{MongoDBServerResource.DefaultUserName:uri}:{password:uri}@");
-            }
-        }
-
-        builder.AppendLiteral($"{resource.Name}:{targetPort.ToString(CultureInfo.InvariantCulture)}/?");
-
-        if (resource.PasswordParameter is not null)
-        {
-            builder.Append($"authSource={MongoDBServerResource.DefaultAuthenticationDatabase:uri}&");
-        }
-
-        builder.AppendLiteral("directConnection=true");
-
-        context.EnvironmentVariables["ME_CONFIG_MONGODB_URL"] = builder.Build();
+        //   mongodb://admin:p%40ss@mongo.dev.internal:27017/?authSource=admin&...  ->  mongo.dev.internal:27017
+        // The connection string URI-escapes the credentials, and it puts a '/' before the query whenever the server has a
+        // password, which `AddMongoDB` always assigns.
+        // See https://github.com/mongo-express/mongo-express-docker/blob/master/docker-entrypoint.sh
+        context.EnvironmentVariables["ME_CONFIG_MONGODB_URL"] = resource.BuildConnectionString();
         context.EnvironmentVariables["ME_CONFIG_BASICAUTH"] = "false";
     }
 
