@@ -3,6 +3,7 @@
 
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Aspire.Cli.EndToEnd.Tests.Helpers;
 using Aspire.Cli.Resources;
@@ -25,18 +26,19 @@ namespace Aspire.Cli.EndToEnd.Tests;
 /// <c>ASPIRE_CLI_PACKAGES</c> hive override under a <c>stable</c> identity (the product fix that
 /// makes the override honored under any emulated channel name, not just <c>local</c>).
 ///
-/// This class is the <b>all-local stable</b> row of the AppHost-language × channel matrix, with one
-/// scaffolding test per AppHost language (C# and TypeScript) plus focused TypeScript coverage for
-/// package-scoped source composition. We keep the language tests separate because C# and TypeScript
-/// AppHosts scaffold through different code paths and have diverged in behavior before.
+/// This class contains the <b>all-local stable</b> row of the AppHost-language × channel matrix, with
+/// one scaffolding test per AppHost language (C# and TypeScript), plus focused TypeScript coverage for
+/// package-scoped source composition. The source-composition test also runs against the PR archive
+/// used by normal GitHub CI, so that regression coverage does not depend on the opt-in stable archive.
+/// We keep the language tests separate because C# and TypeScript AppHosts scaffold through different
+/// code paths and have diverged in behavior before.
 ///
 /// <para>
-/// <b>Gating / cost:</b> these tests only run when the CLI was installed from a local hive archive
-/// (<see cref="CliInstallMode.LocalHive"/>) <em>and</em> that build produced a stable-shaped package
-/// (no pre-release suffix). In default CI the CLI is installed from a pre-release
-/// <see cref="CliInstallMode.LocalArchive"/>, and a normal local hive build stamps a <c>-dev</c>
-/// version, so in both cases these tests skip and add zero CI cost. They activate only in the
-/// deliberate local workflow:
+/// <b>Gating / cost:</b> the two scaffolding tests only run when the CLI was installed from a local
+/// hive archive (<see cref="CliInstallMode.LocalHive"/>) and that build produced a stable-shaped
+/// package (no pre-release suffix). The package-scoped source-composition test additionally runs with
+/// the <see cref="CliInstallMode.LocalArchive"/> supplied by normal PR CI. The stable-release matrix
+/// activates in the deliberate local workflow:
 /// <code>
 /// ./localhive.sh --version 13.5.0 -o /tmp/aspire-localrelease -r linux-arm64 --archive
 /// ASPIRE_E2E_ARCHIVE=/tmp/aspire-localrelease.tar.gz \
@@ -181,27 +183,27 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
 
     /// <summary>
     /// Verifies that a package-scoped <c>aspire add --source</c> appends the selected feed instead of
-    /// replacing the future-stable identity feed. The explicit source contains only a third-party
-    /// integration package; its exact <c>Aspire.Hosting</c> dependency exists only in the local hive.
-    /// The hive is deliberately not registered in ambient NuGet configuration, so a cold restore can
-    /// succeed only when the CLI composes both invocation-scoped sources.
+    /// replacing the matching identity feed. The explicit source contains only a third-party
+    /// integration package; its exact <c>Aspire.Hosting</c> dependency exists only in the installed
+    /// identity hive. The hive is deliberately not registered in ambient NuGet configuration, so a
+    /// cold restore can succeed only when the CLI composes both invocation-scoped sources.
     /// </summary>
     [CaptureWorkspaceOnFailure]
     [Fact]
-    public async Task EmulatedLocalReleaseAppendsThirdPartySourceForTypeScriptRestore()
+    public async Task PackageScopedSourceAppendsIdentitySourceForTypeScriptRestore()
     {
         const string packageId = "CommunityToolkit.Aspire.Hosting.SourceAppendProbe";
         const string packageVersion = "1.0.0";
 
         var repoRoot = CliE2ETestHelpers.GetRepoRoot();
         var strategy = CliInstallStrategy.Detect(output.WriteLine);
-        var localStableVersion = RequireLocalStableArchiveOrSkip(repoRoot, strategy);
+        var restoreContext = RequirePackageSourceAppendArchiveOrSkip(repoRoot, strategy);
         var workspace = TemporaryWorkspace.Create(output);
         CreateThirdPartyIntegrationPackage(
             Path.Combine(workspace.WorkspaceRoot.FullName, "explicit-feed"),
             packageId,
             packageVersion,
-            localStableVersion);
+            restoreContext.Version);
 
         using var terminal = CliE2ETestHelpers.CreateDockerTestTerminal(
             repoRoot,
@@ -219,16 +221,23 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
             TestContext.Current.CancellationToken);
 
         await auto.PrepareDockerEnvironmentAsync(counter, workspace);
-        await InstallLocalHiveWithoutLocalChannelAsync(auto, counter);
-        await ApplyEmulatedLocalReleaseIdentityAsync(auto, counter, localStableVersion);
+        if (strategy.Mode == CliInstallMode.LocalHive)
+        {
+            await InstallLocalHiveWithoutLocalChannelAsync(auto, counter);
+            await ApplyEmulatedLocalReleaseIdentityAsync(auto, counter, restoreContext.Version);
+        }
+        else
+        {
+            await auto.InstallAspireCliAsync(strategy, counter);
+        }
 
         // Use an empty per-test package cache so a globally cached Aspire.Hosting cannot conceal
-        // loss of the identity-local source. The local hive must remain invocation-scoped: unlike
+        // loss of the identity-local source. The identity hive must remain invocation-scoped: unlike
         // the C# AppHost tests above, this polyglot path does not need it registered with NuGet.
         await auto.RunCommandAsync("export NUGET_PACKAGES=\"$PWD/.nuget-packages\"", counter);
         await auto.RunCommandAsync(
-            "if dotnet nuget list source | grep -F \"$HOME/.aspire/hives/local/packages\"; then " +
-            "echo 'The local hive must not be registered as an ambient source.' >&2; exit 1; fi",
+            $"if dotnet nuget list source | grep -F \"$HOME/.aspire/hives/{restoreContext.HiveLabel}/packages\"; then " +
+            "echo 'The identity hive must not be registered as an ambient source.' >&2; exit 1; fi",
             counter);
 
         await auto.TypeAsync("aspire init --language typescript --non-interactive --suppress-agent-init");
@@ -237,7 +246,19 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
         await auto.WaitForSuccessPromptAsync(counter);
 
         var configPath = Path.Combine(workspace.WorkspaceRoot.FullName, "aspire.config.json");
-        Assert.Equal(localStableVersion, GetSdkVersionFromAspireConfig(configPath));
+        Assert.Equal(restoreContext.Version, GetSdkVersionFromAspireConfig(configPath));
+
+        // PR archive creation persists its channel in aspire.config.json. Remove that project-level
+        // selection so the add operation must rediscover the matching source from the running CLI
+        // identity, reproducing the path that package-scoped --source previously short-circuited.
+        RemoveChannelFromAspireConfig(configPath);
+
+        // Initialization restores the polyglot SDK and therefore warms NUGET_PACKAGES. Remove those
+        // assets while leaving the workspace manifest in place so add must reject stale paths and
+        // perform a genuinely cold restore from the composed explicit and identity sources.
+        await auto.RunCommandAsync(
+            "rm -rf \"$NUGET_PACKAGES\" && mkdir -p \"$NUGET_PACKAGES\"",
+            counter);
 
         await auto.TypeAsync(
             $"aspire add {packageId} --version {packageVersion} --source explicit-feed --non-interactive");
@@ -248,15 +269,36 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
 
         var packageCacheId = packageId.ToLowerInvariant();
         var sourceMetadata = $".nuget-packages/{packageCacheId}/{packageVersion}/.nupkg.metadata";
-        var hostingMetadata = $".nuget-packages/aspire.hosting/{localStableVersion}/.nupkg.metadata";
+        var hostingMetadata = $".nuget-packages/aspire.hosting/{restoreContext.Version}/.nupkg.metadata";
         await auto.RunCommandAsync(
             $"test \"$(find explicit-feed -maxdepth 1 -name '*.nupkg' | wc -l)\" -eq 1 && " +
             $"test -f {sourceMetadata} && test -f {hostingMetadata} && " +
             $"python3 -c 'import json,os; " +
             $"selected=json.load(open(\"{sourceMetadata}\")); hosting=json.load(open(\"{hostingMetadata}\")); " +
             "assert os.path.realpath(selected[\"source\"]) == os.path.realpath(\"explicit-feed\"); " +
-            "assert os.path.realpath(hosting[\"source\"]) == os.path.realpath(os.path.expandvars(\"$HOME/.aspire/hives/local/packages\"))'",
+            $"assert os.path.realpath(hosting[\"source\"]) == os.path.realpath(os.path.expandvars(\"$HOME/.aspire/hives/{restoreContext.HiveLabel}/packages\"))'",
             counter);
+    }
+
+    private static PackageSourceAppendRestoreContext RequirePackageSourceAppendArchiveOrSkip(
+        string repoRoot,
+        CliInstallStrategy strategy)
+    {
+        Assert.SkipUnless(
+            strategy.Mode is CliInstallMode.LocalHive or CliInstallMode.LocalArchive,
+            $"Package-scoped source composition requires a local hive or PR archive; current mode is {strategy.Mode}.");
+
+        if (strategy.Mode == CliInstallMode.LocalArchive)
+        {
+            Assert.SkipWhen(
+                strategy.ExpectedVersion is null,
+                "The PR archive did not contain an Aspire.Cli pointer package from which to determine the identity version.");
+
+            return new(strategy.ExpectedVersion!, strategy.LocalArchiveHiveLabel);
+        }
+
+        var localStableVersion = RequireLocalStableArchiveOrSkip(repoRoot, strategy);
+        return new(localStableVersion, "local");
     }
 
     /// <summary>
@@ -529,4 +571,15 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
 
         throw new InvalidOperationException($"Could not find package '{packageId}' in {configPath}.");
     }
+
+    private static void RemoveChannelFromAspireConfig(string configPath)
+    {
+        var config = JsonNode.Parse(File.ReadAllText(configPath))?.AsObject()
+            ?? throw new InvalidOperationException($"Expected {configPath} to contain a JSON object.");
+
+        config.Remove("channel");
+        File.WriteAllText(configPath, config.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private sealed record PackageSourceAppendRestoreContext(string Version, string HiveLabel);
 }
