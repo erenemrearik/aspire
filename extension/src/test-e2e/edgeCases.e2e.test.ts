@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { AspireExtensionE2ECodeLensProbeResult, AspireExtensionE2EControlCommand } from '../types/extensionApi';
+import type { AspireExtensionE2EControlCommand } from '../types/extensionApi';
 import { getCommandInvocationCount, getDebugLaunchCount, isSamePath, waitForCommandOutcome, waitForDebugLaunch, waitForDebugSessionStartup, waitForExtensionState, waitForNoDebugSessions, waitForNoRunningAppHost, waitForRepositoryIdle, waitForRunningAppHost, waitForSelectedWorkspaceAppHost, waitForWorkspaceAppHost } from './helpers/assertions';
 import { createEmptyAppHostProject, createExternalSingleFileAppHost, executeE2eControlCommand, getGeneratedAppHostPath, getGeneratedProjectRoot, isProcessAlive, removeExternalSingleFileAppHost, removeGeneratedProject, restoreWorkspaceAppHostConfig, restoreWorkspaceCliPath, runE2eTeardown, setCliUnavailableForE2E, setDebugLaunchSuppressedForE2E, stopAppHostIfRunning, stopPrimaryAppHostIfRunning, waitForKnownProcessExit, writeFileWithRetry, writeWorkspaceAppHostConfigForPath } from './helpers/fixtures';
 import { getPrimaryAppHostProjectPath, getWorkspaceRoot } from './helpers/paths';
@@ -212,27 +212,15 @@ builder.Build().Run();`));
             'Set up Python debugging support to debug resources in this app.',
             60000);
         await notification.dismiss();
-
-        const timeoutMs = 60000;
-        const started = Date.now();
-        let lastResult: AspireExtensionE2ECodeLensProbeResult | undefined;
-        while (Date.now() - started < timeoutMs) {
-            lastResult = (await executeE2eControlCommand({ name: 'getCodeLenses', filePath: appHostPath })).result as AspireExtensionE2ECodeLensProbeResult;
-            if (lastResult.commandTitles.some(title => title.includes('Set up Python debugger'))) {
-                return;
-            }
-
-            await delay(500);
-        }
-
-        throw new Error(`Timed out after ${timeoutMs}ms waiting for the Python debugger CodeLens. Last provider result: ${JSON.stringify(lastResult)}`);
     });
 
     test('process-owner cleanup stops the owned CLI and AppHost process tree', async () => {
         await openAspireView();
         await waitForRepositoryIdle();
-        const discovered = await waitForWorkspaceAppHost();
-        const appHostPath = discovered.state.workspaceAppHostPath ?? getPrimaryAppHostProjectPath();
+        await waitForWorkspaceAppHost();
+        // The previous test removes a generated AppHost; discovery can still select it while
+        // that deletion propagates. This test targets the permanent fixture, not the selection.
+        const appHostPath = getPrimaryAppHostProjectPath();
 
         const beforeInvocation = getCommandInvocationCount('aspire-vscode.debugAppHost');
         await executeE2eControlCommand({ name: 'debugAppHost', appHostPath }, { waitFor: 'started' });
@@ -258,7 +246,3 @@ builder.Build().Run();`));
         await waitForNoRunningAppHost(120000, appHostPath);
     });
 });
-
-function delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}

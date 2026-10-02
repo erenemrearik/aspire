@@ -44,15 +44,13 @@ internal sealed class MockAuxiliaryBackchannelMonitor : IAuxiliaryBackchannelMon
 {
     public IEnumerable<IAppHostAuxiliaryBackchannel> Connections => [];
 
-    public IEnumerable<IAppHostAuxiliaryBackchannel> GetConnectionsByHash(string hash) => [];
-
     public string? SelectedAppHostPath { get; set; }
 
     public IAppHostAuxiliaryBackchannel? SelectedConnection => null;
 
-    public Task ScanAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task ScanAsync(CancellationToken cancellationToken = default, bool pruneOrphanedSockets = true, bool throwOnDiscoveryFailure = false) => Task.CompletedTask;
 
-    public async IAsyncEnumerable<IReadOnlyList<IAppHostAuxiliaryBackchannel>> WatchConnectionsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<IReadOnlyList<IAppHostAuxiliaryBackchannel>> WatchConnectionsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default, bool readOnly = false)
     {
         await ScanAsync(cancellationToken).ConfigureAwait(false);
         yield return [];
@@ -64,4 +62,3 @@ internal sealed class MockAuxiliaryBackchannelMonitor : IAuxiliaryBackchannelMon
         return [];
     }
 }
-

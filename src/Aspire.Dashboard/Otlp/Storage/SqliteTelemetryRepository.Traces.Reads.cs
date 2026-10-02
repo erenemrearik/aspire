@@ -98,6 +98,7 @@ public sealed partial class SqliteTelemetryRepository
             trace_summaries AS (
                 SELECT
                     pt.trace_id,
+                    pt.last_updated_timestamp_ticks,
                     pt.full_name,
                     pt.first_span_timestamp_ticks,
                     pt.duration_ticks,
@@ -116,6 +117,7 @@ public sealed partial class SqliteTelemetryRepository
                 a.MaxDurationTicks,
                 (SELECT COUNT(*) FROM telemetry_traces) >= @MaxTraceCount AS IsFull,
                 ts.trace_id AS TraceId,
+                ts.last_updated_timestamp_ticks AS LastUpdatedTimestampTicks,
                 ts.full_name AS FullName,
                 ts.first_span_timestamp_ticks AS StartTimeTicks,
                 ts.duration_ticks AS DurationTicks,
@@ -145,6 +147,7 @@ public sealed partial class SqliteTelemetryRepository
                 return new TraceSummary
                 {
                     TraceId = trace.TraceId!,
+                    LastUpdatedTimestampTicks = trace.LastUpdatedTimestampTicks!.Value,
                     FullName = trace.FullName!,
                     StartTime = new DateTime(trace.StartTimeTicks!.Value, DateTimeKind.Utc),
                     Duration = TimeSpan.FromTicks(trace.DurationTicks!.Value),
@@ -373,6 +376,11 @@ public sealed partial class SqliteTelemetryRepository
         {
             var sourcePredicate = BuildStringPredicate("r.resource_name", condition, parameterName);
             var peerPredicate = BuildStringPredicate("pr.resource_name", condition, parameterName);
+            if (condition is FilterCondition.NotEqual or FilterCondition.NotContains)
+            {
+                return $"({sourcePredicate} AND (pr.resource_id IS NULL OR {peerPredicate}))";
+            }
+
             return $"({sourcePredicate} OR (pr.resource_id IS NOT NULL AND {peerPredicate}))";
         }
 
@@ -421,6 +429,19 @@ public sealed partial class SqliteTelemetryRepository
             WHERE 1 = 1
             """);
         var parameters = new DynamicParameters();
+        if (context.SpanIdentities is { Count: > 0 })
+        {
+            var identityPredicates = new List<string>(context.SpanIdentities.Count);
+            for (var index = 0; index < context.SpanIdentities.Count; index++)
+            {
+                parameters.Add($"SpanIdentityTraceId{index}", context.SpanIdentities[index].TraceId);
+                parameters.Add($"SpanIdentitySpanId{index}", context.SpanIdentities[index].SpanId);
+                identityPredicates.Add($"(s.trace_id = @SpanIdentityTraceId{index} AND s.span_id = @SpanIdentitySpanId{index})");
+            }
+            sql.Append(" AND (");
+            sql.AppendJoin(" OR ", identityPredicates);
+            sql.Append(')');
+        }
         if (context.ResourceKeys.Count > 0)
         {
             var predicates = new List<string>(context.ResourceKeys.Count);
@@ -464,6 +485,8 @@ public sealed partial class SqliteTelemetryRepository
         {
             if (filter is not FieldTelemetryFilter fieldFilter)
             {
+                sql.Append(" AND ");
+                sql.Append(BuildSpanTypePredicate(filter, parameters, ref filterIndex));
                 continue;
             }
             if (fieldFilter.Field == KnownTraceFields.DurationField)
@@ -512,6 +535,8 @@ public sealed partial class SqliteTelemetryRepository
                         s.trace_id LIKE @{parameterName} ESCAPE '!' OR
                         sc.scope_name LIKE @{parameterName} ESCAPE '!' OR
                         r.resource_name LIKE @{parameterName} ESCAPE '!' OR
+                        COALESCE(pr.resource_name, '') LIKE @{parameterName} ESCAPE '!' OR
+                        s.display_summary LIKE @{parameterName} ESCAPE '!' OR
                         ss.status_name LIKE @{parameterName} ESCAPE '!' OR
                         sk.kind_name LIKE @{parameterName} ESCAPE '!' OR
                         COALESCE(s.status_message, '') LIKE @{parameterName} ESCAPE '!' OR
@@ -522,6 +547,15 @@ public sealed partial class SqliteTelemetryRepository
             }
         }
         return new TraceQuery(sql.ToString(), parameters);
+    }
+
+    private HashSet<(string TraceId, string SpanId)> GetMatchingSpanIdentitiesFromDatabase(GetSpansRequest context)
+    {
+        using var connection = _database.OpenConnection();
+        var query = BuildSpanQuery(context);
+        return connection.Query<SpanIdentityRecord>($"SELECT s.trace_id AS TraceId, s.span_id AS SpanId {query.FromAndWhere};", query.Parameters)
+            .Select(identity => (identity.TraceId, identity.SpanId))
+            .ToHashSet();
     }
 
     private List<string> GetTracePropertyKeysFromDatabase(ResourceKey? resourceKey, CancellationToken cancellationToken)
@@ -601,13 +635,15 @@ public sealed partial class SqliteTelemetryRepository
                 FROM telemetry_span_attributes
                 WHERE attribute_key = @AttributeName COLLATE NOCASE
                 GROUP BY attribute_value;
-                """, new { AttributeName = attributeName })
+                """, attributeName)
         };
         return values.ToDictionary(record => record.FieldValue!, record => record.ValueCount, StringComparers.OtlpAttribute);
 
-        IEnumerable<FieldValueRecord> Query(string sql, object? parameters = null)
+        IEnumerable<FieldValueRecord> Query(string sql, string? attributeName = null)
         {
-            return connection.Query<FieldValueRecord>(sql, parameters);
+            return attributeName is null
+                ? connection.Query<FieldValueRecord>(sql)
+                : connection.Query<FieldValueRecord>(sql, new { AttributeName = attributeName });
         }
 
         IEnumerable<FieldValueRecord> QueryFieldValues(string expression, string table)
@@ -808,24 +844,25 @@ public sealed partial class SqliteTelemetryRepository
 
     private sealed record TraceQuery(string FromAndWhere, DynamicParameters Parameters);
 
-    private sealed class TraceAggregateRecord
+    internal sealed class TraceAggregateRecord
     {
         public required int TotalItemCount { get; init; }
         public required long MaxDurationTicks { get; init; }
     }
 
-    private sealed class TraceSummaryRecord
+    internal sealed class TraceSummaryRecord
     {
         public required string TraceId { get; init; }
         public required long LastUpdatedTimestampTicks { get; init; }
     }
 
-    private sealed class TracePageSummaryRecord
+    internal sealed class TracePageSummaryRecord
     {
         public required int TotalItemCount { get; init; }
         public required long MaxDurationTicks { get; init; }
         public required bool IsFull { get; init; }
         public string? TraceId { get; init; }
+        public long? LastUpdatedTimestampTicks { get; init; }
         public string? FullName { get; init; }
         public long? StartTimeTicks { get; init; }
         public long? DurationTicks { get; init; }
@@ -841,29 +878,29 @@ public sealed partial class SqliteTelemetryRepository
         public int? ErroredSpans { get; init; }
     }
 
-    private sealed class SpanIdentityRecord
+    internal sealed class SpanIdentityRecord
     {
         public required string TraceId { get; init; }
         public required string SpanId { get; init; }
     }
 
-    private sealed class TraceOwnedAttributeRecord : AttributeRecord
+    internal sealed class TraceOwnedAttributeRecord : AttributeRecord
     {
         public required string TraceId { get; init; }
         public required string OwnerId { get; init; }
     }
 
-    private sealed class TextOwnedAttributeRecord : AttributeRecord
+    internal sealed class TextOwnedAttributeRecord : AttributeRecord
     {
         public required string OwnerId { get; init; }
     }
 
-    private sealed class LongOwnedAttributeRecord : AttributeRecord
+    internal sealed class LongOwnedAttributeRecord : AttributeRecord
     {
         public required long OwnerId { get; init; }
     }
 
-    private sealed class SpanEventRecord
+    internal sealed class SpanEventRecord
     {
         public required string TraceId { get; init; }
         public required string EventId { get; init; }
@@ -872,7 +909,7 @@ public sealed partial class SqliteTelemetryRepository
         public required long EventTimeTicks { get; init; }
     }
 
-    private sealed class SpanLinkRecord
+    internal sealed class SpanLinkRecord
     {
         public required long LinkId { get; init; }
         public required string SourceTraceId { get; init; }
@@ -882,7 +919,7 @@ public sealed partial class SqliteTelemetryRepository
         public required string TraceState { get; init; }
     }
 
-    private sealed class SpanRecord
+    internal sealed class SpanRecord
     {
         public required string TraceId { get; init; }
         public required string SpanId { get; init; }
