@@ -112,10 +112,8 @@ internal static class ResourceViewModelExtensions
     /// Tries to get the per-replica terminal info: the stable replica index and the
     /// total replica count for the parent resource. Both values are stamped onto
     /// each replica snapshot by the AppHost when the resource has
-    /// <c>WithTerminal()</c> applied. The pair is sufficient for the dashboard to
-    /// build a <c>?resource=&lt;name&gt;&amp;replica=&lt;index&gt;</c> URL that the
-    /// terminal WebSocket proxy can resolve to a per-replica HMP v1 producer
-    /// socket without exposing the socket path to the browser.
+    /// <c>WithTerminal()</c> applied. These values describe the replica layout;
+    /// terminal connections identify the resource by its unique instance name.
     /// </summary>
     public static bool TryGetTerminalReplicaInfo(this ResourceViewModel resource, out int replicaIndex, out int replicaCount)
     {

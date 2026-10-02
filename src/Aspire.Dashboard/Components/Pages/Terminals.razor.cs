@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Aspire.Dashboard.Components.Layout;
 using Aspire.Dashboard.Model;
@@ -17,7 +18,8 @@ public sealed partial class Terminals : ComponentBase, IAsyncDisposable, ICompon
     IPageWithSessionAndUrlState<Terminals.TerminalsViewModel, Terminals.TerminalsPageState>
 {
     private readonly CancellationTokenSource _cts = new();
-    private readonly Dictionary<string, ResourceViewModel> _resourceByName = new(StringComparers.ResourceName);
+    // URL restoration can read resource names off the renderer while the watch updates this map.
+    private readonly ConcurrentDictionary<string, ResourceViewModel> _resourceByName = new(StringComparers.ResourceName);
     private ImmutableList<SelectViewModel<ResourceTypeDetails>>? _resources;
     private readonly List<CommandViewModel> _highlightedCommands = [];
     private readonly List<MenuButtonItem> _resourceMenuItems = [];
@@ -143,7 +145,7 @@ public sealed partial class Terminals : ComponentBase, IAsyncDisposable, ICompon
                     {
                         if (changeType == ResourceViewModelChangeType.Delete)
                         {
-                            _resourceByName.Remove(resource.Name);
+                            _resourceByName.TryRemove(resource.Name, out _);
                         }
                         else
                         {
@@ -209,11 +211,16 @@ public sealed partial class Terminals : ComponentBase, IAsyncDisposable, ICompon
     public string GetUrlFromSerializableViewModel(TerminalsPageState serializable)
     {
         var resource = FindResource(serializable.SelectedResource);
-        return DashboardUrls.TerminalsUrl(resource?.Id?.InstanceId);
+        return DashboardUrls.TerminalsUrl(GetResourceName(resource));
     }
 
     public TerminalsPageState ConvertViewModelToSerializable()
-        => new(PageViewModel.SelectedResource?.Id?.InstanceId);
+        => new(GetResourceName(PageViewModel.SelectedResource));
+
+    private string? GetResourceName(SelectViewModel<ResourceTypeDetails>? selectedResource)
+        => selectedResource?.Id?.InstanceId is { } name && _resourceByName.TryGetValue(name, out var resource)
+            ? ResourceViewModel.GetResourceName(resource, _resourceByName)
+            : null;
 
     private ResourceViewModel? GetSelectedResource()
         => PageViewModel.SelectedResource?.Id?.InstanceId is { } name

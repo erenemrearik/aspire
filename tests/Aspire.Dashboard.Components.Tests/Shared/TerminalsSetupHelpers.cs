@@ -18,7 +18,6 @@ internal static class TerminalsSetupHelpers
         FluentUISetupHelpers.SetupFluentDialogProvider(context);
         FluentUISetupHelpers.SetupFluentDivider(context);
         FluentUISetupHelpers.SetupFluentInputLabel(context);
-        context.JSInterop.SetupVoid("Microsoft.FluentUI.Blazor.Components.Select.Initialize", _ => true).SetVoidResult();
         FluentUISetupHelpers.SetupFluentKeyCode(context);
         FluentUISetupHelpers.SetupFluentMenu(context);
         FluentUISetupHelpers.SetupFluentAnchor(context);

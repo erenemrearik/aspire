@@ -63,9 +63,10 @@
             }
         </ToolbarSection>
         <MainSection>
-            @if (GetSelectedResource() is { } resource && resource.TryGetTerminalReplicaInfo(out var replicaIndex, out _))
+            @if (GetSelectedResource() is { } resource && resource.HasTerminal())
             {
-                <TerminalView ResourceName="@resource.DisplayName" ReplicaIndex="@replicaIndex" ShowOpenInWindow="true"
+                <TerminalView ResourceName="@resource.Name" ShowOpenInWindow="true"
+                              WindowResourceName="@GetResourceName(PageViewModel.SelectedResource)"
                               ResourceIcon="@ResourceIconHelpers.GetIconForResource(IconResolver, resource, IconSize.Size16)" />
             }
             else if (_resources is not null && !_redirected)

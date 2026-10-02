@@ -19,7 +19,7 @@ public sealed class TerminalTests(TerminalTests.TerminalDashboardServerFixture f
     : PlaywrightTestsBase<TerminalTests.TerminalDashboardServerFixture>(fixture)
 {
     private const string ResourceName = "terminal-resource";
-    private const string Endpoint = "/api/terminal?resource=terminal-resource&replica=0";
+    private const string Endpoint = "/api/terminal?resource=terminal-resource";
 
     [Theory]
     [InlineData(false, false)]

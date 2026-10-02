@@ -2,9 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Aspire.Dashboard.Components.Controls;
+using Aspire.Dashboard.Model;
 using Aspire.DashboardService.Proto.V1;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Localization;
+using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.JSInterop;
 
 namespace Aspire.Dashboard.Components.Pages;
@@ -28,9 +30,11 @@ public sealed partial class TerminalWindow : ComponentBase, IAsyncDisposable
     private string? _endpoint;
     private string _title = string.Empty;
     private TerminalToolbarState _terminalState = new();
+    private Icon? _resourceIcon;
+    private string? _resourceInstanceName;
     private bool _ended;
     private bool _disposed;
-    private (string? TerminalId, string? ResourceName, int ReplicaIndex, string? WindowOwner, string? WindowGeneration)? _routeIdentity;
+    private (string? TerminalId, string? ResourceName, string? WindowOwner, string? WindowGeneration)? _routeIdentity;
     private int _watchGeneration;
     private CancellationTokenSource? _watchCts;
     // Also tracks in-flight cancellation so overlapping route changes and disposal join the same cleanup.
@@ -49,16 +53,10 @@ public sealed partial class TerminalWindow : ComponentBase, IAsyncDisposable
     public string? TerminalId { get; set; }
 
     /// <summary>
-    /// Gets or sets the name of the resource whose terminal to attach to.
+    /// Gets or sets the resource name used by the Terminals page: a singleton display name or replica instance name.
     /// </summary>
     [Parameter]
     public string? ResourceName { get; set; }
-
-    /// <summary>
-    /// Gets or sets the 0-based replica index of the resource terminal to attach to.
-    /// </summary>
-    [Parameter]
-    public int ReplicaIndex { get; set; }
 
     /// <summary>Gets or sets the font size carried from the terminal's originating surface.</summary>
     [SupplyParameterFromQuery(Name = "fontSize")]
@@ -82,6 +80,9 @@ public sealed partial class TerminalWindow : ComponentBase, IAsyncDisposable
     public required IDashboardClient DashboardClient { get; init; }
 
     [Inject]
+    public required IconResolver IconResolver { get; init; }
+
+    [Inject]
     public required IStringLocalizer<Dashboard.Resources.TerminalStrings> Loc { get; init; }
 
     [Inject]
@@ -91,8 +92,7 @@ public sealed partial class TerminalWindow : ComponentBase, IAsyncDisposable
     {
         var terminalId = TerminalId is { Length: > 0 } ? TerminalId : null;
         var resourceName = terminalId is null && ResourceName is { Length: > 0 } ? ResourceName : null;
-        var replicaIndex = resourceName is not null ? ReplicaIndex : 0;
-        var routeIdentity = (terminalId, resourceName, replicaIndex, WindowOwner, WindowGeneration);
+        var routeIdentity = (terminalId, resourceName, WindowOwner, WindowGeneration);
         if (_disposed || _routeIdentity == routeIdentity)
         {
             return;
@@ -100,14 +100,36 @@ public sealed partial class TerminalWindow : ComponentBase, IAsyncDisposable
 
         _routeIdentity = routeIdentity;
         _terminalState = new();
-        var generation = ++_watchGeneration;
+        _resourceIcon = null;
+        _resourceInstanceName = null;
         _ended = false;
+        ResourceViewModel? resource = null;
+        if (resourceName is not null && DashboardClient.IsEnabled)
+        {
+            resource = DashboardClient.GetResource(resourceName);
+            if (resource is null)
+            {
+                // Singleton URLs retain the display name (e.g. "shell") across restarts,
+                // while the generated instance name (e.g. "shell-abc123") can change.
+                var resources = DashboardClient.GetResources().ToDictionary(r => r.Name, StringComparers.ResourceName);
+                ResourceViewModel.TryGetResourceByName(resourceName, resources, out resource);
+            }
+        }
+        if (resource is not null && resource.HasTerminal())
+        {
+            _resourceInstanceName = resource.Name;
+            _resourceIcon = ResourceIconHelpers.GetIconForResource(IconResolver, resource, IconSize.Size16);
+        }
+        else if (resourceName is not null)
+        {
+            _ended = true;
+            Logger.LogWarning("Could not resolve terminal resource {ResourceName}.", resourceName);
+        }
+        var generation = ++_watchGeneration;
         _windowTrackingFailed = false;
         _windowReady = terminalId is null || (WindowOwner is null && WindowGeneration is null);
         _endpoint = terminalId is not null ? $"api/apphost-terminal?terminalId={Uri.EscapeDataString(terminalId)}" : null;
-        _title = terminalId ?? (resourceName is not null
-            ? replicaIndex > 0 ? $"{resourceName} #{replicaIndex}" : resourceName
-            : string.Empty);
+        _title = terminalId ?? resourceName ?? string.Empty;
 
         await StopWindowTrackingAsync(release: true);
         if (_disposed || generation != _watchGeneration)

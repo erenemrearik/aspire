@@ -267,21 +267,21 @@ emitted by the dashboard service carries four properties:
 The consumer UDS path is marked `IsSensitive=true` so the dashboard UI masks
 the value in the property list. The path still rides the gRPC stream because
 the dashboard's WebSocket proxy needs it server-side to resolve
-`?resource=&replica=` query parameters into a real socket; the path is never
+the `?resource=<instance-name>` query parameter into a real socket; the path is never
 echoed back to the browser.
 
 ## Dashboard `/api/terminal` WebSocket endpoint
 
 Authenticated (`RequireAuthorization(FrontendAuthorizationDefaults.PolicyName)`)
-endpoint at `/api/terminal?resource=<displayName>&replica=<index>`.
+endpoint at `/api/terminal?resource=<instance-name>`. The resource parameter
+matches `ResourceViewModel.Name`, including the generated instance suffix.
 
 `TerminalWebSocketProxy` resolves the connection entirely server-side:
 
 1. The same-origin WebSocket gate rejects missing or cross-origin `Origin`
    headers before resolving a resource, in addition to frontend authorization.
-2. `ITerminalConnectionResolver.ConnectAsync(resourceName, replicaIndex, ct)`
-   walks `IDashboardClient.GetResources()`, matches by `DisplayName` +
-   `TryGetTerminalReplicaInfo`, and connects via
+2. `ITerminalConnectionResolver.ConnectAsync(resourceName, ct)`
+   looks up `IDashboardClient.GetResource(resourceName)` and connects via
    `Hmp1Transports.ConnectUnixSocket(consumerUdsPath, ct)`.
 3. The handler connects a public `Hmp1WorkloadAdapter`, attaches a per-view
    terminal and `Hwt1PresentationAdapter`, and runs the two transport pumps.
@@ -399,7 +399,10 @@ selected resource from browser session storage, otherwise defaulting to
 resource, the page displays a terminal icon and "Select a resource to view its
 terminal"; on mobile, the message opens the resource selector. An explicit
 `/terminals/resource/{resourceName}` URL takes precedence. A selection that is no
-longer available falls back to **(None)**.
+longer available falls back to **(None)**. URLs and saved selections use the
+resource display name for a singleton and the instance name for replicas,
+matching Console logs. Existing singleton links and saved selections containing
+an instance name are still accepted and canonicalized to the display name.
 
 The selector follows Console logs for ordering, state labels and the shared
 Show hidden resources setting. Waiting and stopped terminal resources remain
@@ -464,7 +467,19 @@ resize the terminal or move the footer controls.
 
 Outside the dock, terminal headers keep a fixed icon slot before the workload title. Active progress
 uses a ring with the percentage in its tooltip, not inline text; otherwise the
-resource page shows its resource icon, and other surfaces use a terminal icon.
+resource page and detached resource windows show the resource icon when its
+metadata is available, and other surfaces use a terminal icon. Detached windows
+look up the matching resource replica in the Dashboard client's current snapshot
+once when opened; they do not carry icons in their URLs or subscribe to resource
+updates. Their route is `/terminal-window/resource/{resourceName}`, using the
+same canonical name as the Terminals page: a stable display name for a singleton
+or an instance name for replicas and display-name collisions. The window key uses
+that same name. Reloading a singleton window after a dashboard restart resolves
+the current instance even if its generated name has changed.
+The window uses resource metadata for the display name and icon; the WebSocket
+connection still uses the resolved instance name, without a numeric replica index.
+An unavailable resource or ambiguous display name shows the ended-terminal
+message instead of attaching to a different replica.
 Error and warning progress retain their accessible labels and theme colors.
 Working directories shorten in the middle when space is limited; UNC paths keep
 their server and share together or show no path if even the root cannot fit.

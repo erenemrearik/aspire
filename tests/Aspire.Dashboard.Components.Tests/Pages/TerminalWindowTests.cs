@@ -5,24 +5,247 @@ using System.Threading.Channels;
 using Aspire.Dashboard.Components.Controls;
 using Aspire.Dashboard.Components.Pages;
 using Aspire.Dashboard.Components.Tests.Shared;
+using Aspire.Dashboard.Model;
 using Aspire.Dashboard.Tests.Shared;
 using Aspire.DashboardService.Proto.V1;
+using Aspire.Tests.Shared.DashboardModel;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.InternalTesting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.JSInterop;
 using Xunit;
+using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
+using IconVariant = Microsoft.FluentUI.AspNetCore.Components.IconVariant;
 
 namespace Aspire.Dashboard.Components.Tests.Pages;
 
 public class TerminalWindowTests : DashboardTestContext
 {
+    [Theory]
+    [InlineData(null, IconVariant.Filled, "Box")]
+    [InlineData("Database", IconVariant.Regular, "Database")]
+    [InlineData("Database", IconVariant.Filled, "Database")]
+    [InlineData("UnknownIcon", IconVariant.Filled, "Box")]
+    public void ResourceIcon_LoadsSelectedReplicaOnceWithoutSubscription(string? iconName, IconVariant iconVariant, string expectedIconName)
+    {
+        var resource = ModelTestHelpers.CreateResource("shell-second", displayName: "shell",
+            properties: TerminalSetupHelpers.CreateTerminalResource("shell-second", replicaIndex: 1, replicaCount: 2).Properties.ToDictionary(),
+            iconName: iconName, iconVariant: iconVariant);
+        var client = new TestDashboardClient(isEnabled: true, initialResources:
+        [
+            TerminalSetupHelpers.CreateTerminalResource("shell-first", replicaIndex: 0, replicaCount: 2, displayName: "shell"),
+            resource
+        ]);
+        TerminalSetupHelpers.SetupTerminalComponents(this, client);
+        var cut = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, "shell-second"));
+
+        AssertResourceIcon(cut, expectedIconName, iconVariant);
+        Assert.Equal("shell-second", cut.FindComponent<TerminalView>().Instance.ResourceName);
+        Assert.Equal(1, client.GetResourceCallCount);
+        Assert.Equal(0, client.GetResourcesCallCount);
+        cut.Render();
+        Assert.Equal(1, client.GetResourceCallCount);
+        Assert.Equal(0, client.ResourceSubscriptionCount);
+    }
+
+    [Theory]
+    [InlineData("shell-single")]
+    [InlineData("shell-first")]
+    [InlineData("shell-second")]
+    public void ResourceName_UsesInstanceIdForTerminalConnection(string resourceName)
+    {
+        var client = new TestDashboardClient(isEnabled: true, initialResources:
+        [
+            TerminalSetupHelpers.CreateTerminalResource("shell-single", displayName: "shell"),
+            TerminalSetupHelpers.CreateTerminalResource("shell-first", displayName: "shell", replicaCount: 8),
+            TerminalSetupHelpers.CreateTerminalResource("shell-second", displayName: "shell", replicaIndex: 7, replicaCount: 8)
+        ]);
+        TerminalSetupHelpers.SetupTerminalComponents(this, client);
+        var cut = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, resourceName));
+
+        Assert.Equal(resourceName, cut.FindComponent<TerminalView>().Instance.ResourceName);
+        TerminalSetupHelpers.AssertSingleTerminalConnection(this,
+            $"ws://localhost/api/terminal?resource={resourceName}");
+        Assert.Equal(1, client.GetResourceCallCount);
+        Assert.Equal(0, client.GetResourcesCallCount);
+        Assert.Equal(0, client.ResourceSubscriptionCount);
+    }
+
+    [Fact]
+    public void ResourceWithoutReplicaMetadata_ConnectsByInstanceName()
+    {
+        var resource = TerminalSetupHelpers.CreateTerminalResource("shell-instance", displayName: "shell");
+        resource = ModelTestHelpers.CreateResource("shell-instance", displayName: "shell",
+            properties: resource.Properties
+                .Where(p => p.Key is not KnownProperties.Terminal.ReplicaIndex and not KnownProperties.Terminal.ReplicaCount)
+                .ToDictionary());
+        var client = new TestDashboardClient(isEnabled: true, initialResources: [resource]);
+        TerminalSetupHelpers.SetupTerminalComponents(this, client);
+        var cut = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, "shell-instance"));
+
+        Assert.Equal("shell-instance", cut.FindComponent<TerminalView>().Instance.ResourceName);
+        Assert.Equal("shell-instance", cut.Find(".terminal-title").TextContent);
+        TerminalSetupHelpers.AssertSingleTerminalConnection(this, "ws://localhost/api/terminal?resource=shell-instance");
+        Assert.Equal(1, client.GetResourceCallCount);
+        Assert.Equal(0, client.GetResourcesCallCount);
+        Assert.Equal(0, client.ResourceSubscriptionCount);
+    }
+
+    [Theory]
+    [InlineData("shell")]
+    [InlineData("shell #1/?%+")]
+    public void SingletonDisplayName_ResolvesCurrentInstanceOnceWithoutSubscription(string displayName)
+    {
+        var resource = TerminalSetupHelpers.CreateTerminalResource("shell-instance", displayName: displayName);
+        var client = new TestDashboardClient(isEnabled: true, initialResources: [resource]);
+        TerminalSetupHelpers.SetupTerminalComponents(this, client);
+        var cut = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, displayName));
+
+        Assert.Equal("shell-instance", cut.FindComponent<TerminalView>().Instance.ResourceName);
+        Assert.Equal(displayName, cut.Find(".terminal-title").TextContent);
+        TerminalSetupHelpers.AssertSingleTerminalConnection(this, "ws://localhost/api/terminal?resource=shell-instance");
+        Assert.Equal(1, client.GetResourceCallCount);
+        Assert.Equal(1, client.GetResourcesCallCount);
+        cut.Render();
+        Assert.Equal(1, client.GetResourceCallCount);
+        Assert.Equal(1, client.GetResourcesCallCount);
+        Assert.Equal(0, client.ResourceSubscriptionCount);
+    }
+
+    [Fact]
+    public void SingletonDisplayName_ReloadResolvesNewInstanceAfterRestart()
+    {
+        var resources = new List<ResourceViewModel>
+        {
+            TerminalSetupHelpers.CreateTerminalResource("shell-before", displayName: "shell")
+        };
+        var client = new TestDashboardClient(isEnabled: true, initialResources: resources);
+        TerminalSetupHelpers.SetupTerminalComponents(this, client);
+        var navigation = Services.GetRequiredService<NavigationManager>();
+        navigation.NavigateTo("terminal-window/resource/shell");
+        var cut = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, "shell"));
+        Assert.Equal("shell-before", cut.FindComponent<TerminalView>().Instance.ResourceName);
+
+        resources[0] = TerminalSetupHelpers.CreateTerminalResource("shell-after", displayName: "shell");
+        cut.Render();
+        Assert.Equal("shell-before", cut.FindComponent<TerminalView>().Instance.ResourceName);
+        cut.Dispose();
+        var reloaded = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, "shell"));
+
+        Assert.Equal("http://localhost/terminal-window/resource/shell", navigation.Uri);
+        Assert.Equal("shell-after", reloaded.FindComponent<TerminalView>().Instance.ResourceName);
+        Assert.Collection(JSInterop.Invocations.Where(i => i.Identifier == "initTerminal"),
+            i => Assert.Equal($"ws://localhost/api/terminal?resource=shell-before&viewId={Assert.IsType<TerminalViewOptions>(i.Arguments[3]).ViewId}", i.Arguments[1]),
+            i => Assert.Equal($"ws://localhost/api/terminal?resource=shell-after&viewId={Assert.IsType<TerminalViewOptions>(i.Arguments[3]).ViewId}", i.Arguments[1]));
+        Assert.Equal(2, client.GetResourceCallCount);
+        Assert.Equal(2, client.GetResourcesCallCount);
+        Assert.Equal(0, client.ResourceSubscriptionCount);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AmbiguousDisplayName_DoesNotAttachToTerminal(bool otherHasTerminal)
+    {
+        var client = new TestDashboardClient(isEnabled: true, initialResources:
+        [
+            TerminalSetupHelpers.CreateTerminalResource("shell-first", displayName: "shell"),
+            otherHasTerminal
+                ? TerminalSetupHelpers.CreateTerminalResource("shell-second", displayName: "shell")
+                : ModelTestHelpers.CreateResource("shell-second", displayName: "shell")
+        ]);
+        TerminalSetupHelpers.SetupTerminalComponents(this, client);
+        var cut = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, "shell"));
+
+        Assert.Equal(Resources.TerminalStrings.TerminalWindowEnded, cut.Find(".terminal-window-ended").TextContent);
+        Assert.Empty(cut.FindComponents<TerminalView>());
+        Assert.Equal([], JSInterop.Invocations.Where(i => i.Identifier == "initTerminal"));
+        Assert.Equal(1, client.GetResourcesCallCount);
+        Assert.Equal(0, client.ResourceSubscriptionCount);
+    }
+
+    [Theory]
+    [InlineData("shell-deleted")]
+    [InlineData("shell-unavailable")]
+    public void UnavailableInstanceId_DoesNotAttachToAnotherReplica(string resourceName)
+    {
+        TerminalSetupHelpers.SetupTerminalComponents(this, new TestDashboardClient(isEnabled: true,
+            initialResources:
+            [
+                TerminalSetupHelpers.CreateTerminalResource("shell-first", displayName: "shell"),
+                ModelTestHelpers.CreateResource("shell-unavailable")
+            ]));
+        var cut = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, resourceName));
+
+        Assert.Equal(Resources.TerminalStrings.TerminalWindowEnded, cut.Find(".terminal-window-ended").TextContent);
+        Assert.Empty(cut.FindComponents<TerminalView>());
+        Assert.Equal([], JSInterop.Invocations.Where(i => i.Identifier == "initTerminal"));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void AppHostOrDisabledClient_DoesNotReadResources(bool appHost, bool isEnabled)
+    {
+        var terminals = Channel.CreateUnbounded<WatchTerminalsUpdate>();
+        var client = new TestDashboardClient(isEnabled: isEnabled, terminalChannelProvider: () => terminals,
+            initialResources: [TerminalSetupHelpers.CreateTerminalResource("shell")]);
+        TerminalSetupHelpers.SetupTerminalComponents(this, client);
+        var cut = Render<TerminalWindow>(builder => builder
+            .Add(p => p.TerminalId, appHost ? "terminal" : null)
+            .Add(p => p.ResourceName, "shell"));
+
+        if (appHost)
+        {
+            Assert.IsType<Icons.Regular.Size20.WindowConsole>(
+                cut.FindComponent<TerminalTitle>().FindComponent<FluentIcon<Icon>>().Instance.Value);
+        }
+        else
+        {
+            Assert.Equal(Resources.TerminalStrings.TerminalWindowEnded, cut.Find(".terminal-window-ended").TextContent);
+            Assert.Empty(cut.FindComponents<TerminalView>());
+        }
+        Assert.Equal(0, client.GetResourceCallCount);
+        Assert.Equal(0, client.GetResourcesCallCount);
+        Assert.Equal(0, client.ResourceSubscriptionCount);
+    }
+
+    [Fact]
+    public void ResourceIcon_RemainsSnapshotUntilReloadAndResetsOnRouteChange()
+    {
+        var resources = new List<ResourceViewModel> { TerminalSetupHelpers.CreateTerminalResource("shell") };
+        var client = new TestDashboardClient(isEnabled: true, initialResources: resources);
+        TerminalSetupHelpers.SetupTerminalComponents(this, client);
+        var cut = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, "shell"));
+        AssertResourceIcon(cut, "Box", IconVariant.Filled);
+        Assert.Equal(1, client.GetResourceCallCount);
+
+        resources[0] = ModelTestHelpers.CreateResource("shell",
+            properties: resources[0].Properties.ToDictionary(), iconName: "Database", iconVariant: IconVariant.Regular);
+        cut.Render();
+        AssertResourceIcon(cut, "Box", IconVariant.Filled);
+        Assert.Equal(1, client.GetResourceCallCount);
+
+        var reloaded = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, "shell"));
+        AssertResourceIcon(reloaded, "Database", IconVariant.Regular);
+        Assert.Equal(2, client.GetResourceCallCount);
+
+        cut.Render(builder => builder.Add(p => p.ResourceName, "missing"));
+        Assert.Equal(Resources.TerminalStrings.TerminalWindowEnded, cut.Find(".terminal-window-ended").TextContent);
+        Assert.Empty(cut.FindComponents<TerminalView>());
+        Assert.Equal(3, client.GetResourceCallCount);
+        Assert.Equal(1, client.GetResourcesCallCount);
+        Assert.Equal(0, client.ResourceSubscriptionCount);
+    }
+
     [Fact]
     public async Task WorkloadMetadata_UpdatesWindowTitleAndTitlebar()
     {
-        TerminalSetupHelpers.SetupTerminalComponents(this, new TestDashboardClient());
+        TerminalSetupHelpers.SetupTerminalComponents(this, new TestDashboardClient(isEnabled: true,
+            initialResources: [TerminalSetupHelpers.CreateTerminalResource("shell")]));
         var head = Render<HeadOutlet>();
         var cut = Render<TerminalWindow>(builder => builder.Add(p => p.ResourceName, "shell"));
         var terminal = cut.FindComponent<TerminalView>().Instance;
@@ -133,13 +356,14 @@ public class TerminalWindowTests : DashboardTestContext
     public void OpeningWindow_AutoFitsUsingFontFromQuery(bool appHost)
     {
         var updates = Channel.CreateUnbounded<WatchTerminalsUpdate>();
-        TerminalSetupHelpers.SetupTerminalComponents(this, new TestDashboardClient(terminalChannelProvider: () => updates));
-        var path = appHost ? "/terminal-window/apphost/terminal" : "/terminal-window/resource/shell/2";
+        TerminalSetupHelpers.SetupTerminalComponents(this, new TestDashboardClient(isEnabled: true,
+            initialResources: [TerminalSetupHelpers.CreateTerminalResource("shell-second", displayName: "shell", replicaIndex: 2, replicaCount: 3)],
+            terminalChannelProvider: () => updates));
+        var path = appHost ? "/terminal-window/apphost/terminal" : "/terminal-window/resource/shell-second";
         Services.GetRequiredService<NavigationManager>().NavigateTo($"{path}?fontSize=19");
         var cut = Render<TerminalWindow>(builder => builder
             .Add(p => p.TerminalId, appHost ? "terminal" : null)
-            .Add(p => p.ResourceName, appHost ? null : "shell")
-            .Add(p => p.ReplicaIndex, appHost ? 0 : 2));
+            .Add(p => p.ResourceName, appHost ? null : "shell-second"));
 
         var terminal = cut.FindComponent<TerminalView>().Instance;
         Assert.True(terminal.AutoFit);
@@ -165,8 +389,7 @@ public class TerminalWindowTests : DashboardTestContext
 
         cut.Render(builder => builder
             .Add(p => p.TerminalId, "terminal")
-            .Add(p => p.ResourceName, "unused")
-            .Add(p => p.ReplicaIndex, 3));
+            .Add(p => p.ResourceName, "unused"));
         Assert.Equal("Shell", head.Find("title").TextContent);
         Assert.Equal(1, client.TerminalSubscriptionCount);
 
@@ -224,7 +447,11 @@ public class TerminalWindowTests : DashboardTestContext
     public async Task ResourceRoute_CancelsAppHostWatchAndResetsRouteState(bool firstTerminalEnded)
     {
         var updates = Channel.CreateUnbounded<WatchTerminalsUpdate>();
-        var client = new TestDashboardClient(terminalChannelProvider: () => updates);
+        var client = new TestDashboardClient(isEnabled: true, terminalChannelProvider: () => updates, initialResources:
+        [
+            TerminalSetupHelpers.CreateTerminalResource("resource-second", displayName: "resource", replicaIndex: 2, replicaCount: 4),
+            TerminalSetupHelpers.CreateTerminalResource("resource-third", displayName: "resource", replicaIndex: 3, replicaCount: 4)
+        ]);
         TerminalSetupHelpers.SetupTerminalComponents(this, client);
         var head = Render<HeadOutlet>();
         var cut = Render<TerminalWindow>(builder => builder.Add(p => p.TerminalId, "terminal"));
@@ -238,22 +465,20 @@ public class TerminalWindowTests : DashboardTestContext
 
         cut.Render(builder => builder
             .Add(p => p.TerminalId, null)
-            .Add(p => p.ResourceName, "resource")
-            .Add(p => p.ReplicaIndex, 2));
+            .Add(p => p.ResourceName, "resource-second"));
         cut.WaitForAssertion(() =>
         {
             Assert.Equal(0, client.ActiveTerminalSubscriptionCount);
             Assert.Empty(cut.FindAll(".terminal-window-ended"));
             var terminal = cut.FindComponent<TerminalView>().Instance;
             Assert.Null(terminal.EndpointPathAndQuery);
-            Assert.Equal("resource", terminal.ResourceName);
-            Assert.Equal(2, terminal.ReplicaIndex);
-            Assert.Equal("resource #2", head.Find("title").TextContent);
+            Assert.Equal("resource-second", terminal.ResourceName);
+            Assert.Equal("resource-second", head.Find("title").TextContent);
         });
 
-        cut.Render(builder => builder.Add(p => p.ReplicaIndex, 3));
-        Assert.Equal("resource #3", head.Find("title").TextContent);
-        Assert.Equal(3, cut.FindComponent<TerminalView>().Instance.ReplicaIndex);
+        cut.Render(builder => builder.Add(p => p.ResourceName, "resource-third"));
+        Assert.Equal("resource-third", head.Find("title").TextContent);
+        Assert.Equal("resource-third", cut.FindComponent<TerminalView>().Instance.ResourceName);
         Assert.Equal(1, client.TerminalSubscriptionCount);
 
         await SetTerminalAsync(cut, "next").DefaultTimeout();
@@ -391,6 +616,12 @@ public class TerminalWindowTests : DashboardTestContext
 
         await cut.InvokeAsync(() => cut.Instance.DisposeAsync().AsTask()).DefaultTimeout();
         Assert.Equal(0, client.ActiveTerminalSubscriptionCount);
+    }
+
+    private static void AssertResourceIcon(IRenderedComponent<TerminalWindow> component, string name, IconVariant variant)
+    {
+        var icon = component.FindComponent<TerminalTitle>().FindComponent<FluentIcon<Icon>>().Instance.Value;
+        Assert.Equal((name, IconSize.Size16, variant), (icon.Name, icon.Size, icon.Variant));
     }
 
     private static Task SetTerminalAsync(IRenderedComponent<TerminalWindow> component, string terminalId)

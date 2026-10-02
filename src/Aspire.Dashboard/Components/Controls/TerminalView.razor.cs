@@ -41,17 +41,17 @@ public sealed partial class TerminalView : ComponentBase, IAsyncDisposable
     private readonly string _sizeSelectId = $"terminal-size-{Guid.NewGuid():N}";
     private readonly string _paletteSelectId = $"terminal-palette-{Guid.NewGuid():N}";
 
-    /// <summary>Gets or sets the display name of the resource that owns the terminal.</summary>
+    /// <summary>Gets or sets the unique instance name of the resource that owns the terminal.</summary>
     [Parameter]
     public string? ResourceName { get; set; }
+
+    /// <summary>Gets or sets the canonical resource name for the detached window, defaulting to the instance name.</summary>
+    [Parameter]
+    public string? WindowResourceName { get; set; }
 
     /// <summary>Gets or sets the resource icon displayed in the titlebar when progress is inactive.</summary>
     [Parameter]
     public Icon? ResourceIcon { get; set; }
-
-    /// <summary>Gets or sets the zero-based resource replica index.</summary>
-    [Parameter]
-    public int ReplicaIndex { get; set; }
 
     /// <summary>Gets or sets the accessible label for decreasing the font size.</summary>
     [Parameter]
@@ -221,7 +221,7 @@ public sealed partial class TerminalView : ComponentBase, IAsyncDisposable
             return null;
         }
         return new Uri(new Uri(NavigationManager.BaseUri),
-            $"api/terminal?resource={Uri.EscapeDataString(ResourceName)}&replica={ReplicaIndex}").PathAndQuery;
+            $"api/terminal?resource={Uri.EscapeDataString(ResourceName)}").PathAndQuery;
     }
 
     private Task InitializeTerminalAsync(string endpoint)

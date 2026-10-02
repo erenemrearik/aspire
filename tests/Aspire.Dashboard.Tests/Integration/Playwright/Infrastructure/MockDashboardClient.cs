@@ -98,7 +98,8 @@ public sealed class MockDashboardClient : IDashboardClient, IResourceRepositoryW
         throw new NotImplementedException();
     }
 
-    public ResourceViewModel? GetResource(string resourceName) => null;
+    public ResourceViewModel? GetResource(string resourceName) =>
+        GetResources().FirstOrDefault(resource => string.Equals(resource.Name, resourceName, StringComparison.Ordinal));
 
     public IReadOnlyList<ResourceViewModel> GetResources() => _resources ?? [];
 

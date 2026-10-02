@@ -38,9 +38,126 @@ public class TerminalsTests : DashboardTestContext
     }
 
     [Theory]
+    [InlineData("shell", true)]
+    [InlineData("shell", false)]
+    [InlineData("shell-gdkfxyqe", true)]
+    [InlineData("shell-gdkfxyqe", false)]
+    public async Task SingletonRoute_UsesDisplayNameLikeConsoleLogs(string resourceName, bool isDesktop)
+    {
+        Terminals.TerminalsPageState? saved = null;
+        var storage = new TestSessionStorage
+        {
+            OnSetAsync = (key, value) =>
+            {
+                if (key == BrowserStorageKeys.TerminalsPageState)
+                {
+                    saved = Assert.IsType<Terminals.TerminalsPageState>(value);
+                }
+            }
+        };
+        TerminalsSetupHelpers.SetupPage(this,
+            CreateClient(TerminalSetupHelpers.CreateTerminalResource("shell-gdkfxyqe", displayName: "shell")), storage);
+        var cut = RenderPage(resourceName, isDesktop);
+
+        Assert.Equal("http://localhost/terminals/resource/shell", Services.GetRequiredService<NavigationManager>().Uri);
+        Assert.Equal("shell-gdkfxyqe", cut.Instance.PageViewModel.SelectedResource!.Id!.InstanceId);
+        Assert.Equal("shell-gdkfxyqe", cut.FindComponent<TerminalView>().Instance.ResourceName);
+        Assert.Equal("shell", cut.FindComponent<TerminalView>().Instance.WindowResourceName);
+        Assert.Equal("shell", cut.Find(".terminal-title").TextContent);
+        Assert.Equal("shell", saved?.SelectedResource);
+        Assert.Equal("/terminals/resource/shell",
+            cut.Instance.GetUrlFromSerializableViewModel(new("shell-gdkfxyqe")));
+
+        await cut.InvokeAsync(() => cut.FindComponent<TerminalView>().Instance.OnTerminalStateChanged(new TerminalToolbarState
+        {
+            TerminalId = 1, Generation = 1, Connected = true, FontPx = 17
+        }));
+        Assert.Equal("http://localhost/terminal-window/resource/shell?fontSize=17",
+            cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-url"));
+        Assert.Equal("resource:shell", cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-key"));
+    }
+
+    [Fact]
+    public async Task SelectingSingleton_PersistsDisplayNameAndEscapesUrl()
+    {
+        const string displayName = "shell #1/?%+";
+        Terminals.TerminalsPageState? saved = null;
+        var storage = new TestSessionStorage
+        {
+            OnSetAsync = (key, value) =>
+            {
+                if (key == BrowserStorageKeys.TerminalsPageState)
+                {
+                    saved = Assert.IsType<Terminals.TerminalsPageState>(value);
+                }
+            }
+        };
+        TerminalsSetupHelpers.SetupPage(this,
+            CreateClient(TerminalSetupHelpers.CreateTerminalResource("shell-gdkfxyqe", displayName: displayName)), storage);
+        var cut = RenderPage(null);
+        var selector = cut.FindComponent<ResourceSelect>();
+
+        await cut.InvokeAsync(() => selector.Instance.SelectedResourceChanged.InvokeAsync(selector.Instance.Resources!.Last()));
+
+        Assert.Equal("http://localhost/terminals/resource/shell%20%231%2F%3F%25%2B",
+            Services.GetRequiredService<NavigationManager>().Uri);
+        Assert.Equal(displayName, saved?.SelectedResource);
+        Assert.Equal("shell-gdkfxyqe", cut.FindComponent<TerminalView>().Instance.ResourceName);
+        Assert.Equal(displayName, cut.FindComponent<TerminalView>().Instance.WindowResourceName);
+        Assert.Equal(displayName, cut.Find(".terminal-title").TextContent);
+        await cut.InvokeAsync(() => cut.FindComponent<TerminalView>().Instance.OnTerminalStateChanged(new TerminalToolbarState
+        {
+            TerminalId = 1, Generation = 1, Connected = true, FontPx = 17
+        }));
+        Assert.Equal("http://localhost/terminal-window/resource/shell%20%231%2F%3F%25%2B?fontSize=17",
+            cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-url"));
+        Assert.Equal($"resource:{displayName}", cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-key"));
+    }
+
+    [Theory]
+    [InlineData("shell")]
+    [InlineData("shell-gdkfxyqe")]
+    public void SavedSingleton_RestoresDisplayNameOrLegacyInstanceId(string storedResource)
+    {
+        var storage = new TestSessionStorage
+        {
+            OnGetAsync = key => key == BrowserStorageKeys.TerminalsPageState
+                ? (true, new Terminals.TerminalsPageState(storedResource)) : (false, null)
+        };
+        TerminalsSetupHelpers.SetupPage(this,
+            CreateClient(TerminalSetupHelpers.CreateTerminalResource("shell-gdkfxyqe", displayName: "shell")), storage);
+        var cut = RenderPage(null);
+
+        Assert.Equal("http://localhost/terminals/resource/shell", Services.GetRequiredService<NavigationManager>().Uri);
+        // bUnit does not run the Router when restoring the saved route.
+        cut.Render(builder => builder.Add(p => p.ResourceName, "shell"));
+        Assert.Equal("shell-gdkfxyqe", cut.Instance.PageViewModel.SelectedResource!.Id!.InstanceId);
+        Assert.Equal("shell", cut.Instance.ConvertViewModelToSerializable().SelectedResource);
+    }
+
+    [Fact]
+    public async Task SingletonSharingDisplayNameWithNonTerminal_UsesInstanceIdLikeConsoleLogs()
+    {
+        TerminalsSetupHelpers.SetupPage(this, CreateClient(
+            TerminalSetupHelpers.CreateTerminalResource("shell-terminal", displayName: "shell"),
+            ModelTestHelpers.CreateResource("shell-other", displayName: "shell")));
+        var cut = RenderPage("shell-terminal");
+
+        Assert.Equal("http://localhost/terminals/resource/shell-terminal", Services.GetRequiredService<NavigationManager>().Uri);
+        Assert.Equal("shell-terminal", cut.Instance.ConvertViewModelToSerializable().SelectedResource);
+        await cut.InvokeAsync(() => cut.FindComponent<TerminalView>().Instance.OnTerminalStateChanged(new TerminalToolbarState
+        {
+            TerminalId = 1, Generation = 1, Connected = true, FontPx = 17
+        }));
+        Assert.Equal("http://localhost/terminal-window/resource/shell-terminal?fontSize=17",
+            cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-url"));
+        Assert.Equal("resource:shell-terminal", cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-key"));
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void Selector_OnlyTerminalResourcesAndIndividualReplicas(bool isDesktop)
+    public async Task Selector_OnlyTerminalResourcesAndIndividualReplicas(bool isDesktop)
     {
         var client = CreateClient(
             ModelTestHelpers.CreateResource("ordinary"),
@@ -63,10 +180,20 @@ public class TerminalsTests : DashboardTestContext
         Assert.Equal(Resources.ControlsStrings.LabelNone, selector.Resources!.First().Name);
         Assert.All(selector.Resources!.Skip(1), r => Assert.NotNull(r.Id));
         var terminal = cut.FindComponent<TerminalView>().Instance;
-        Assert.Equal("shell", terminal.ResourceName);
-        Assert.Equal(1, terminal.ReplicaIndex);
+        Assert.Equal("shell-2", terminal.ResourceName);
+        Assert.Equal("shell-2", terminal.WindowResourceName);
+        Assert.Equal("shell-2", cut.Find(".terminal-title").TextContent);
         Assert.True(terminal.ShowOpenInWindow);
         Assert.NotNull(terminal.ResourceIcon);
+        Assert.Equal("http://localhost/terminals/resource/shell-2", Services.GetRequiredService<NavigationManager>().Uri);
+        Assert.Equal("shell-2", cut.Instance.ConvertViewModelToSerializable().SelectedResource);
+        await cut.InvokeAsync(() => terminal.OnTerminalStateChanged(new TerminalToolbarState
+        {
+            TerminalId = 1, Generation = 1, Connected = true, FontPx = 17
+        }));
+        Assert.Equal("http://localhost/terminal-window/resource/shell-2?fontSize=17",
+            cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-url"));
+        Assert.Equal("resource:shell-2", cut.Find(".terminal-open-window").GetAttribute("data-terminal-window-key"));
         Assert.Empty(cut.FindComponents<LogViewer>());
     }
 
@@ -357,11 +484,11 @@ public class TerminalsTests : DashboardTestContext
             TerminalId = 1, Generation = 1, Connected = true, FontPx = 17
         }));
         var open = cut.Find(".terminal-titlebar .terminal-open-window");
-        Assert.Equal($"http://localhost{pathBase}/terminal-window/resource/{escapedName}/{replicaIndex}?fontSize=17",
+        Assert.Equal($"http://localhost{pathBase}/terminal-window/resource/{escapedName}?fontSize=17",
             open.GetAttribute("data-terminal-window-url"));
         Assert.Equal(Resources.TerminalStrings.TerminalToolbarOpenInWindow, open.GetAttribute("aria-label"));
         var launcher = TerminalSetupHelpers.GetWindowLauncher(this, cut);
-        await cut.InvokeAsync(() => launcher.OnTerminalWindowOpenedAsync($"resource:{name}:{replicaIndex}", "opened"));
+        await cut.InvokeAsync(() => launcher.OnTerminalWindowOpenedAsync($"resource:{name}", "opened"));
         Assert.Same(viewer, cut.FindComponent<TerminalView>().Instance);
     }
 

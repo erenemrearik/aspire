@@ -28,6 +28,8 @@ public class TestDashboardClient : IDashboardClient
     private int _terminalSubscriptionCount;
     private int _activeTerminalSubscriptionCount;
     private int _resourceSubscriptionCount;
+    private int _getResourceCallCount;
+    private int _getResourcesCallCount;
 
     public bool IsEnabled { get; }
     public bool IsReadOnly { get; set; }
@@ -44,6 +46,8 @@ public class TestDashboardClient : IDashboardClient
     public int TerminalSubscriptionCount => Volatile.Read(ref _terminalSubscriptionCount);
     public int ActiveTerminalSubscriptionCount => Volatile.Read(ref _activeTerminalSubscriptionCount);
     public int ResourceSubscriptionCount => Volatile.Read(ref _resourceSubscriptionCount);
+    public int GetResourceCallCount => Volatile.Read(ref _getResourceCallCount);
+    public int GetResourcesCallCount => Volatile.Read(ref _getResourcesCallCount);
     public event Action<DashboardConnectionState>? ConnectionStateChanged;
     public Task ReconnectAsync() => Task.CompletedTask;
 
@@ -245,7 +249,15 @@ public class TestDashboardClient : IDashboardClient
         await _sendInteractionUpdateChannel.Writer.WriteAsync(request, cancellationToken);
     }
 
-    public ResourceViewModel? GetResource(string resourceName) => null;
+    public ResourceViewModel? GetResource(string resourceName)
+    {
+        Interlocked.Increment(ref _getResourceCallCount);
+        return _initialResources?.FirstOrDefault(resource => StringComparers.ResourceName.Equals(resource.Name, resourceName));
+    }
 
-    public IReadOnlyList<ResourceViewModel> GetResources() => _initialResources?.ToList() ?? [];
+    public IReadOnlyList<ResourceViewModel> GetResources()
+    {
+        Interlocked.Increment(ref _getResourcesCallCount);
+        return _initialResources?.ToList() ?? [];
+    }
 }

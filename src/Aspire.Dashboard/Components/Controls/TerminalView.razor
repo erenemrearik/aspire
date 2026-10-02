@@ -16,13 +16,13 @@
         @if (!Chromeless)
         {
             <div class="terminal-titlebar">
-                <TerminalTitle State="@_state" IdleIcon="@ResourceIcon" FallbackTitle="@(ResourceName ?? Loc[nameof(Resources.TerminalStrings.TerminalTitle)].Value)" />
+                <TerminalTitle State="@_state" IdleIcon="@ResourceIcon" FallbackTitle="@(WindowResourceName ?? ResourceName ?? Loc[nameof(Resources.TerminalStrings.TerminalTitle)].Value)" />
                 @if (ShowOpenInWindow && !string.IsNullOrEmpty(ResourceName))
                 {
                     <TerminalWindowButton Class="terminal-open-window"
                                           Label="@Loc[nameof(Resources.TerminalStrings.TerminalToolbarOpenInWindow)]"
-                                          TerminalKey="@($"resource:{ResourceName}:{ReplicaIndex}")"
-                                          Url="@($"terminal-window/resource/{Uri.EscapeDataString(ResourceName)}/{ReplicaIndex}")"
+                                          TerminalKey="@($"resource:{WindowResourceName ?? ResourceName}")"
+                                          Url="@($"terminal-window/resource/{Uri.EscapeDataString(WindowResourceName ?? ResourceName)}")"
                                           FontSize="@FontSize" />
                 }
             </div>
