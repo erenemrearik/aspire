@@ -124,7 +124,7 @@ pre-agent-steps:
         const headText = (path, sha) => {
           const encoded = path.split("/").map(encodeURIComponent).join("/");
           try {
-            return execFileSync("gh", ["api", "-H", "Accept: application/vnd.github.raw", `repos/${process.env.REPO}/contents/${encoded}?ref=${sha}`],
+            return execFileSync("gh", ["api", "-H", "Accept: application/vnd.github.raw", "repos/" + process.env.REPO + "/contents/" + encoded + "?ref=" + sha],
               { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
           } catch {
             return null;
