@@ -110,7 +110,7 @@ pre-agent-steps:
       # Open Dependabot PRs with their parsed updates, CI rollup, and the alerts each
       # one provably covers. Coverage uses the same module as the approval gate:
       # the head version of every changed manifest is fetched and must bind the
-      # alert package to the new version in the alert's own directory. Bodies are
+      # alert package to the new version in the alert's own manifest. Bodies are
       # parsed and then dropped.
       gh pr list --repo "${REPO}" --author "app/dependabot" --state open --limit 200 \
         --json number,title,body,headRefName,headRefOid,isDraft,files,statusCheckRollup \

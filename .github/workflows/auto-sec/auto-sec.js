@@ -215,11 +215,6 @@ function parseDependabotUpdates(title, body) {
     return [...updates.values()];
 }
 
-function directoryOf(path) {
-    const index = String(path).lastIndexOf('/');
-    return index < 0 ? '' : path.slice(0, index);
-}
-
 function basenameOf(path) {
     const index = String(path).lastIndexOf('/');
     return index < 0 ? path : path.slice(index + 1);
@@ -500,10 +495,6 @@ const MANIFEST_READERS = {
     'directory.packages.props': packagesPropsEntries,
 };
 
-// Lockfiles record every resolved copy of a package. The other manifests record only a
-// declared range, whose lower bound (`^4.0.0`) says nothing about what is installed.
-const LOCKFILE_BASENAMES = new Set(['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'uv.lock']);
-
 function manifestReader(path) {
     return MANIFEST_READERS[basenameOf(String(path ?? '')).toLowerCase()] ?? null;
 }
@@ -564,9 +555,16 @@ function manifestVersionChanges(path, baseText, headText, ecosystem) {
     for (const [key, { name, versions }] of group(headText)) {
         const baseVersions = [...(base.get(key)?.versions ?? [])];
         const removed = baseVersions.filter(version => !versions.has(version));
-        for (const version of versions) {
-            if (!baseVersions.includes(version)) {
-                changes.push({ name, from: removed.length ? removed : baseVersions, to: version });
+        const introduced = [...versions].filter(version => !baseVersions.includes(version));
+        for (const version of introduced) {
+            changes.push({ name, from: removed.length ? removed : baseVersions, to: version });
+        }
+        // A consolidation into a version the base already carries introduces nothing new:
+        // base `foo@1.0.0` + `foo@2.1.0` -> head `foo@2.1.0` still moves the 1.x consumers
+        // to 2.1.0, so the surviving versions are the targets of the removed ones.
+        if (!introduced.length && removed.length) {
+            for (const version of versions) {
+                changes.push({ name, from: removed, to: version });
             }
         }
     }
@@ -582,19 +580,21 @@ function isBreakingVersionChange(change) {
 }
 
 /**
- * True when every occurrence of `update.name` in the changed manifests of the alert's
- * directory is `acceptable`, and at least one occurrence is the update's new version.
- * A lockfile can keep an old nested copy (`lodash@4.17.20` under a parent) next to the
- * bumped top-level one, so a single matching occurrence does not prove the fix. When the
- * directory has a changed lockfile, only lockfiles are consulted, because a declared
- * range in package.json does not say which version is installed.
+ * True when every occurrence of `update.name` in the alert's own manifest
+ * (`alert.manifest_path`) is `acceptable` on the PR head, and at least one occurrence is
+ * the update's new version. A lockfile can keep an old nested copy (`lodash@4.17.20` under
+ * a parent) next to the bumped top-level one, so a single matching occurrence does not
+ * prove the fix. Another manifest in the same directory (for example `yarn.lock` next to
+ * an alerted `package-lock.json`) never counts, and an alerted manifest the PR leaves
+ * unchanged is not in `headContents`, so it is not fixed.
  */
-function alertDirectoryCarries(alert, ecosystem, update, headContents, acceptable) {
-    const alertDirectory = directoryOf(alert.manifest_path ?? '');
-    const manifests = Object.entries(headContents ?? {}).filter(([path]) => directoryOf(path) === alertDirectory);
-    const lockfiles = manifests.filter(([path]) => LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase()));
-    const versions = (lockfiles.length ? lockfiles : manifests)
-        .flatMap(([path, text]) => manifestPackageVersions(path, text, ecosystem, update.name));
+function alertManifestCarries(alert, ecosystem, update, headContents, acceptable) {
+    const alertPath = String(alert.manifest_path ?? '').replace(/^\.?\/+/, '');
+    const text = Object.hasOwn(headContents ?? {}, alertPath) ? headContents[alertPath] : null;
+    if (!alertPath || text === null) {
+        return false;
+    }
+    const versions = manifestPackageVersions(alertPath, text, ecosystem, update.name);
     return versions.some(version => sameVersion(version, update.to)) && versions.every(acceptable);
 }
 
@@ -606,8 +606,7 @@ function updateMatchesAlert(alert, ecosystem, update) {
 /**
  * True when `update` provably fixes `alert`. Grouped Dependabot PRs can update the same
  * package in several directories, so a match on package name alone is not enough: the
- * changed manifests in the alert's own directory must carry the new version on the PR
- * head, and every remaining occurrence of the package there must be at or above the
+ * alert's own manifest must carry the new version on the PR head, and every remaining occurrence of the package there must be at or above the
  * first patched version. `headContents` maps each changed manifest path to its head
  * text. Malware alerts are never counted as fixed (see `evaluateApprovalGates`).
  */
@@ -623,7 +622,7 @@ function alertFixedByUpdate(alert, ecosystem, update, headContents) {
     // `first_patched_version` only bounds the range the installed version fell in; an
     // advisory can list disjoint vulnerable ranges, so every occurrence must also sit
     // outside all of them.
-    return alertDirectoryCarries(alert, ecosystem, update, headContents,
+    return alertManifestCarries(alert, ecosystem, update, headContents,
         version => (compareVersions(version, patched) ?? -1) >= 0 && !inVulnerableRanges(version, alertVulnerableRanges(alert)));
 }
 
@@ -666,7 +665,7 @@ function inVulnerableRanges(version, ranges) {
  * Alert numbers a Dependabot PR covers, so the agent does not duplicate the fix in the
  * auto-sec PR. Non-malware alerts use the same proof as the approval gate
  * (`alertFixedByUpdate`). Malware alerts have no patched version; they are covered only
- * when every occurrence of the flagged package in the alert's directory is the PR's new
+ * when every occurrence of the flagged package in the alert's own manifest is the PR's new
  * version, and the approval gate still leaves those PRs to a human reviewer.
  */
 function coveredAlerts(alerts, ecosystem, updates, headContents) {
@@ -676,7 +675,7 @@ function coveredAlerts(alerts, ecosystem, updates, headContents) {
     return (alerts ?? [])
         .filter(alert => updates.some(update => alert.malware
             ? updateMatchesAlert(alert, ecosystem, update)
-                && alertDirectoryCarries(alert, ecosystem, update, headContents, version => sameVersion(version, update.to))
+                && alertManifestCarries(alert, ecosystem, update, headContents, version => sameVersion(version, update.to))
             : alertFixedByUpdate(alert, ecosystem, update, headContents)))
         .map(alert => alert.number)
         .sort((a, b) => a - b);

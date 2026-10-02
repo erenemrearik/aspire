@@ -59,6 +59,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("breaking-change-grouped-transition")]
     [InlineData("breaking-change-unlisted-package")]
     [InlineData("breaking-change-consolidated-versions")]
+    [InlineData("breaking-change-retained-version")]
     [InlineData("cooldown-not-satisfied")]
     [InlineData("cooldown-not-satisfied-unlisted-package")]
     [InlineData("too-many-version-changes")]
@@ -66,6 +67,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("malware-requires-review-unlisted-package")]
     [InlineData("fixes-no-open-alert")]
     [InlineData("fixes-no-open-alert-other-directory")]
+    [InlineData("fixes-no-open-alert-other-lockfile")]
     [InlineData("fixes-no-open-alert-vulnerable-copy-remains")]
     [InlineData("fixes-no-open-alert-later-vulnerable-range")]
     [InlineData("head-sha-mismatch-after-gates")]
@@ -141,6 +143,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("foo", "2.1.0");
                 scenario["responses"]!["https://registry.npmjs.org/foo"] = Response(new JsonObject { ["time"] = new JsonObject { ["2.1.0"] = "2026-09-01T00:00:00Z" } });
                 break;
+            case "breaking-change-retained-version":
+                // The lockfile drops foo@1.0.0 and keeps foo@2.1.0, so the 1.x consumers move
+                // across a major version even though no new version is introduced.
+                expectedReason = "breaking-change";
+                scenario["contents"]!["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("foo", "1.0.0") + YarnLockEntry("foo", "2.1.0");
+                scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("foo", "2.1.0");
+                scenario["responses"]!["https://registry.npmjs.org/foo"] = Response(new JsonObject { ["time"] = new JsonObject { ["2.1.0"] = "2026-09-01T00:00:00Z" } });
+                break;
             case "malware-requires-review-unlisted-package":
                 // The lockfile also changes minimist, which has an open malware alert, without
                 // the PR body listing it.
@@ -211,6 +221,12 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 scenario["contents"]!["playground/app/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("minimist", "1.2.8");
                 scenario["alerts"]![0]!["manifest_path"] = "playground/app/yarn.lock";
                 scenario["responses"]!["https://registry.npmjs.org/minimist"] = Response(new JsonObject { ["time"] = new JsonObject { ["1.2.8"] = "2026-09-01T00:00:00Z" } });
+                break;
+            case "fixes-no-open-alert-other-lockfile":
+                // The alert is on package-lock.json, but the PR changes only yarn.lock in the
+                // same directory, so it does not prove the alerted manifest is fixed.
+                expectedReason = "fixes-no-open-alert";
+                scenario["alerts"]![0]!["manifest_path"] = "extension/package-lock.json";
                 break;
             case "no-checks":
                 scenario["checkRuns"] = new JsonArray();
