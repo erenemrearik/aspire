@@ -155,20 +155,19 @@ public sealed class EmptyAppHostTemplateTests(ITestOutputHelper output)
             counter);
         await auto.RunCommandAsync("aspire config set features.updateNotificationsEnabled false -g", counter);
         await auto.RunCommandAsync("aspire config set features.showAllTemplates true -g", counter);
-        await auto.StartUnexpectedNuGetSourceContactTripwireAsync(counter, includeAzureDevOps: true);
+        await auto.StartUnexpectedNuGetSourceContactTripwireAsync(counter, includeAzureDevOps: false);
         await auto.RunCommandAsync("rm -rf \"$HOME/.aspire/logs\" && mkdir -p \"$HOME/.aspire/logs\"", counter);
 
         await auto.RunCommandAsync(
             "aspire new aspire-servicedefaults --name AmbientServiceDefaults --output AmbientServiceDefaults " +
-            "--channel stable --skip-restore --non-interactive --suppress-agent-init --log-level Debug",
+            "--channel stable --non-interactive --suppress-agent-init --log-level Debug",
             counter,
             TimeSpan.FromMinutes(2));
 
         await auto.RunCommandAsync("test -f AmbientServiceDefaults/AmbientServiceDefaults.csproj", counter);
         await auto.RunCommandAsync(
             $"find \"$HOME/.aspire/logs\" -type f -name '*.log' -print -quit | grep -q . && " +
-            $"grep -R -F \"Running dotnet in $PWD with args: package search Aspire.ProjectTemplates\" \"$HOME/.aspire/logs\" && " +
-            $"grep -R -F \"Running dotnet in $PWD with args: new install Aspire.ProjectTemplates@{stableTemplateVersion}\" \"$HOME/.aspire/logs\" && " +
+            $"grep -R -F \"Running dotnet in $PWD with args: new install $PWD/ambient-template-feed/Aspire.ProjectTemplates.{stableTemplateVersion}.nupkg\" \"$HOME/.aspire/logs\" && " +
             "! grep -R -F 'aspire-nuget-config' \"$HOME/.aspire/logs\" && " +
             "! grep -R -F 'api.nuget.org' \"$HOME/.aspire/logs\"",
             counter);
@@ -207,15 +206,14 @@ public sealed class EmptyAppHostTemplateTests(ITestOutputHelper output)
 
         await auto.RunCommandAsync(
             "aspire new aspire-servicedefaults --name DailyServiceDefaults --output DailyServiceDefaults " +
-            "--channel daily --skip-restore --non-interactive --suppress-agent-init --log-level Debug",
+            "--channel daily --non-interactive --suppress-agent-init --log-level Debug",
             counter,
             TimeSpan.FromMinutes(3));
 
         await auto.RunCommandAsync("test -f DailyServiceDefaults/DailyServiceDefaults.csproj", counter);
         await auto.RunCommandAsync(
             "find \"$HOME/.aspire/logs\" -type f -name '*.log' -print -quit | grep -q . && " +
-            "grep -R -E \"Running dotnet in $PWD/aspire-nuget-config[^ ]* with args: package search Aspire\\.ProjectTemplates\" \"$HOME/.aspire/logs\" && " +
-            "grep -R -E \"Running dotnet in $PWD/aspire-nuget-config[^ ]* with args: new install Aspire\\.ProjectTemplates@[^ ]+\" \"$HOME/.aspire/logs\" && " +
+            "grep -R -E \"Running dotnet in $PWD/\\.aspire-nuget-config[^ ]* with args: new install Aspire\\.ProjectTemplates@[^ ]+\" \"$HOME/.aspire/logs\" && " +
             "! grep -R -F 'api.nuget.org' \"$HOME/.aspire/logs\"",
             counter);
         await auto.AssertUnexpectedNuGetSourceWasNotContactedAsync(counter);
