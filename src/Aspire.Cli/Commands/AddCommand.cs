@@ -560,6 +560,9 @@ internal sealed class AddCommand : BaseCommand
                     package.Package.Id,
                     workingDirectory,
                     sourceMappings ?? channel.Mappings,
+                    sourceMappings is null
+                        ? NuGetPackageSearchPolicy.AmbientOverlay
+                        : NuGetPackageSearchPolicy.Exclusive,
                     cancellationToken);
                 versions.AddRange(packages.Select(p => (FriendlyName: package.FriendlyName, Package: p, Channel: channel)));
             }

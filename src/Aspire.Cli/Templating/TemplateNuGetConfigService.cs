@@ -7,6 +7,7 @@ using Aspire.Cli.Commands;
 using Aspire.Cli.DotNet;
 using Aspire.Cli.Exceptions;
 using Aspire.Cli.Interaction;
+using Aspire.Cli.NuGet;
 using Aspire.Cli.Packaging;
 using Aspire.Cli.Utils;
 using NuGetPackage = Aspire.Shared.NuGetPackageCli;
@@ -319,6 +320,9 @@ internal sealed class TemplateNuGetConfigService(
                         !isUnqualifiedLocalResolution &&
                         string.IsNullOrWhiteSpace(query.VersionOverride) &&
                         string.IsNullOrWhiteSpace(query.SourceOverride),
+                    string.IsNullOrWhiteSpace(query.SourceOverride)
+                        ? NuGetPackageSearchPolicy.AmbientOverlay
+                        : NuGetPackageSearchPolicy.Exclusive,
                     ct);
                 lock (resultsLock)
                 {
@@ -423,22 +427,17 @@ internal sealed class TemplateNuGetConfigService(
         KnownEmoji? statusEmoji,
         CancellationToken cancellationToken)
     {
-        var templateInstallMappings = string.IsNullOrWhiteSpace(sourceOverride)
-            ? selection.Channel.Mappings
-            : PackageSourceOverrideMappings.CreateForSourceOnlyOperations(sourceOverride);
-
-        // Whilst we install the templates - if source mappings are available we need
-        // to generate a temporary NuGet.config file to make sure we install the right package
-        // from the right feed. Without mappings we just use the ambient configuration
-        // (although we should still specify the source) because the user would have selected it.
-        //
-        // The temporary config is disposed when this method returns. That is intentional —
-        // only `dotnet new install` consumes the config; the subsequent `dotnet new <template>`
-        // call (in DotNetTemplateFactory and InitCommand) operates against the already-installed
-        // template hive and uses the ambient NuGet configuration.
-        using var temporaryConfig = templateInstallMappings is not null
-            ? await TemporaryNuGetConfig.CreateAsync(templateInstallMappings)
-            : null;
+        using var searchConfiguration = string.IsNullOrWhiteSpace(sourceOverride)
+            ? await selection.Channel.CreateSearchConfigurationAsync(
+                executionContext.WorkingDirectory,
+                selection.Channel.Mappings,
+                NuGetPackageSearchPolicy.AmbientOverlay,
+                cancellationToken)
+            : await selection.Channel.CreateSearchConfigurationAsync(
+                executionContext.WorkingDirectory,
+                PackageSourceOverrideMappings.CreateForSourceOnlyOperations(sourceOverride),
+                NuGetPackageSearchPolicy.Exclusive,
+                cancellationToken);
 
         var collector = new OutputCollector();
 
@@ -455,7 +454,10 @@ internal sealed class TemplateNuGetConfigService(
                 return await runner.InstallTemplateAsync(
                     packageName: TemplatesPackageName,
                     version: selection.Package.Version,
-                    nugetConfigFile: temporaryConfig?.ConfigFile,
+                    // dotnet new install has no --configfile option. Running from the generated
+                    // overlay directory lets NuGet discover the overlay and continue walking the
+                    // original workspace hierarchy for ambient sources and credentials.
+                    nugetConfigFile: searchConfiguration.ConfigurationFile,
                     nugetSource: string.IsNullOrWhiteSpace(sourceOverride) ? selection.Package.Source : sourceOverride,
                     force: true,
                     options: options,

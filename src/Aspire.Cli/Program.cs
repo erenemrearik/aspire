@@ -507,6 +507,7 @@ public class Program
         builder.Services.AddTransient<IAppHostCliBackchannel, AppHostCliBackchannel>();
 
         // Register both NuGetPackageCache implementations - factory chooses based on embedded bundle
+        builder.Services.AddSingleton<NuGetInvocationConfigurationSource>();
         builder.Services.AddSingleton<NuGetPackageCache>();
         builder.Services.AddSingleton<BundleNuGetPackageCache>();
         builder.Services.AddSingleton<INuGetPackageCache>(sp =>

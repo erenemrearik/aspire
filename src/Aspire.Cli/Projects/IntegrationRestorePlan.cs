@@ -110,25 +110,21 @@ internal sealed class IntegrationRestorePlanResolver(
             executionContext.NuGetServiceIndexOverride);
         restoreSources = NormalizeSources(restoreSources, new DirectoryInfo(appDirectoryPath));
 
-        var settings = nugetService.GetNuGetSettings(
-            appDirectoryPath,
-            cancellationToken);
-        var configSources = IntegrationRestorePlan.ResolveNuGetConfigSources(
-            restoreSources.PackageSourceMappings,
+        var invocationConfiguration = new NuGetInvocationConfigurationSource(nugetService).Resolve(
+            new DirectoryInfo(appDirectoryPath),
             workloadId,
-            settings.Sources,
-            settings.ReservedPackageSourceKeys,
-            settings.SourceIdentityKey);
+            restoreSources.PackageSourceMappings,
+            restoreSources.PackageScopedAppendSource,
+            restoreSources.HasAuthoritativeAspirePolicy,
+            cancellationToken);
 
         return new IntegrationRestorePlan(
             effectivePackageSourceOverride,
             effectivePackageSourceOverridePattern,
             restoreSources,
-            settings,
-            configSources,
+            invocationConfiguration,
             appDirectoryPath,
-            executionContext.AspireHomeDirectory,
-            nugetService);
+            executionContext.AspireHomeDirectory);
     }
 
     private void ThrowIfStagingUnavailable(string? requestedChannel)
@@ -359,21 +355,17 @@ internal sealed class IntegrationRestorePlan
 {
     private readonly string? _effectivePackageSourceOverridePattern;
     private readonly IntegrationRestoreSources _restoreSources;
-    private readonly NuGetSettingsInfo _settings;
-    private readonly NuGetConfigSource[] _configSources;
+    private readonly NuGetInvocationConfiguration _invocationConfiguration;
     private readonly string _appDirectoryPath;
     private readonly DirectoryInfo _aspireHomeDirectory;
-    private readonly BundleNuGetService _nugetService;
 
     public IntegrationRestorePlan(
         string? effectivePackageSourceOverride,
         string? effectivePackageSourceOverridePattern,
         IntegrationRestoreSources restoreSources,
-        NuGetSettingsInfo settings,
-        NuGetConfigSource[] configSources,
+        NuGetInvocationConfiguration invocationConfiguration,
         string appDirectoryPath,
-        DirectoryInfo aspireHomeDirectory,
-        BundleNuGetService nugetService)
+        DirectoryInfo aspireHomeDirectory)
     {
         EffectivePackageSourceOverride = effectivePackageSourceOverride;
         _effectivePackageSourceOverridePattern = effectivePackageSourceOverridePattern;
@@ -384,20 +376,9 @@ internal sealed class IntegrationRestorePlan
                 ? null
                 : [.. restoreSources.PackageSourceMappings]
         };
-        _settings = settings with
-        {
-            ConfigPaths = [.. settings.ConfigPaths],
-            Sources = [.. settings.Sources],
-            SensitiveSourceValues = [.. settings.SensitiveSourceValues],
-            PackageSourceMappings = [.. settings.PackageSourceMappings],
-            DisabledPackageSourceKeys = [.. settings.DisabledPackageSourceKeys],
-            ReservedPackageSourceKeys = [.. settings.ReservedPackageSourceKeys],
-            SourceIdentityKey = [.. settings.SourceIdentityKey]
-        };
-        _configSources = [.. configSources];
+        _invocationConfiguration = invocationConfiguration;
         _appDirectoryPath = appDirectoryPath;
         _aspireHomeDirectory = aspireHomeDirectory;
-        _nugetService = nugetService;
     }
 
     public string? EffectivePackageSourceOverride { get; }
@@ -425,9 +406,9 @@ internal sealed class IntegrationRestorePlan
         var overlay = await CreateRestoreOverlayAsync(cancellationToken).ConfigureAwait(false);
         var sources = GetNuGetSources()?.ToArray();
         string[] configPaths = overlay is null
-            ? [.. _settings.ConfigPaths]
-            : [overlay.ConfigFile.FullName, .. _settings.ConfigPaths];
-        var sensitiveSources = _settings.SensitiveSourceValues
+            ? [.. _invocationConfiguration.Settings.ConfigPaths]
+            : [overlay.ConfigFile.FullName, .. _invocationConfiguration.Settings.ConfigPaths];
+        var sensitiveSources = _invocationConfiguration.Settings.SensitiveSourceValues
             .Concat(
                 _restoreSources.PackageSourceMappings?
                     .Select(static mapping => mapping.Source)
@@ -439,7 +420,7 @@ internal sealed class IntegrationRestorePlan
             overlay,
             sources,
             configPaths,
-            _settings.CacheIdentity,
+            _invocationConfiguration.Settings.CacheIdentity,
             sensitiveSources,
             GetGlobalPackagesFolder(overlay));
     }
@@ -468,23 +449,16 @@ internal sealed class IntegrationRestorePlan
         }
         else
         {
-            var overlay = CreateNuGetConfigOverlay(
-                _restoreSources.PackageSourceMappings,
-                _settings,
-                _configSources,
-                globalPackagesFolder,
-                _restoreSources.PackageScopedAppendSource,
-                _restoreSources.HasAuthoritativeAspirePolicy);
-            _nugetService.WriteNuGetConfigOverlay(
-                overlay,
+            _invocationConfiguration.WriteOverlay(
                 restoreOverlayFile.FullName,
+                globalPackagesFolder,
                 cancellationToken);
         }
 
         var rootAdditionalSources = _restoreSources.PackageSourceMappings is null
             ? GetNuGetSources()?.ToArray() ?? []
             : [];
-        var sensitiveSources = _settings.SensitiveSourceValues
+        var sensitiveSources = _invocationConfiguration.Settings.SensitiveSourceValues
             .Concat(selectedSensitiveSources)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -505,82 +479,12 @@ internal sealed class IntegrationRestorePlan
         IReadOnlyList<NuGetSourceInfo> ambientSources,
         IReadOnlyList<string> reservedPackageSourceKeys,
         ReadOnlySpan<byte> sourceIdentityKey)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workloadId);
-
-        if (mappings is null)
-        {
-            return [];
-        }
-
-        var usedKeys = reservedPackageSourceKeys
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var generatedSourceKeyPrefix = $"aspire-{workloadId}";
-        var sourceIndex = 0;
-        var nextAdditionalSourceKey = 0;
-
-        var resolvedSources = new List<NuGetConfigSource>();
-        foreach (var source in mappings
-            .Select(static mapping => mapping.Source)
-            .Distinct(PackageSourceIdentity.Comparer))
-        {
-            // Source order still determines the primary source when its ambient alias is reused.
-            var isPrimarySource = sourceIndex++ == 0;
-            var sourceIdentity = NuGetSourceIdentity.Compute(source, sourceIdentityKey);
-            var ambientMatches = ambientSources
-                .Where(candidate => string.Equals(candidate.Identity, sourceIdentity, StringComparison.Ordinal))
-                .ToArray();
-            if (ambientMatches.Length > 0)
-            {
-                var enabledMatches = ambientMatches
-                    .Where(static ambientSource => ambientSource.IsEnabled)
-                    .ToArray();
-                var selectedMatches = enabledMatches;
-                if (selectedMatches.Length == 0)
-                {
-                    // Credentials and client certificates are attached to source aliases. When an
-                    // equivalent source must be re-enabled, preserve the authenticated alias.
-                    var preferredDisabledMatch = ambientMatches.FirstOrDefault(static ambientSource =>
-                        ambientSource.HasCredentials || ambientSource.HasClientCertificates);
-                    selectedMatches = [preferredDisabledMatch ?? ambientMatches[0]];
-                }
-
-                foreach (var ambientSource in selectedMatches)
-                {
-                    resolvedSources.Add(new NuGetConfigSource(
-                        ambientSource.Name,
-                        source,
-                        IsAmbient: true,
-                        ambientSource.IsEnabled));
-                }
-
-                continue;
-            }
-
-            string key;
-            if (isPrimarySource)
-            {
-                key = generatedSourceKeyPrefix;
-                if (!usedKeys.Add(key))
-                {
-                    throw new InvalidOperationException(
-                        $"The generated NuGet source key '{key}' conflicts with an existing NuGet configuration key.");
-                }
-            }
-            else
-            {
-                do
-                {
-                    key = $"{generatedSourceKeyPrefix}-{nextAdditionalSourceKey++}";
-                }
-                while (!usedKeys.Add(key));
-            }
-
-            resolvedSources.Add(new NuGetConfigSource(key, source, IsAmbient: false, IsEnabled: true));
-        }
-
-        return [.. resolvedSources];
-    }
+        => NuGetInvocationConfigurationComposer.ResolveConfigSources(
+            mappings,
+            workloadId,
+            ambientSources,
+            reservedPackageSourceKeys,
+            sourceIdentityKey);
 
     internal static NuGetConfigOverlay CreateNuGetConfigOverlay(
         PackageMapping[] selectedMappings,
@@ -589,38 +493,13 @@ internal sealed class IntegrationRestorePlan
         string? globalPackagesFolder,
         string? packageScopedAppendSource = null,
         bool hasAuthoritativeAspirePolicy = false)
-    {
-        ArgumentNullException.ThrowIfNull(selectedMappings);
-        ArgumentNullException.ThrowIfNull(settings);
-        ArgumentNullException.ThrowIfNull(selectedSources);
-
-        var enabledSourceKeys = selectedSources
-            .Where(static source => source.IsAmbient && !source.IsEnabled)
-            .Select(static source => source.Key)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var clearDisabledPackageSources = enabledSourceKeys.Count > 0;
-        var disabledPackageSourceKeys = clearDisabledPackageSources
-            ? settings.DisabledPackageSourceKeys
-                .Where(key => !enabledSourceKeys.Contains(key))
-                .ToArray()
-            : [];
-
-        return new NuGetConfigOverlay(
-            selectedSources
-                .Where(static source => !source.IsAmbient)
-                .Select(static source => (Key: source.Key, Source: source.Source))
-                .ToArray(),
-            ComposePackageSourceMappings(
-                selectedMappings,
-                settings.PackageSourceMappings,
-                settings.Sources,
-                selectedSources,
-                packageScopedAppendSource,
-                hasAuthoritativeAspirePolicy),
-            clearDisabledPackageSources,
-            disabledPackageSourceKeys,
-            globalPackagesFolder);
-    }
+        => NuGetInvocationConfigurationComposer.CreateOverlay(
+            selectedMappings,
+            settings,
+            selectedSources,
+            globalPackagesFolder,
+            packageScopedAppendSource,
+            hasAuthoritativeAspirePolicy);
 
     internal static NuGetPackageSourceMapping[] ComposePackageSourceMappings(
         IReadOnlyList<PackageMapping> selectedMappings,
@@ -629,101 +508,13 @@ internal sealed class IntegrationRestorePlan
         IReadOnlyList<NuGetConfigSource> selectedSources,
         string? packageScopedAppendSource = null,
         bool hasAuthoritativeAspirePolicy = false)
-    {
-        ArgumentNullException.ThrowIfNull(selectedMappings);
-        ArgumentNullException.ThrowIfNull(ambientMappings);
-        ArgumentNullException.ThrowIfNull(ambientSources);
-        ArgumentNullException.ThrowIfNull(selectedSources);
-
-        var patternsBySourceKey = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        var hasPackageScopedAppendSource = packageScopedAppendSource is not null;
-
-        if (ambientMappings.Count == 0)
-        {
-            // Enabling package-source mapping changes NuGet from "every enabled source can serve
-            // every package" to deny-by-default. Reproduce that existing eligibility first.
-            foreach (var ambientSource in ambientSources.Where(static source => source.IsEnabled))
-            {
-                AddPattern(patternsBySourceKey, ambientSource.Name, PackageMapping.AllPackages);
-            }
-        }
-        else
-        {
-            foreach (var ambientMapping in ambientMappings)
-            {
-                foreach (var pattern in ambientMapping.Patterns)
-                {
-                    AddPattern(patternsBySourceKey, ambientMapping.SourceKey, pattern);
-                }
-            }
-        }
-
-        if (hasPackageScopedAppendSource && !hasAuthoritativeAspirePolicy)
-        {
-            // With no selected channel policy, ambient '*' mappings previously made those sources
-            // eligible for Aspire packages. Promote that eligibility to the appended Aspire*
-            // specificity so --source does not accidentally replace the ambient feeds.
-            foreach (var (sourceKey, patterns) in patternsBySourceKey.ToArray())
-            {
-                if (patterns.Contains(PackageMapping.AllPackages, StringComparer.OrdinalIgnoreCase))
-                {
-                    AddPattern(
-                        patternsBySourceKey,
-                        sourceKey,
-                        PackageSourceOverrideMappings.DefaultPackagePattern);
-                }
-            }
-        }
-
-        var authoritativePatterns = selectedMappings
-            .Where(mapping =>
-                mapping.PackageFilter != PackageMapping.AllPackages &&
-                !(!hasAuthoritativeAspirePolicy &&
-                  PackageSourceIdentity.Comparer.Equals(mapping.Source, packageScopedAppendSource) &&
-                  string.Equals(
-                      mapping.PackageFilter,
-                      PackageSourceOverrideMappings.DefaultPackagePattern,
-                      StringComparison.OrdinalIgnoreCase)))
-            .Select(static mapping => mapping.PackageFilter)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var authoritativeSources = selectedMappings
-            .Where(static mapping => mapping.PackageFilter != PackageMapping.AllPackages)
-            .Select(static mapping => mapping.Source)
-            .ToHashSet(PackageSourceIdentity.Comparer);
-        foreach (var patterns in patternsBySourceKey.Values)
-        {
-            patterns.RemoveAll(pattern => authoritativePatterns.Any(
-                authoritativePattern => PackageSourceOverrideMappings.CompetesWithAuthoritativePattern(
-                    pattern,
-                    authoritativePattern)));
-        }
-
-        foreach (var mapping in selectedMappings)
-        {
-            if (ambientMappings.Count > 0 &&
-                mapping.PackageFilter == PackageMapping.AllPackages &&
-                !authoritativeSources.Contains(mapping.Source))
-            {
-                // Existing mapping policy already owns unrelated package eligibility. Do not
-                // broaden it with a channel fallback source.
-                continue;
-            }
-
-            foreach (var source in selectedSources.Where(
-                source => PackageSourceIdentity.Comparer.Equals(source.Source, mapping.Source)))
-            {
-                AddPattern(patternsBySourceKey, source.Key, mapping.PackageFilter);
-            }
-        }
-
-        return patternsBySourceKey
-            .Where(static mapping => mapping.Value.Count > 0)
-            .Select(static mapping => new NuGetPackageSourceMapping(
-                mapping.Key,
-                [.. mapping.Value]))
-            .ToArray();
-    }
+        => NuGetInvocationConfigurationComposer.ComposePackageSourceMappings(
+            selectedMappings,
+            ambientMappings,
+            ambientSources,
+            selectedSources,
+            packageScopedAppendSource,
+            hasAuthoritativeAspirePolicy);
 
     private IEnumerable<string>? GetNuGetSources()
         => _restoreSources.PackageSourceMappings is null && _restoreSources.AdditionalSources.Count > 0
@@ -766,7 +557,7 @@ internal sealed class IntegrationRestorePlan
         }
 
         var primarySource = packageSourceHints[0];
-        return _configSources
+        return _invocationConfiguration.ConfigSources
             .FirstOrDefault(source => PackageSourceIdentity.Comparer.Equals(source.Source, primarySource))
             ?.Key ?? primarySource;
     }
@@ -802,27 +593,18 @@ internal sealed class IntegrationRestorePlan
             return null;
         }
 
-        var overlay = CreateNuGetConfigOverlay(
-            _restoreSources.PackageSourceMappings,
-            _settings,
-            _configSources,
+        var config = await _invocationConfiguration.CreateTemporaryOverlayAsync(
+            parentDirectory: null,
             globalPackagesFolder: null,
-            packageScopedAppendSource: _restoreSources.PackageScopedAppendSource,
-            hasAuthoritativeAspirePolicy: _restoreSources.HasAuthoritativeAspirePolicy);
-        var config = await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-            path => _nugetService.WriteNuGetConfigOverlay(
-                overlay,
-                path,
-                cancellationToken)).ConfigureAwait(false);
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Integration restore mappings did not produce a NuGet policy overlay.");
         return await ConfigureGlobalPackagesFolderAsync(
             config,
-            overlay,
             cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<TemporaryNuGetConfig> ConfigureGlobalPackagesFolderAsync(
         TemporaryNuGetConfig config,
-        NuGetConfigOverlay overlay,
         CancellationToken cancellationToken)
     {
         var globalPackagesFolder = GetGlobalPackagesFolder(config);
@@ -834,9 +616,9 @@ internal sealed class IntegrationRestorePlan
         try
         {
             await config.RegenerateAsync(
-                path => _nugetService.WriteNuGetConfigOverlay(
-                    overlay with { GlobalPackagesFolder = globalPackagesFolder },
+                path => _invocationConfiguration.WriteOverlay(
                     path,
+                    globalPackagesFolder,
                     cancellationToken)).ConfigureAwait(false);
             return config;
         }
@@ -847,22 +629,6 @@ internal sealed class IntegrationRestorePlan
         }
     }
 
-    private static void AddPattern(
-        Dictionary<string, List<string>> patternsBySourceKey,
-        string sourceKey,
-        string pattern)
-    {
-        if (!patternsBySourceKey.TryGetValue(sourceKey, out var patterns))
-        {
-            patterns = [];
-            patternsBySourceKey.Add(sourceKey, patterns);
-        }
-
-        if (!patterns.Contains(pattern, StringComparer.OrdinalIgnoreCase))
-        {
-            patterns.Add(pattern);
-        }
-    }
 }
 
 internal sealed record NuGetConfigSource(

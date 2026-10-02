@@ -67,6 +67,41 @@ internal sealed class TemporaryNuGetConfig : IDisposable
         }
     }
 
+    public static async Task<TemporaryNuGetConfig> CreateRestoreOverlayAsync(
+        DirectoryInfo parentDirectory,
+        Action<string> writeConfig)
+    {
+        ArgumentNullException.ThrowIfNull(parentDirectory);
+        ArgumentNullException.ThrowIfNull(writeConfig);
+
+        parentDirectory.Create();
+        string tempDirectory;
+        do
+        {
+            tempDirectory = Path.Combine(
+                parentDirectory.FullName,
+                $".aspire-nuget-config-{Path.GetRandomFileName()}");
+        }
+        while (Directory.Exists(tempDirectory));
+
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            // NuGet discovers configuration by walking up from the working directory. The overlay
+            // must therefore live below the caller's directory rather than in the system temp
+            // directory, otherwise workspace and user configuration would be skipped.
+            var configFile = new FileInfo(Path.Combine(tempDirectory, "NuGet.Config"));
+            writeConfig(configFile.FullName);
+
+            return new TemporaryNuGetConfig(configFile, await ComputeCacheIdentityAsync(configFile).ConfigureAwait(false));
+        }
+        catch
+        {
+            TryDeleteDirectory(tempDirectory);
+            throw;
+        }
+    }
+
     /// <summary>
     /// Generates a standalone NuGet.config file at the specified path with the given package mappings.
     /// </summary>

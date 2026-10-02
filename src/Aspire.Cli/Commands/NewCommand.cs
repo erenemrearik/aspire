@@ -442,6 +442,9 @@ internal sealed class NewCommand : BaseCommand
                         ExecutionContext.WorkingDirectory,
                         templateDiscoveryMappings,
                         filterLocalPackagesToPinnedVersion: !isUnqualifiedLocalResolution,
+                        string.IsNullOrWhiteSpace(source)
+                            ? NuGetPackageSearchPolicy.AmbientOverlay
+                            : NuGetPackageSearchPolicy.Exclusive,
                         cancellationToken))
                         .Where(p => Semver.SemVersion.TryParse(p.Version, Semver.SemVersionStyles.Strict, out _))
                         .ToArray();

@@ -2906,8 +2906,8 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
     public async Task AddCommand_WithPrHive_PrefersCurrentCliVersion()
     {
         // PR-hive packages are discovered through the package-search code path: the
-        // explicit channel maps to a separate NuGet source that, when queried, returns
-        // a package pinned to the current CLI version.
+        // explicit channel maps to a separate NuGet source through an invocation overlay
+        // that returns a package pinned to the current CLI version.
         var cliVersion = VersionHelper.GetDefaultSdkVersion();
 
         var (exitCode, selectedVersion, prompted) = await RunAddRedisWithHiveScenarioAsync(
@@ -2917,9 +2917,10 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
                 hivesDir.Create();
                 hivesDir.CreateSubdirectory("pr-12345");
             },
-            searchCallback: nugetSource => nugetSource is null
-                ? new[] { new NuGetPackage { Id = "Aspire.Hosting.Redis", Source = "implicit", Version = "13.2.2" } }
-                : new[] { new NuGetPackage { Id = "Aspire.Hosting.Redis", Source = "pr-hive", Version = cliVersion } },
+            searchCallback: (workingDirectory, nugetSource) =>
+                nugetSource is not null || File.Exists(Path.Combine(workingDirectory.FullName, "NuGet.Config"))
+                    ? [new NuGetPackage { Id = "Aspire.Hosting.Redis", Source = "pr-hive", Version = cliVersion }]
+                    : [new NuGetPackage { Id = "Aspire.Hosting.Redis", Source = "implicit", Version = "13.2.2" }],
             promptFailureMessage: "Should not prompt when the current CLI version is available in a PR hive.");
 
         Assert.Equal(0, exitCode);
@@ -3030,7 +3031,7 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
                 File.WriteAllText(Path.Combine(localPackagesDir.FullName, $"Aspire.Hosting.{cliVersion}.nupkg"), string.Empty);
                 File.WriteAllText(Path.Combine(localPackagesDir.FullName, $"Aspire.Hosting.Redis.{cliVersion}.nupkg"), string.Empty);
             },
-            searchCallback: _ => new[] { new NuGetPackage { Id = "Aspire.Hosting.Redis", Source = "implicit", Version = "13.2.2" } },
+            searchCallback: (_, _) => [new NuGetPackage { Id = "Aspire.Hosting.Redis", Source = "implicit", Version = "13.2.2" }],
             promptFailureMessage: "Should not prompt when the current CLI version is available in the local hive.");
 
         Assert.Equal(0, exitCode);
@@ -3071,7 +3072,7 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
                 File.WriteAllText(Path.Combine(prPackagesDir.FullName, $"Aspire.Hosting.{staleVersion}.nupkg"), string.Empty);
                 File.WriteAllText(Path.Combine(prPackagesDir.FullName, $"Aspire.Hosting.Redis.{staleVersion}.nupkg"), string.Empty);
             },
-            searchCallback: _ => new[] { new NuGetPackage { Id = "Aspire.Hosting.Redis", Source = "implicit", Version = "13.2.2" } },
+            searchCallback: (_, _) => [new NuGetPackage { Id = "Aspire.Hosting.Redis", Source = "implicit", Version = "13.2.2" }],
             promptFailureMessage: "Should not prompt; CLI-version match in local hive should win.");
 
         Assert.Equal(0, exitCode);
@@ -3168,7 +3169,7 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
     /// </summary>
     private async Task<(int ExitCode, string SelectedVersion, bool PromptInvoked)> RunAddRedisWithHiveScenarioAsync(
         Action<TemporaryWorkspace> configureHives,
-        Func<FileInfo?, NuGetPackage[]> searchCallback,
+        Func<DirectoryInfo, FileInfo?, NuGetPackage[]> searchCallback,
         string promptFailureMessage)
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
@@ -3204,7 +3205,7 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
                 var runner = new TestDotNetCliRunner();
                 runner.SearchPackagesAsyncCallback = (dir, query, exactMatch, prerelease, take, skip, nugetSource, useCache, invocationOptions, cancellationToken) =>
                 {
-                    return (0, searchCallback(nugetSource));
+                    return (0, searchCallback(dir, nugetSource));
                 };
 
                 runner.AddPackageAsyncCallback = (projectFilePath, packageName, packageVersion, nugetSource, noRestore, invocationOptions, cancellationToken) =>

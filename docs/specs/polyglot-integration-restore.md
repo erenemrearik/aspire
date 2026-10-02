@@ -145,6 +145,8 @@ The CLI matches effective Aspire package source locations to the opaque identiti
 
 When the effective policy includes package-source mappings, the CLI writes a small `NuGet.Config` overlay.
 
+A shared NuGet invocation configuration source resolves the ambient settings snapshot, source aliases, and effective mapping overlay for both integration restore and channel-aware package or template operations. Stable channel operations contribute no selected source policy and use ambient NuGet configuration directly. Other channels contribute only their Aspire-specific mappings; their synthetic `*` fallback is not copied into the invocation overlay, so ambient configuration continues to own unrelated package sources. SDK-driven package searches and template installation place the temporary overlay below the caller's working directory so normal NuGet hierarchy discovery still loads repository and user configuration.
+
 A selected channel or explicit source override augments the effective `packageSources` set: its source is introduced when it is not already configured, while ambient sources remain available. Package eligibility is different. The effective `packageSourceMapping` policy selectively replaces ambient mappings that can tie with or outrank an authoritative selected pattern. A package-scoped `aspire add --source` mapping keeps the exact selected package authoritative while mapping both the appended source and the resolved identity or channel feed to `Aspire*`.
 
 The overlay can contain:

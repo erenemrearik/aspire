@@ -131,7 +131,12 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
 
     public Task<IEnumerable<NuGetPackage>> GetTemplatePackagesAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
     {
-        return GetTemplatePackagesAsync(workingDirectory, Mappings, filterLocalPackagesToPinnedVersion: true, cancellationToken);
+        return GetTemplatePackagesAsync(
+            workingDirectory,
+            Mappings,
+            filterLocalPackagesToPinnedVersion: true,
+            NuGetPackageSearchPolicy.AmbientOverlay,
+            cancellationToken);
     }
 
     /// <summary>
@@ -139,7 +144,12 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
     /// </summary>
     public Task<IEnumerable<NuGetPackage>> GetTemplatePackagesAsync(DirectoryInfo workingDirectory, PackageMapping[]? mappings, CancellationToken cancellationToken)
     {
-        return GetTemplatePackagesAsync(workingDirectory, mappings, filterLocalPackagesToPinnedVersion: false, cancellationToken);
+        return GetTemplatePackagesAsync(
+            workingDirectory,
+            mappings,
+            filterLocalPackagesToPinnedVersion: false,
+            NuGetPackageSearchPolicy.Exclusive,
+            cancellationToken);
     }
 
     /// <summary>
@@ -150,6 +160,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
         DirectoryInfo workingDirectory,
         PackageMapping[]? mappings,
         bool filterLocalPackagesToPinnedVersion,
+        NuGetPackageSearchPolicy searchPolicy,
         CancellationToken cancellationToken)
     {
         validateTemplatePackageMetadataPrefetching?.Invoke();
@@ -171,16 +182,20 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
 
         var tasks = new List<Task<IEnumerable<NuGetPackage>>>();
 
-        using var tempNuGetConfig = mappings is not null ? await TemporaryNuGetConfig.CreateAsync(mappings) : null;
+        using var searchConfiguration = await CreateSearchConfigurationAsync(
+            workingDirectory,
+            mappings,
+            searchPolicy,
+            cancellationToken);
 
         if (Quality is PackageChannelQuality.Stable || Quality is PackageChannelQuality.Both)
         {
-            tasks.Add(nuGetPackageCache.GetTemplatePackagesAsync(workingDirectory, false, tempNuGetConfig?.ConfigFile, cancellationToken));
+            tasks.Add(nuGetPackageCache.GetTemplatePackagesAsync(searchConfiguration, false, cancellationToken));
         }
 
         if (Quality is PackageChannelQuality.Prerelease || Quality is PackageChannelQuality.Both)
         {
-            tasks.Add(nuGetPackageCache.GetTemplatePackagesAsync(workingDirectory, true, tempNuGetConfig?.ConfigFile, cancellationToken));
+            tasks.Add(nuGetPackageCache.GetTemplatePackagesAsync(searchConfiguration, true, cancellationToken));
         }
 
         var packageResults = await Task.WhenAll(tasks);
@@ -213,6 +228,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
             workingDirectory,
             Mappings,
             applyPinnedVersion: true,
+            NuGetPackageSearchPolicy.AmbientOverlay,
             cancellationToken);
     }
 
@@ -227,6 +243,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
             workingDirectory,
             mappings,
             applyPinnedVersion: false,
+            NuGetPackageSearchPolicy.Exclusive,
             cancellationToken);
     }
 
@@ -234,6 +251,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
         DirectoryInfo workingDirectory,
         PackageMapping[]? mappings,
         bool applyPinnedVersion,
+        NuGetPackageSearchPolicy searchPolicy,
         CancellationToken cancellationToken)
     {
         if (GetLocalAspirePackageSource(mappings) is { } localPackageSource)
@@ -247,16 +265,20 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
 
         var tasks = new List<Task<IEnumerable<NuGetPackage>>>();
 
-        using var tempNuGetConfig = mappings is not null ? await TemporaryNuGetConfig.CreateAsync(mappings) : null;
+        using var searchConfiguration = await CreateSearchConfigurationAsync(
+            workingDirectory,
+            mappings,
+            searchPolicy,
+            cancellationToken);
 
         if (Quality is PackageChannelQuality.Stable || Quality is PackageChannelQuality.Both)
         {
-            tasks.Add(nuGetPackageCache.GetIntegrationPackagesAsync(workingDirectory, false, tempNuGetConfig?.ConfigFile, cancellationToken));
+            tasks.Add(nuGetPackageCache.GetIntegrationPackagesAsync(searchConfiguration, false, cancellationToken));
         }
 
         if (Quality is PackageChannelQuality.Prerelease || Quality is PackageChannelQuality.Both)
         {
-            tasks.Add(nuGetPackageCache.GetIntegrationPackagesAsync(workingDirectory, true, tempNuGetConfig?.ConfigFile, cancellationToken));
+            tasks.Add(nuGetPackageCache.GetIntegrationPackagesAsync(searchConfiguration, true, cancellationToken));
         }
 
         var packageResults = await Task.WhenAll(tasks);
@@ -410,6 +432,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
             workingDirectory,
             Mappings,
             applyPinnedVersion: true,
+            NuGetPackageSearchPolicy.AmbientOverlay,
             cancellationToken);
     }
 
@@ -424,6 +447,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
             workingDirectory,
             mappings,
             applyPinnedVersion: false,
+            NuGetPackageSearchPolicy.Exclusive,
             cancellationToken);
     }
 
@@ -431,6 +455,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
         DirectoryInfo workingDirectory,
         PackageMapping[]? mappings,
         bool applyPinnedVersion,
+        NuGetPackageSearchPolicy searchPolicy,
         CancellationToken cancellationToken)
     {
         if (GetLocalAspirePackageSource(mappings) is { } localPackageSource)
@@ -441,18 +466,22 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
                 cancellationToken);
         }
 
-        using var tempNuGetConfig = mappings is not null ? await TemporaryNuGetConfig.CreateAsync(mappings) : null;
+        using var searchConfiguration = await CreateSearchConfigurationAsync(
+            workingDirectory,
+            mappings,
+            searchPolicy,
+            cancellationToken);
 
         var tasks = new List<Task<IEnumerable<NuGetPackage>>>();
 
         if (Quality is PackageChannelQuality.Stable or PackageChannelQuality.Both)
         {
-            tasks.Add(nuGetPackageCache.GetPackagesAsync(workingDirectory, PolyglotTagSearchTerm, filter: null, prerelease: false, tempNuGetConfig?.ConfigFile, useCache: true, cancellationToken));
+            tasks.Add(nuGetPackageCache.GetPackagesAsync(searchConfiguration, PolyglotTagSearchTerm, filter: null, prerelease: false, useCache: true, cancellationToken));
         }
 
         if (Quality is PackageChannelQuality.Prerelease or PackageChannelQuality.Both)
         {
-            tasks.Add(nuGetPackageCache.GetPackagesAsync(workingDirectory, PolyglotTagSearchTerm, filter: null, prerelease: true, tempNuGetConfig?.ConfigFile, useCache: true, cancellationToken));
+            tasks.Add(nuGetPackageCache.GetPackagesAsync(searchConfiguration, PolyglotTagSearchTerm, filter: null, prerelease: true, useCache: true, cancellationToken));
         }
 
         var results = await Task.WhenAll(tasks);
@@ -553,16 +582,18 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
 
         var tasks = new List<Task<IEnumerable<NuGetPackage>>>();
 
-        using var tempNuGetConfig = Type is PackageChannelType.Explicit ? await TemporaryNuGetConfig.CreateAsync(Mappings!) : null;
+        using var searchConfiguration = await nuGetPackageCache.CreateAmbientOverlayAsync(
+            workingDirectory,
+            Mappings,
+            cancellationToken);
 
         if (Quality is PackageChannelQuality.Stable || Quality is PackageChannelQuality.Both)
         {
             tasks.Add(nuGetPackageCache.GetPackagesAsync(
-                workingDirectory: workingDirectory,
+                configuration: searchConfiguration,
                 packageId: packageId,
                 filter: id => id.Equals(packageId, StringComparisons.NuGetPackageId),
                 prerelease: false,
-                nugetConfigFile: tempNuGetConfig?.ConfigFile,
                 useCache: true, // Enable caching for package channel resolution
                 cancellationToken: cancellationToken));
         }
@@ -570,11 +601,10 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
         if (Quality is PackageChannelQuality.Prerelease || Quality is PackageChannelQuality.Both)
         {
             tasks.Add(nuGetPackageCache.GetPackagesAsync(
-                workingDirectory: workingDirectory,
+                configuration: searchConfiguration,
                 packageId: packageId,
                 filter: id => id.Equals(packageId, StringComparisons.NuGetPackageId),
                 prerelease: true,
-                nugetConfigFile: tempNuGetConfig?.ConfigFile,
                 useCache: true, // Enable caching for package channel resolution
                 cancellationToken: cancellationToken));
         }
@@ -591,11 +621,10 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
         if (Quality is PackageChannelQuality.Stable && !packages.Any())
         {
             packages = await nuGetPackageCache.GetPackagesAsync(
-                workingDirectory: workingDirectory,
+                configuration: searchConfiguration,
                 packageId: packageId,
                 filter: id => id.Equals(packageId, StringComparisons.NuGetPackageId),
                 prerelease: true,
-                nugetConfigFile: tempNuGetConfig?.ConfigFile,
                 useCache: true, // Enable caching for package channel resolution
                 cancellationToken: cancellationToken);
 
@@ -649,6 +678,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
             packageId,
             workingDirectory,
             Mappings,
+            NuGetPackageSearchPolicy.AmbientOverlay,
             cancellationToken);
     }
 
@@ -656,6 +686,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
         string packageId,
         DirectoryInfo workingDirectory,
         PackageMapping[]? mappings,
+        NuGetPackageSearchPolicy searchPolicy,
         CancellationToken cancellationToken)
     {
         if (GetLocalAspirePackageSource(mappings) is { } localPackageSource)
@@ -669,15 +700,18 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
 
         var tasks = new List<Task<IEnumerable<NuGetPackage>>>();
 
-        using var tempNuGetConfig = mappings is not null ? await TemporaryNuGetConfig.CreateAsync(mappings) : null;
+        using var searchConfiguration = await CreateSearchConfigurationAsync(
+            workingDirectory,
+            mappings,
+            searchPolicy,
+            cancellationToken);
 
         if (Quality is PackageChannelQuality.Stable || Quality is PackageChannelQuality.Both)
         {
             tasks.Add(nuGetPackageCache.GetPackageVersionsAsync(
-                workingDirectory: workingDirectory,
+                configuration: searchConfiguration,
                 exactPackageId: packageId,
                 prerelease: false,
-                nugetConfigFile: tempNuGetConfig?.ConfigFile,
                 useCache: true, // Enable caching for package channel resolution
                 cancellationToken: cancellationToken));
         }
@@ -685,10 +719,9 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
         if (Quality is PackageChannelQuality.Prerelease || Quality is PackageChannelQuality.Both)
         {
             tasks.Add(nuGetPackageCache.GetPackageVersionsAsync(
-                workingDirectory: workingDirectory,
+                configuration: searchConfiguration,
                 exactPackageId: packageId,
                 prerelease: true,
-                nugetConfigFile: tempNuGetConfig?.ConfigFile,
                 useCache: true, // Enable caching for package channel resolution
                 cancellationToken: cancellationToken));
         }
@@ -705,10 +738,9 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
         if (Quality is PackageChannelQuality.Stable && !packages.Any())
         {
             packages = await nuGetPackageCache.GetPackageVersionsAsync(
-                workingDirectory: workingDirectory,
+                configuration: searchConfiguration,
                 exactPackageId: packageId,
                 prerelease: true,
-                nugetConfigFile: tempNuGetConfig?.ConfigFile,
                 useCache: true, // Enable caching for package channel resolution
                 cancellationToken: cancellationToken);
 
@@ -726,6 +758,37 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
         });
 
         return filteredPackages;
+    }
+
+    public Task<IEnumerable<NuGetPackage>> GetPackageVersionsAsync(
+        string packageId,
+        DirectoryInfo workingDirectory,
+        PackageMapping[]? mappings,
+        CancellationToken cancellationToken)
+        => GetPackageVersionsAsync(
+            packageId,
+            workingDirectory,
+            mappings,
+            NuGetPackageSearchPolicy.AmbientOverlay,
+            cancellationToken);
+
+    internal Task<NuGetPackageSearchConfiguration> CreateSearchConfigurationAsync(
+        DirectoryInfo workingDirectory,
+        PackageMapping[]? mappings,
+        NuGetPackageSearchPolicy searchPolicy,
+        CancellationToken cancellationToken)
+    {
+        return searchPolicy switch
+        {
+            NuGetPackageSearchPolicy.AmbientOverlay => nuGetPackageCache.CreateAmbientOverlayAsync(
+                workingDirectory,
+                mappings,
+                cancellationToken),
+            NuGetPackageSearchPolicy.Exclusive => nuGetPackageCache.CreateStandaloneAsync(
+                workingDirectory,
+                mappings ?? []),
+            _ => throw new ArgumentOutOfRangeException(nameof(searchPolicy))
+        };
     }
 
     private IEnumerable<NuGetPackage> GetPackageVersionsFromLocalPackageSource(
