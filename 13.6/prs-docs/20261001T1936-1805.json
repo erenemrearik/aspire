@@ -1,0 +1,9 @@
+{
+  "author": "IEvangelist",
+  "comment": "Website infrastructure fix for SSE stream lifetime and telemetry; not documentation of a product PR",
+  "mergedAt": "2026-10-01T19:36:50Z",
+  "number": 1805,
+  "runDate": "2026-10-02T00:08:41Z",
+  "status": "excluded",
+  "title": "Cap live SSE stream lifetime and fix response-time telemetry"
+}

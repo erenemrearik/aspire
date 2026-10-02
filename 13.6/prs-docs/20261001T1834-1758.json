@@ -1,0 +1,9 @@
+{
+  "author": "IEvangelist",
+  "comment": "Website-only fix for YouTube live PiP player error; not documentation of a product PR",
+  "mergedAt": "2026-10-01T18:34:36Z",
+  "number": 1758,
+  "runDate": "2026-10-02T00:08:41Z",
+  "status": "excluded",
+  "title": "Fix YouTube live Picture-in-Picture Error 153"
+}
