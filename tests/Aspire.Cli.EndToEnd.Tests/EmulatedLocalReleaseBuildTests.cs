@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Aspire.Cli.EndToEnd.Tests.Helpers;
@@ -25,9 +26,9 @@ namespace Aspire.Cli.EndToEnd.Tests;
 /// makes the override honored under any emulated channel name, not just <c>local</c>).
 ///
 /// This class is the <b>all-local stable</b> row of the AppHost-language × channel matrix, with one
-/// test per AppHost language (C# and TypeScript). We keep a test per language rather than collapsing
-/// them because C# and TypeScript AppHosts scaffold through different code paths and have diverged in
-/// behavior before, so each cell of the matrix must be exercised independently.
+/// scaffolding test per AppHost language (C# and TypeScript) plus focused TypeScript coverage for
+/// package-scoped source composition. We keep the language tests separate because C# and TypeScript
+/// AppHosts scaffold through different code paths and have diverged in behavior before.
 ///
 /// <para>
 /// <b>Gating / cost:</b> these tests only run when the CLI was installed from a local hive archive
@@ -179,6 +180,86 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// Verifies that a package-scoped <c>aspire add --source</c> appends the selected feed instead of
+    /// replacing the future-stable identity feed. The explicit source contains only a third-party
+    /// integration package; its exact <c>Aspire.Hosting</c> dependency exists only in the local hive.
+    /// The hive is deliberately not registered in ambient NuGet configuration, so a cold restore can
+    /// succeed only when the CLI composes both invocation-scoped sources.
+    /// </summary>
+    [CaptureWorkspaceOnFailure]
+    [Fact]
+    public async Task EmulatedLocalReleaseAppendsThirdPartySourceForTypeScriptRestore()
+    {
+        const string packageId = "CommunityToolkit.Aspire.Hosting.SourceAppendProbe";
+        const string packageVersion = "1.0.0";
+
+        var repoRoot = CliE2ETestHelpers.GetRepoRoot();
+        var strategy = CliInstallStrategy.Detect(output.WriteLine);
+        var localStableVersion = RequireLocalStableArchiveOrSkip(repoRoot, strategy);
+        var workspace = TemporaryWorkspace.Create(output);
+        CreateThirdPartyIntegrationPackage(
+            Path.Combine(workspace.WorkspaceRoot.FullName, "explicit-feed"),
+            packageId,
+            packageVersion,
+            localStableVersion);
+
+        using var terminal = CliE2ETestHelpers.CreateDockerTestTerminal(
+            repoRoot,
+            strategy,
+            output,
+            workspace: workspace);
+        var counter = new SequenceCounter();
+        var auto = new Hex1bTerminalAutomator(terminal, defaultTimeout: TimeSpan.FromSeconds(500));
+        await using var terminalRun = CliE2ETestHelpers.StartRun(
+            terminal,
+            workspace,
+            auto,
+            counter,
+            output,
+            TestContext.Current.CancellationToken);
+
+        await auto.PrepareDockerEnvironmentAsync(counter, workspace);
+        await InstallLocalHiveWithoutLocalChannelAsync(auto, counter);
+        await ApplyEmulatedLocalReleaseIdentityAsync(auto, counter, localStableVersion);
+
+        // Use an empty per-test package cache so a globally cached Aspire.Hosting cannot conceal
+        // loss of the identity-local source. The local hive must remain invocation-scoped: unlike
+        // the C# AppHost tests above, this polyglot path does not need it registered with NuGet.
+        await auto.RunCommandAsync("export NUGET_PACKAGES=\"$PWD/.nuget-packages\"", counter);
+        await auto.RunCommandAsync(
+            "if dotnet nuget list source | grep -F \"$HOME/.aspire/hives/local/packages\"; then " +
+            "echo 'The local hive must not be registered as an ambient source.' >&2; exit 1; fi",
+            counter);
+
+        await auto.TypeAsync("aspire init --language typescript --non-interactive --suppress-agent-init");
+        await auto.EnterAsync();
+        await auto.WaitUntilTextAsync("Created apphost.mts", timeout: TimeSpan.FromMinutes(2));
+        await auto.WaitForSuccessPromptAsync(counter);
+
+        var configPath = Path.Combine(workspace.WorkspaceRoot.FullName, "aspire.config.json");
+        Assert.Equal(localStableVersion, GetSdkVersionFromAspireConfig(configPath));
+
+        await auto.TypeAsync(
+            $"aspire add {packageId} --version {packageVersion} --source explicit-feed --non-interactive");
+        await auto.EnterAsync();
+        await auto.WaitForAspireAddSuccessAsync(counter, TimeSpan.FromMinutes(3));
+
+        Assert.Equal(packageVersion, GetPackageVersionFromAspireConfig(configPath, packageId));
+
+        var packageCacheId = packageId.ToLowerInvariant();
+        var sourceMetadata = $".nuget-packages/{packageCacheId}/{packageVersion}/.nupkg.metadata";
+        var hostingMetadata = $".nuget-packages/aspire.hosting/{localStableVersion}/.nupkg.metadata";
+        await auto.RunCommandAsync(
+            $"test \"$(find explicit-feed -maxdepth 1 -name '*.nupkg' | wc -l)\" -eq 1 && " +
+            $"test -f {sourceMetadata} && test -f {hostingMetadata} && " +
+            $"python3 -c 'import json,os; " +
+            $"selected=json.load(open(\"{sourceMetadata}\")); hosting=json.load(open(\"{hostingMetadata}\")); " +
+            "assert os.path.realpath(selected[\"source\"]) == os.path.realpath(\"explicit-feed\"); " +
+            "assert os.path.realpath(hosting[\"source\"]) == os.path.realpath(os.path.expandvars(\"$HOME/.aspire/hives/local/packages\"))'",
+            counter);
+    }
+
+    /// <summary>
     /// Asserts the preconditions for an all-local emulated-release run and returns the local stable
     /// version, or skips the test. The run requires (1) the CLI installed from a local hive archive and
     /// (2) that archive built with a stable-shaped version (via <c>localhive --version X.Y.Z</c>). In
@@ -291,6 +372,40 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
         await auto.WaitForSuccessPromptAsync(counter);
     }
 
+    private static void CreateThirdPartyIntegrationPackage(
+        string sourceDirectory,
+        string packageId,
+        string packageVersion,
+        string hostingVersion)
+    {
+        Directory.CreateDirectory(sourceDirectory);
+        var packagePath = Path.Combine(sourceDirectory, $"{packageId}.{packageVersion}.nupkg");
+        using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
+        var nuspec = archive.CreateEntry($"{packageId}.nuspec");
+        using (var writer = new StreamWriter(nuspec.Open()))
+        {
+            writer.Write($"""
+                <?xml version="1.0"?>
+                <package>
+                  <metadata>
+                    <id>{packageId}</id>
+                    <version>{packageVersion}</version>
+                    <authors>Aspire</authors>
+                    <description>Verifies package-scoped source composition.</description>
+                    <tags>aspire integration hosting polyglot</tags>
+                    <dependencies>
+                      <group targetFramework="net10.0">
+                        <dependency id="Aspire.Hosting" version="[{hostingVersion}]" />
+                      </group>
+                    </dependencies>
+                  </metadata>
+                </package>
+                """);
+        }
+
+        archive.CreateEntry("lib/net10.0/_._");
+    }
+
     private static void AssertNoNuGetConfig(DirectoryInfo projectDir)
     {
         // Match by file name with a case-insensitive comparison rather than relying on the glob
@@ -393,5 +508,25 @@ public sealed class EmulatedLocalReleaseBuildTests(ITestOutputHelper output)
         }
 
         throw new InvalidOperationException($"Could not find an Aspire.* Redis entry in packages of {configPath}.");
+    }
+
+    private static string GetPackageVersionFromAspireConfig(string configPath, string packageId)
+    {
+        if (!File.Exists(configPath))
+        {
+            throw new FileNotFoundException($"Expected aspire.config.json to exist: {configPath}", configPath);
+        }
+
+        using var document = JsonDocument.Parse(File.ReadAllText(configPath));
+        if (document.RootElement.TryGetProperty("packages", out var packages) &&
+            packages.ValueKind == JsonValueKind.Object &&
+            packages.TryGetProperty(packageId, out var packageVersion) &&
+            packageVersion.ValueKind == JsonValueKind.String &&
+            packageVersion.GetString() is { Length: > 0 } version)
+        {
+            return version;
+        }
+
+        throw new InvalidOperationException($"Could not find package '{packageId}' in {configPath}.");
     }
 }

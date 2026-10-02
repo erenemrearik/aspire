@@ -58,11 +58,13 @@ internal static class PackageSourceOverrideMappings
             new(packagePattern, packageSourceOverride)
         };
 
-        if (!packagePattern.EndsWith('*'))
+        if (IsExactPackagePattern(packagePattern))
         {
             // The exact pattern guarantees that the selected integration comes from --source.
-            // Keep the same source generally eligible as well so dependencies that it does carry
-            // can restore there, while ambient sources remain available for the rest of the graph.
+            // Keep that source eligible for the remaining Aspire closure alongside the resolved
+            // channel or ambient feed. NuGet has no source priority, so matching packages can come
+            // from either feed; the exact selected-package pattern remains authoritative.
+            mappings.Add(new PackageMapping(DefaultPackagePattern, packageSourceOverride));
             mappings.Add(new PackageMapping(PackageMapping.AllPackages, packageSourceOverride));
         }
 
@@ -97,6 +99,9 @@ internal static class PackageSourceOverrideMappings
 
     internal static string GetEffectivePackagePattern(string? packagePattern)
         => string.IsNullOrWhiteSpace(packagePattern) ? DefaultPackagePattern : packagePattern;
+
+    internal static bool IsExactPackagePattern(string packagePattern)
+        => !packagePattern.EndsWith('*');
 
     internal static bool MatchesPackage(string packagePattern, string packageName)
         => packagePattern.EndsWith('*')
