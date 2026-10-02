@@ -35,6 +35,25 @@ public class PackageSourceOverrideMappingsTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
+    public void Create_ExactPackagePatternKeepsSourceEligibleForAspireClosure()
+    {
+        const string source = "https://example.com/integration";
+        const string packageId = "CommunityToolkit.Aspire.Hosting.Redis";
+
+        var mappings = PackageSourceOverrideMappings.Create(
+            source,
+            requestedChannel: null,
+            nugetServiceIndexOverride: null,
+            packagePattern: packageId);
+
+        Assert.Equal(
+            [packageId, PackageSourceOverrideMappings.DefaultPackagePattern, PackageMapping.AllPackages],
+            mappings
+                .Where(mapping => PackageSourceIdentity.Comparer.Equals(mapping.Source, source))
+                .Select(static mapping => mapping.PackageFilter));
+    }
+
+    [Fact]
     [PlatformSpecific(TestPlatforms.AnyUnix)]
     public void ResolveForWorkingDirectory_RelativePathContainingColon_ResolvesAgainstWorkingDirectory()
     {

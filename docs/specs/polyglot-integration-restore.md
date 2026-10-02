@@ -55,7 +55,7 @@ The generated root's assets graph still includes packages contributed transitive
 
 Channel selection never changes the NuGet configuration discovery model. Every restore loads the AppHost-anchored hierarchy, then applies the same source-precedence rules:
 
-1. An explicit source override is authoritative for the package IDs controlled by that invocation. A restore-level override controls the `Aspire*` pattern; `aspire add` controls the selected canonical package ID.
+1. An explicit source override is authoritative for the package IDs controlled by that invocation. A restore-level override controls the `Aspire*` pattern; `aspire add` controls the selected canonical package ID and appends the source to the feeds eligible for the remaining Aspire closure.
 2. A selected channel with an Aspire-specific feed is authoritative for the Aspire package patterns owned by that channel.
 3. Otherwise, Aspire packages use the ambient NuGet source and mapping policy.
 
@@ -103,9 +103,11 @@ Polyglot `aspire add` passes the channel selected during package discovery and a
 
 An explicit source scopes package discovery, polyglot compatibility filtering, and version selection exclusively to that source, so the command cannot offer an integration or version that the source does not contain. Without an explicit source, exact-version discovery uses each candidate channel's package-source mappings rather than performing an unscoped ambient search.
 
-After selection, the selected canonical package ID is mapped authoritatively to the explicit source, and that source remains generally eligible for dependencies it also contains. The effective ambient and project-channel policy remains eligible for the rest of the package's dependency closure, including transitive Aspire packages that the specified source does not contain. The `--source` value and its exact package pattern are invocation-scoped; integration references do not persist a per-package restore source.
+After selection, the selected canonical package ID is mapped authoritatively to the explicit source. The source is also mapped for `Aspire*` and general dependencies, while the effective ambient, identity, and project-channel policy remains eligible for the rest of the package's dependency closure. The command therefore appends a package feed rather than treating it as a complete package universe. If the same Aspire package ID and version exists in multiple eligible feeds, NuGet does not provide source priority; the package can come from either feed or an existing global-packages entry.
 
-The selected channel is likewise used only for the add invocation; selecting a package from another channel does not replace the channel persisted for the AppHost. Aspire does not currently persist per-integration channel or source provenance. The add can therefore succeed while a later restore cannot resolve the selected package version through the persisted project policy. That package requires either a project-wide channel change or user-owned NuGet configuration that makes it available. Persisting the selected channel automatically would instead change source policy for every integration in the AppHost.
+The `--source` value and its package mappings are invocation-scoped. Aspire does not currently persist per-integration channel or source provenance in `aspire.config.json`. The add can therefore succeed while a later cold restore cannot resolve the selected package version through the persisted project policy. A corporate mirror that must replace a blocked default feed likewise requires persistent NuGet or project policy; an invocation-scoped appended source does not prevent NuGet from contacting another eligible feed, and an inaccessible feed can still fail restore.
+
+The selected channel is likewise used only for the add invocation; selecting a package from another channel does not replace the channel persisted for the AppHost. Persisting the selected channel automatically would instead change source policy for every integration in the AppHost.
 
 The higher-level source-scoped package discovery behavior is shared with C# AppHosts, but the restore policy and overlays described here are polyglot-specific.
 
@@ -143,7 +145,7 @@ The CLI matches effective Aspire package source locations to the opaque identiti
 
 When the effective policy includes package-source mappings, the CLI writes a small `NuGet.Config` overlay.
 
-A selected channel or explicit source override augments the effective `packageSources` set: its source is introduced when it is not already configured, while ambient sources remain available. Package eligibility is different. The effective `packageSourceMapping` policy selectively replaces ambient mappings that can tie with or outrank an authoritative selected pattern.
+A selected channel or explicit source override augments the effective `packageSources` set: its source is introduced when it is not already configured, while ambient sources remain available. Package eligibility is different. The effective `packageSourceMapping` policy selectively replaces ambient mappings that can tie with or outrank an authoritative selected pattern. A package-scoped `aspire add --source` mapping keeps the exact selected package authoritative while mapping both the appended source and the resolved identity or channel feed to `Aspire*`.
 
 The overlay can contain:
 
@@ -158,7 +160,7 @@ When a selected source is not already represented by an ambient alias, Aspire na
 
 When ambient configuration does not enable package-source mapping, introducing an authoritative Aspire mapping must preserve the prior eligibility of ambient sources for non-Aspire packages. Selecting a channel must not implicitly restrict unrelated dependencies to the channel's fallback source.
 
-Ambient mappings for Aspire package patterns remain effective for stable or default restores. When a source-specific channel or explicit source override is selected, only mappings that compete for those Aspire patterns are replaced.
+Ambient mappings for Aspire package patterns remain effective for stable or default restores. A restore-level `Aspire*` override replaces mappings that compete for that broad pattern. An exact package-scoped override replaces only mappings that can control the selected package; general Aspire mappings remain and the appended source receives its own `Aspire*` mapping.
 
 For a selected `Aspire*` policy:
 
@@ -290,7 +292,8 @@ The SDK project-reference path does not attempt to reproduce MSBuild evaluation 
 | Daily, staging, or PR channel | Replaces competing Aspire mappings while retaining unrelated ambient policy | Can opt into the selected version; the source hint requires a compatible project mapping policy |
 | Local channel | Maps `Aspire*` to the absolute local hive while retaining unrelated ambient mappings | Can opt into the selected version; the local source hint requires a compatible project mapping policy |
 | NuGet service-index proxy override | Does not add or rewrite restore sources; configured ambient URLs remain authoritative | Retains its own restore policy |
-| Explicit `--source` | Pins the invocation-owned package pattern to that source while retaining eligible ambient and channel sources for the remaining dependency closure | Receives a credential-free source hint that requires a compatible project mapping policy |
+| Restore-level explicit `--source` | Maps `Aspire*` exclusively to the explicit source while retaining unrelated ambient policy | Receives a credential-free source hint that requires a compatible project mapping policy |
+| Explicit `aspire add --source` | Pins the selected package to that source and makes both the appended source and resolved identity, channel, or ambient feeds eligible for the remaining Aspire closure; source priority is not guaranteed | Receives a credential-free source hint that requires a compatible project mapping policy |
 | Credential-bearing explicit `--source` | Rejected before package discovery or restore | Not invoked |
 | Credential-bearing configured channel source | Uses the configured source, suppresses raw process logging, and exact-redacts captured diagnostics | Source hint is omitted; retains its own restore policy |
 | Ambient authenticated source | Uses the ambient source key and NuGet-owned credentials | Retains its own configuration and credentials |
