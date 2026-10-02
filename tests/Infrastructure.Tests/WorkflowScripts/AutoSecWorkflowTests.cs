@@ -56,10 +56,12 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("breaking-change")]
     [InlineData("breaking-change-grouped-transition")]
     [InlineData("breaking-change-unlisted-package")]
+    [InlineData("breaking-change-consolidated-versions")]
     [InlineData("cooldown-not-satisfied")]
     [InlineData("cooldown-not-satisfied-unlisted-package")]
     [InlineData("too-many-version-changes")]
     [InlineData("malware-requires-review")]
+    [InlineData("malware-requires-review-unlisted-package")]
     [InlineData("fixes-no-open-alert")]
     [InlineData("fixes-no-open-alert-other-directory")]
     [InlineData("fixes-no-open-alert-vulnerable-copy-remains")]
@@ -117,6 +119,31 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 scenario["contents"]!["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("react", "17.0.2");
                 scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("react", "18.2.0");
                 scenario["responses"]!["https://registry.npmjs.org/react"] = Response(new JsonObject { ["time"] = new JsonObject { ["18.2.0"] = "2026-09-01T00:00:00Z" } });
+                break;
+            case "breaking-change-consolidated-versions":
+                // The lockfile collapses foo@1.0.0 and foo@2.0.0 into foo@2.1.0, moving the
+                // 1.x consumers across a major version.
+                expectedReason = "breaking-change";
+                scenario["contents"]!["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("foo", "1.0.0") + YarnLockEntry("foo", "2.0.0");
+                scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("foo", "2.1.0");
+                scenario["responses"]!["https://registry.npmjs.org/foo"] = Response(new JsonObject { ["time"] = new JsonObject { ["2.1.0"] = "2026-09-01T00:00:00Z" } });
+                break;
+            case "malware-requires-review-unlisted-package":
+                // The lockfile also changes minimist, which has an open malware alert, without
+                // the PR body listing it.
+                expectedReason = "malware-requires-review";
+                scenario["contents"]!["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("minimist", "1.2.5");
+                scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("minimist", "1.2.8");
+                scenario["responses"]!["https://registry.npmjs.org/minimist"] = Response(new JsonObject { ["time"] = new JsonObject { ["1.2.8"] = "2026-09-01T00:00:00Z" } });
+                scenario["alerts"]!.AsArray().Add(new JsonObject
+                {
+                    ["number"] = 9,
+                    ["ecosystem"] = "npm",
+                    ["package"] = "minimist",
+                    ["manifest_path"] = "extension/yarn.lock",
+                    ["first_patched_version"] = null,
+                });
+                scenario["malwareNumbers"] = new JsonArray(9);
                 break;
             case "cooldown-not-satisfied-unlisted-package":
                 // The lockfile also bumps minimist to a release published three days ago.
@@ -456,7 +483,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["nugetConfigText"] = File.ReadAllText(Path.Combine(RepoRoot.Path, "NuGet.config")),
             ["responses"] = new JsonObject
             {
-                ["https://api.nuget.org/v3/registration5-semver1/system.text.json/9.0.5.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
+                ["https://api.nuget.org/v3/registration5-gz-semver2/system.text.json/9.0.5.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
                 ["https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-eng/nuget/v3/index.json"] = ServiceIndex("https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-eng/nuget/v3/flat2/"),
                 ["https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-eng/nuget/v3/flat2/system.text.json/index.json"] = Response(new JsonObject { ["versions"] = new JsonArray("9.0.4", "9.0.5") }),
             },
@@ -490,7 +517,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         const string publicIndex = "https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json";
         var responses = new JsonObject
         {
-            ["https://api.nuget.org/v3/registration5-semver1/contoso.build.engine/1.0.0.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
+            ["https://api.nuget.org/v3/registration5-gz-semver2/contoso.build.engine/1.0.0.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
             ["https://dnceng.pkgs.visualstudio.com/public/_packaging/dotnet9-transport/nuget/v3/index.json"] = ServiceIndex(transportFlat),
             [$"{transportFlat}contoso.build.engine/index.json"] = Response(new JsonObject { ["versions"] = new JsonArray("1.0.0") }),
             [publicIndex] = ServiceIndex("https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/flat2/"),
@@ -504,14 +531,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.True(prefixMapped["value"]!["available_on_approved_feed"]!.GetValue<bool>());
         Assert.Equal(
             [
-                "https://api.nuget.org/v3/registration5-semver1/contoso.build.engine/1.0.0.json",
+                "https://api.nuget.org/v3/registration5-gz-semver2/contoso.build.engine/1.0.0.json",
                 "https://dnceng.pkgs.visualstudio.com/public/_packaging/dotnet9-transport/nuget/v3/index.json",
                 $"{transportFlat}contoso.build.engine/index.json",
             ],
             prefixMapped["urls"]!.AsArray().Select(url => url!.GetValue<string>()));
         Assert.False(exactMapped["value"]!["available_on_approved_feed"]!.GetValue<bool>());
         Assert.Equal(
-            ["https://api.nuget.org/v3/registration5-semver1/contoso.build.tasks/1.0.0.json"],
+            ["https://api.nuget.org/v3/registration5-gz-semver2/contoso.build.tasks/1.0.0.json"],
             exactMapped["urls"]!.AsArray().Select(url => url!.GetValue<string>()));
 
         static JsonObject NuGetLookup(string name, string config, JsonObject responses) => new()
@@ -540,7 +567,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["nugetConfigText"] = File.ReadAllText(Path.Combine(RepoRoot.Path, "NuGet.config")),
             ["responses"] = new JsonObject
             {
-                ["https://api.nuget.org/v3/registration5-semver1/contoso.lib/1.2.3.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
+                ["https://api.nuget.org/v3/registration5-gz-semver2/contoso.lib/1.2.3.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
             },
         });
         var npm = await RunHarnessAsync(new JsonObject

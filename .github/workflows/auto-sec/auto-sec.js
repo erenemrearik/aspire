@@ -569,11 +569,12 @@ function manifestVersionChanges(path, baseText, headText, ecosystem) {
     return changes;
 }
 
-// A new version is breaking unless at least one base version it replaces is a
-// non-breaking predecessor. A package new to the manifest has no predecessor and is
-// left to the cooldown and source gates.
+// A new version is breaking when any base version it replaces crosses a breaking
+// boundary: a lockfile that consolidates `foo@1.x` and `foo@2.0` into `foo@2.1` moves
+// the `1.x` consumers across a major version. A package new to the manifest has no
+// predecessor and is left to the cooldown and source gates.
 function isBreakingVersionChange(change) {
-    return change.from.length > 0 && change.from.every(from => isBreakingChange(from, change.to));
+    return change.from.some(from => isBreakingChange(from, change.to));
 }
 
 /**
@@ -700,8 +701,10 @@ function evaluateApprovalGates(input) {
     }
 
     // Malware alerts have no patched version, so no version check can prove the update
-    // removes the flagged release. Fail closed and leave any PR touching one to a human.
-    if (ecosystem && alerts.some(alert => alert.malware && updates.some(update => updateMatchesAlert(alert, ecosystem, update)))) {
+    // removes the flagged release. Fail closed and leave any PR touching one to a human,
+    // including packages changed only by lockfile regeneration.
+    const touched = [...updates, ...versionChanges];
+    if (ecosystem && alerts.some(alert => alert.malware && touched.some(update => updateMatchesAlert(alert, ecosystem, update)))) {
         reasons.push('malware-requires-review');
     }
 
@@ -897,7 +900,7 @@ async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetc
         case 'nuget': {
             const id = name.toLowerCase();
             const normalizedVersion = version.toLowerCase();
-            const leaf = await fetchJson(fetchImpl, `https://api.nuget.org/v3/registration5-semver1/${id}/${normalizedVersion}.json`);
+            const leaf = await fetchJson(fetchImpl, `https://api.nuget.org/v3/registration5-gz-semver2/${id}/${normalizedVersion}.json`);
             publishedAt = leaf?.published ?? null;
             available = checkAvailability && nugetConfigText ? await isNuGetVersionAvailable(fetchImpl, nugetConfigText, id, normalizedVersion) : null;
             break;

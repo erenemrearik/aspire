@@ -80,7 +80,8 @@ open Dependabot PRs. Pure code findings are out of scope.
   - every package version the diff introduces, listed in the PR body or not, stays
     within the same major version (same minor for `0.x`) and was published at least
     7 days ago
-  - no updated package has an open malware alert (those always need a human review)
+  - no package the diff changes has an open malware alert (those always need a human
+    review)
 - **Remaining alerts** are fixed in a single `[auto-sec]` PR on
   `auto-sec/security-updates`, labeled `auto-sec`. Later runs update that PR
   instead of opening another one. NuGet bumps are made only when the fixed version
