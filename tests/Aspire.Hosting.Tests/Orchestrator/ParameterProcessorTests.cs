@@ -1429,9 +1429,18 @@ public class ParameterProcessorTests
         var history = new SecretRedactionHistory();
         var processor = CreateParameterProcessor(secretRedactionHistory: history);
         var parameter = CreateParameterResource("secret", "initial-secret", secret: true);
-        await processor.InitializeParametersAsync([parameter]).DefaultTimeout();
         using var cts = new CancellationTokenSource();
-        cts.Cancel();
+        parameter.ValueChanged += (_, args, cancellationToken) =>
+        {
+            if (args.Value == "canceled-notification-secret")
+            {
+                cts.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            return Task.CompletedTask;
+        };
+        await processor.InitializeParametersAsync([parameter]).DefaultTimeout();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => parameter.SetValueAsync("canceled-notification-secret", cts.Token)).DefaultTimeout();
         await parameter.SetValueAsync("replacement-secret").DefaultTimeout();
@@ -2145,6 +2154,64 @@ public class ParameterProcessorTests
         await updates.MoveNextAsync().DefaultTimeout();
         Assert.Equal(KnownResourceStates.Running, updates.Current.Snapshot.State?.Text);
         Assert.DoesNotContain(updates.Current.Snapshot.Properties, property => property.Name == KnownProperties.Parameter.Value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ParameterSetValueAsync_CanceledAfterCommit_ReconcilesLatestValue(bool clearValue)
+    {
+        var notificationService = ResourceNotificationServiceTestHelpers.Create();
+        var interactionService = new TestInteractionService { IsAvailable = true };
+        var processor = CreateParameterProcessor(notificationService: notificationService, interactionService: interactionService);
+        var parameter = CreateParameterResource("testParam", "initialValue");
+        var resumeNotifications = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Hold both notifications before the processor observes them, so the older version is stale.
+        parameter.ValueChanged += (_, args, _) => args.Value == "initialValue"
+            ? Task.CompletedTask
+            : resumeNotifications.Task;
+        await using var updates = notificationService.WatchAsync().GetAsyncEnumerator();
+        await processor.InitializeParametersAsync([parameter]).DefaultTimeout();
+        await updates.MoveNextAsync().DefaultTimeout();
+
+        using var cts = new CancellationTokenSource();
+        var olderUpdate = parameter.SetValueAsync("olderValue");
+        var latestUpdate = parameter.SetValueAsync(clearValue ? null : "latestValue", cts.Token);
+        try
+        {
+            Assert.False(olderUpdate.IsCompleted);
+            Assert.False(latestUpdate.IsCompleted);
+            cts.Cancel();
+        }
+        finally
+        {
+            resumeNotifications.TrySetResult();
+        }
+
+        try
+        {
+            await Task.WhenAll(olderUpdate, latestUpdate).DefaultTimeout();
+            await updates.MoveNextAsync().DefaultTimeout();
+            Assert.Equal(clearValue ? KnownResourceStates.ValueMissing : KnownResourceStates.Running, updates.Current.Snapshot.State?.Text);
+            if (clearValue)
+            {
+                await Assert.ThrowsAsync<MissingParameterValueException>(() => parameter.GetValueAsync(CancellationToken.None).AsTask()).DefaultTimeout();
+                var notification = await interactionService.Interactions.Reader.ReadAsync().DefaultTimeout();
+                Assert.Equal(InteractionStrings.ParametersBarTitle, notification.Title);
+                Assert.False(notification.CancellationToken.IsCancellationRequested);
+                await parameter.SetValueAsync("resolvedValue").DefaultTimeout();
+                Assert.True(notification.CancellationToken.IsCancellationRequested);
+            }
+            else
+            {
+                Assert.Equal("latestValue", await parameter.GetValueAsync(CancellationToken.None).DefaultTimeout());
+                AssertParameterValueProperty(updates.Current.Snapshot, "latestValue", isSensitive: false);
+            }
+        }
+        finally
+        {
+            await parameter.SetValueAsync("cleanupValue").DefaultTimeout();
+        }
     }
 
     [Fact]

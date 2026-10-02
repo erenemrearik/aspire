@@ -193,6 +193,32 @@ public class AddParameterTests
         Assert.True(secondObserverInvoked);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ParameterSetAsync_WhenAlreadyCanceled_DoesNotChangeValue(bool setException)
+    {
+        var parameter = new ParameterResource("test", _ => "initial", secret: false);
+        await parameter.SetValueAsync("current").DefaultTimeout();
+        var version = parameter.ValueChangeVersion;
+        var notified = false;
+        parameter.ValueChanged += (_, _, _) =>
+        {
+            notified = true;
+            return Task.CompletedTask;
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => setException
+            ? parameter.SetExceptionAsync(new InvalidOperationException("canceled"), cts.Token)
+            : parameter.SetValueAsync("replacement", cts.Token)).DefaultTimeout();
+
+        Assert.Equal("current", await parameter.GetValueAsync(CancellationToken.None).DefaultTimeout());
+        Assert.Equal(version, parameter.ValueChangeVersion);
+        Assert.False(notified);
+    }
+
     [Fact]
     public async Task ParameterSetValueAsync_AggregatesMultipleObserverFailures()
     {

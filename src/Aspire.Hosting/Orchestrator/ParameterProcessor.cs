@@ -260,13 +260,15 @@ public sealed class ParameterProcessor(
 
     private Task OnParameterValueChangedAsync(ParameterResource parameterResource, ParameterResourceValueChangedEventArgs eventArgs, CancellationToken cancellationToken)
     {
-        return HandleParameterValueChangedAsync(parameterResource, eventArgs, cancellationToken);
+        return HandleParameterValueChangedAsync(parameterResource, eventArgs);
     }
 
-    private async Task HandleParameterValueChangedAsync(ParameterResource parameterResource, ParameterResourceValueChangedEventArgs eventArgs, CancellationToken cancellationToken)
+    private async Task HandleParameterValueChangedAsync(ParameterResource parameterResource, ParameterResourceValueChangedEventArgs eventArgs)
     {
         var updateLock = GetParameterUpdateLock(parameterResource);
-        await updateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // The value is already committed. Cancellation must not strand the latest version
+        // without dashboard or unresolved-parameter updates after older observers skip it.
+        await updateLock.WaitAsync().ConfigureAwait(false);
 
         try
         {

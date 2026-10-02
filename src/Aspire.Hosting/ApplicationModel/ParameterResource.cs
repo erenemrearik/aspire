@@ -285,6 +285,8 @@ public class ParameterResource : Resource, IExpressionValue
     /// Setting a value directly on the resource updates dashboard state after the resource has been observed by the host.
     /// It does not save the value to deployment state. Required parameters set to <see langword="null"/> or an empty string
     /// are faulted with <see cref="MissingParameterValueException"/>, while optional parameters can be cleared to <see langword="null"/>.
+    /// Cancellation is checked before assignment. After assignment, cancellation does not roll back the value or
+    /// prevent the host from synchronizing dashboard and parameter-resolution state, even if another observer reports cancellation.
     /// </remarks>
     [AspireExport("ParameterResource.setValueAsync", MethodName = "setValueAsync")]
     public Task SetValueAsync(string? value = null, CancellationToken cancellationToken = default)
@@ -293,6 +295,7 @@ public class ParameterResource : Resource, IExpressionValue
 
         lock (_valueTaskLock)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var waitForValueTcs = GetOrCreateResettableWaitForValueTcs();
             var missingValueException = CreateMissingValueException(value);
             if (missingValueException is null)
@@ -318,6 +321,10 @@ public class ParameterResource : Resource, IExpressionValue
     /// <param name="cancellationToken">The cancellation token to observe while applying the exception.</param>
     /// <returns>A task that completes when the exception has been applied and observers have processed the change.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="exception"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Cancellation is checked before assignment. After assignment, cancellation does not roll back the exception or
+    /// prevent the host from synchronizing dashboard and parameter-resolution state, even if another observer reports cancellation.
+    /// </remarks>
     public Task SetExceptionAsync(Exception exception, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(exception);
@@ -326,6 +333,7 @@ public class ParameterResource : Resource, IExpressionValue
 
         lock (_valueTaskLock)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             GetOrCreateResettableWaitForValueTcs().SetException(exception);
             eventArgs = CreateValueChangedEventArgs(exception);
         }
