@@ -523,25 +523,141 @@ public sealed class DashboardClientTests(ITestOutputHelper testOutputHelper) : I
         }
     }
 
-    [Fact]
-    public async Task WhenResourcesReady_ReconnectWaitsForNewSnapshot()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenResourcesReady_InteractionReconnectPreservesResourceReadiness(bool resourcesReceived)
     {
+        var resources = Channel.CreateUnbounded<WatchResourcesUpdate>();
+        var firstInteractions = Channel.CreateUnbounded<WatchInteractionsResponseUpdate>();
+        var secondInteractions = Channel.CreateUnbounded<WatchInteractionsResponseUpdate>();
+        var disconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recovered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var interactionSubscriptions = 0;
+        var resourceSubscriptions = 0;
         await using var client = CreateResourceServiceClient();
         client.SetDashboardServiceClient(new MockDashboardServiceClient
         {
-            ResourceUpdatesChannel = Channel.CreateUnbounded<WatchResourcesUpdate>().Reader
+            ResourceUpdatesProvider = () =>
+            {
+                Interlocked.Increment(ref resourceSubscriptions);
+                return resources.Reader;
+            },
+            InteractionUpdatesProvider = () => Interlocked.Increment(ref interactionSubscriptions) == 1
+                ? firstInteractions.Reader : secondInteractions.Reader
         });
+        client.ConnectionStateChanged += state =>
+        {
+            if (state == DashboardConnectionState.Disconnected)
+            {
+                disconnected.TrySetResult();
+            }
+            else if (state == DashboardConnectionState.Connected && disconnected.Task.IsCompleted)
+            {
+                recovered.TrySetResult();
+            }
+        };
         var ready = client.WhenResourcesReady;
         await client.WhenConnected.DefaultTimeout();
-        client.SetInitialDataReceived();
+        if (resourcesReceived)
+        {
+            await resources.Writer.WriteAsync(new WatchResourcesUpdate { InitialData = new InitialResourceData() });
+            await ready.DefaultTimeout();
+        }
+
+        firstInteractions.Writer.Complete(new RpcException(new Status(StatusCode.Unavailable, "Interaction stream disconnected")));
+        await disconnected.Task.DefaultTimeout();
+        Assert.Same(ready, client.WhenResourcesReady);
+        Assert.Equal(resourcesReceived, ready.IsCompleted);
+
+        await secondInteractions.Writer.WriteAsync(new WatchInteractionsResponseUpdate { InteractionId = 1 });
+        await recovered.Task.DefaultTimeout();
+        Assert.Same(ready, client.WhenResourcesReady);
+        Assert.Equal(resourcesReceived, ready.IsCompleted);
+        if (!resourcesReceived)
+        {
+            await resources.Writer.WriteAsync(new WatchResourcesUpdate { InitialData = new InitialResourceData() });
+        }
+        await ready.DefaultTimeout();
+        var (snapshot, _) = await client.SubscribeResourcesAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Empty(snapshot);
+        Assert.Equal(1, Volatile.Read(ref resourceSubscriptions));
+        Assert.Equal(2, Volatile.Read(ref interactionSubscriptions));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenResourcesReady_ResourceReconnectWaitsForPersistedSnapshot(bool failStream)
+    {
+        var first = Channel.CreateUnbounded<WatchResourcesUpdate>();
+        var second = Channel.CreateUnbounded<WatchResourcesUpdate>();
+        var third = Channel.CreateUnbounded<WatchResourcesUpdate>();
+        var subscriptionsStarted = Channel.CreateUnbounded<int>();
+        var persisting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var persisted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var subscriptionCount = 0;
+        var snapshotCount = 0;
+        var writer = new RecordingResourceRepositoryWriter
+        {
+            OnReplaceResourcesAsync = async _ =>
+            {
+                if (Interlocked.Increment(ref snapshotCount) == 2)
+                {
+                    persisting.TrySetResult();
+                    await persisted.Task;
+                }
+            }
+        };
+        await using var client = CreateResourceServiceClient(resourceRepositoryWriter: writer);
+        client.SetDashboardServiceClient(new MockDashboardServiceClient
+        {
+            ResourceUpdatesProvider = () =>
+            {
+                var attempt = Interlocked.Increment(ref subscriptionCount);
+                subscriptionsStarted.Writer.TryWrite(attempt);
+                return attempt switch
+                {
+                    1 => first.Reader,
+                    2 => second.Reader,
+                    _ => third.Reader
+                };
+            }
+        });
+        var ready = client.WhenResourcesReady;
+        Assert.Equal(1, await subscriptionsStarted.Reader.ReadAsync().AsTask().DefaultTimeout());
+        await first.Writer.WriteAsync(new WatchResourcesUpdate { InitialData = new InitialResourceData() });
         await ready.DefaultTimeout();
 
-        client.SetConnectionStateForTesting(DashboardConnectionState.Disconnected);
-        var reconnectedReady = client.WhenResourcesReady;
-        Assert.False(reconnectedReady.IsCompleted);
-        client.SetInitialDataReceived();
-        await reconnectedReady.DefaultTimeout();
-        Assert.NotSame(ready, reconnectedReady);
+        try
+        {
+            first.Writer.Complete(failStream ? new RpcException(new Status(StatusCode.Unavailable, "Resource stream disconnected")) : null);
+            Assert.Equal(2, await subscriptionsStarted.Reader.ReadAsync().AsTask().DefaultTimeout());
+            var replacementReady = client.WhenResourcesReady;
+            Assert.NotSame(ready, replacementReady);
+            Assert.False(replacementReady.IsCompleted);
+            var subscription = client.SubscribeResourcesAsync(CancellationToken.None);
+            Assert.False(subscription.IsCompleted);
+
+            // A retry before its initial snapshot must retain the task that callers are already waiting on.
+            second.Writer.Complete(failStream ? new RpcException(new Status(StatusCode.Unavailable, "Resource stream disconnected again")) : null);
+            Assert.Equal(3, await subscriptionsStarted.Reader.ReadAsync().AsTask().DefaultTimeout());
+            Assert.Same(replacementReady, client.WhenResourcesReady);
+
+            await third.Writer.WriteAsync(new WatchResourcesUpdate { InitialData = new InitialResourceData() });
+            await persisting.Task.DefaultTimeout();
+            Assert.False(replacementReady.IsCompleted);
+            Assert.False(subscription.IsCompleted);
+
+            persisted.SetResult();
+            await replacementReady.DefaultTimeout();
+            var (snapshot, _) = await subscription.DefaultTimeout();
+            Assert.Empty(snapshot);
+        }
+        finally
+        {
+            persisted.TrySetResult();
+        }
     }
 
     [Fact]
@@ -1121,6 +1237,8 @@ public sealed class DashboardClientTests(ITestOutputHelper testOutputHelper) : I
         public IReadOnlyList<WatchResourceConsoleLogsUpdate> ConsoleLogUpdates { get; init; } = [];
         public IReadOnlyList<WatchResourcesUpdate> ResourceUpdates { get; init; } = [];
         public ChannelReader<WatchResourcesUpdate>? ResourceUpdatesChannel { get; init; }
+        public Func<ChannelReader<WatchResourcesUpdate>>? ResourceUpdatesProvider { get; init; }
+        public Func<ChannelReader<WatchInteractionsResponseUpdate>>? InteractionUpdatesProvider { get; init; }
         public Func<ChannelReader<WatchTerminalsUpdate>>? TerminalUpdatesProvider { get; init; }
         public Action? OnTerminalWatchDisposed { get; init; }
         public Activity? ActivityOnGetApplicationInformation { get; private set; }
@@ -1150,9 +1268,9 @@ public sealed class DashboardClientTests(ITestOutputHelper testOutputHelper) : I
         {
             return new AsyncDuplexStreamingCall<WatchInteractionsRequestUpdate, WatchInteractionsResponseUpdate>(
                 new ClientStreamWriter<WatchInteractionsRequestUpdate>(),
-                new AsyncStreamReader<WatchInteractionsResponseUpdate>(),
+                new AsyncStreamReader<WatchInteractionsResponseUpdate>(channel: InteractionUpdatesProvider?.Invoke()),
                 Task.FromResult(new Metadata()),
-                () => new Status(StatusCode.Unimplemented, "Unimplemented!"),
+                () => InteractionUpdatesProvider is null ? new Status(StatusCode.Unimplemented, "Unimplemented!") : Status.DefaultSuccess,
                 () => new Metadata(),
                 () => { });
         }
@@ -1235,7 +1353,7 @@ public sealed class DashboardClientTests(ITestOutputHelper testOutputHelper) : I
                 ? (IAsyncStreamReader<WatchResourcesUpdate>)new FailingAsyncStreamReader<WatchResourcesUpdate>()
                 : new AsyncStreamReader<WatchResourcesUpdate>(
                     Interlocked.Exchange(ref _resourceUpdatesReturned, 1) == 0 ? ResourceUpdates : [],
-                    ResourceUpdatesChannel);
+                    ResourceUpdatesProvider?.Invoke() ?? ResourceUpdatesChannel);
 
             return new AsyncServerStreamingCall<WatchResourcesUpdate>(
                 reader,
