@@ -126,6 +126,33 @@ else
                     <div class="resource-pane-message">@ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesNoResources)]</div>
                 }
 
+                @if (_isLoaded)
+                {
+                    var isAllSelected = _selectedResourceNames.Count == 0;
+                    var allResourceCount = GetAllResourceNames().Count;
+                    var allResourcesText = Loc[nameof(Dashboard.Resources.Layout.ResourceHeaderAllResources)].Value;
+
+                    <div class="resource-row resource-row-all @(isAllSelected ? "selected" : string.Empty)">
+                        <a class="resource-row-link"
+                           href="@GetSelectionUrl([])"
+                           aria-current="@(isAllSelected ? "page" : null)"
+                           title="@allResourcesText"
+                           @onclick="OnAllResourcesClickAsync"
+                           @onclick:preventDefault="true">
+                            <span class="resource-row-icon">
+                                <FluentIcon Width="16px" Value="@(new Icons.Regular.Size20.AppsList())" Color="Color.Custom" CustomColor="currentColor" />
+                            </span>
+                            @if (!showCollapsedPane)
+                            {
+                                <span class="resource-row-text">
+                                    <span class="resource-row-name">@allResourcesText</span>
+                                    <span class="resource-row-sub">@string.Format(CultureInfo.CurrentCulture, allResourceCount == 1 ? Loc[nameof(Dashboard.Resources.Layout.ResourcePaneCountSingular)] : Loc[nameof(Dashboard.Resources.Layout.ResourcePaneCountPlural)], allResourceCount)</span>
+                                </span>
+                            }
+                        </a>
+                    </div>
+                }
+
                 @if (isTagsMode)
                 {
                     @if (_isLoaded && !showCollapsedPane && TagStore.GetAllTags().Count == 0)
@@ -379,18 +406,6 @@ else
                                 <h1 class="resource-title">@SelectedResourceName</h1>
                             </div>
                             <div class="resource-header-meta">@Loc[nameof(Dashboard.Resources.Layout.ResourceHeaderNotFound)]</div>
-                        </div>
-                    }
-                    else if (CurrentTab == ResourceTab.Overview)
-                    {
-                        <span class="resource-header-icon neutral">
-                            <FluentIcon Width="24px" Value="@(new Icons.Regular.Size24.CursorClick())" Color="Color.Default" />
-                        </span>
-                        <div class="resource-header-text">
-                            <div class="resource-header-title">
-                                <h1 class="resource-title">@Loc[nameof(Dashboard.Resources.Layout.ResourceHeaderNoSelection)]</h1>
-                            </div>
-                            <div class="resource-header-meta">@Loc[nameof(Dashboard.Resources.Layout.ResourceHeaderNoSelectionDescription)]</div>
                         </div>
                     }
                     else

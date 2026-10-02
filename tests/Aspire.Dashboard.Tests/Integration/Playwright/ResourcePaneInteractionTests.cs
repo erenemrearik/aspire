@@ -60,6 +60,49 @@ public sealed class ResourcePaneInteractionTests : PlaywrightTestsBase<Dashboard
 
     [Fact]
     [OuterloopTest("Resource-intensive Playwright browser test")]
+    public async Task AllResourcesRow_ClearsSelectionAndListsResourcesInOverview()
+    {
+        const string resourceName = "TestResource";
+
+        await RunTestAsync(async page =>
+        {
+            await page.SetViewportSizeAsync(1280, 900);
+            await page.GotoAsync($"/resources/{resourceName}");
+
+            var pane = page.Locator(".resource-pane");
+            var title = page.Locator("h1.resource-title");
+            var allResourcesLink = pane.Locator(".resource-row-all a");
+            await Assertions.Expect(title).ToHaveTextAsync(resourceName);
+            await Assertions.Expect(allResourcesLink).Not.ToHaveAttributeAsync("aria-current", "page");
+
+            await allResourcesLink.ClickAsync();
+            await Assertions.Expect(title).ToHaveTextAsync(Resources.Layout.ResourceHeaderAllResources);
+            await Assertions.Expect(allResourcesLink).ToHaveAttributeAsync("aria-current", "page");
+            await Assertions.Expect(pane.Locator("a[aria-current]")).ToHaveCountAsync(1);
+
+            var overviewCards = page.GetByRole(AriaRole.List, new PageGetByRoleOptions { Name = Resources.Layout.ResourceHeaderAllResources });
+            await Assertions.Expect(overviewCards.GetByRole(AriaRole.Link, new LocatorGetByRoleOptions { Name = resourceName, Exact = true })).ToBeVisibleAsync();
+
+            // Switching tabs keeps all resources selected, including when returning to the overview.
+            var tabs = page.Locator(".resource-tabs");
+            await tabs.GetByRole(AriaRole.Link, new LocatorGetByRoleOptions { Name = Resources.Layout.NavMenuConsoleLogsTab }).ClickAsync();
+            await page.WaitForURLAsync("**/consolelogs");
+            await Assertions.Expect(title).ToHaveTextAsync(Resources.Layout.ResourceHeaderAllResources);
+
+            await tabs.GetByRole(AriaRole.Link, new LocatorGetByRoleOptions { Name = Resources.Layout.ResourceTabOverview }).ClickAsync();
+            await page.WaitForURLAsync("**/resources");
+            await Assertions.Expect(overviewCards).ToBeVisibleAsync();
+            await Assertions.Expect(allResourcesLink).ToHaveAttributeAsync("aria-current", "page");
+
+            // The cleared selection is remembered when entering the resources view again.
+            await page.GotoAsync("/resources");
+            await Assertions.Expect(overviewCards).ToBeVisibleAsync();
+            await Assertions.Expect(title).ToHaveTextAsync(Resources.Layout.ResourceHeaderAllResources);
+        });
+    }
+
+    [Fact]
+    [OuterloopTest("Resource-intensive Playwright browser test")]
     public async Task ResourceRowModifierClicks_SelectSeveralResources()
     {
         var repository = DashboardServerFixture.DashboardApp.Services.GetRequiredService<ITelemetryRepositoryWriter>();

@@ -202,16 +202,6 @@
         <target state="new">No resource is selected, so data from every resource is shown. Select resources in the list to filter it.</target>
         <note />
       </trans-unit>
-      <trans-unit id="ResourceHeaderNoSelection">
-        <source>No resource selected</source>
-        <target state="new">No resource selected</target>
-        <note />
-      </trans-unit>
-      <trans-unit id="ResourceHeaderNoSelectionDescription">
-        <source>Select a resource in the list. Ctrl+click (Cmd+click on macOS) selects several resources, Shift+click selects a range.</source>
-        <target state="new">Select a resource in the list. Ctrl+click (Cmd+click on macOS) selects several resources, Shift+click selects a range.</target>
-        <note />
-      </trans-unit>
       <trans-unit id="ResourceHeaderNotFound">
         <source>Resource not found</source>
         <target state="new">Resource not found</target>

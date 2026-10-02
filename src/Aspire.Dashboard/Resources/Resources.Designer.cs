@@ -1068,24 +1068,6 @@ namespace Aspire.Dashboard.Resources {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Select resources.
-        /// </summary>
-        public static string ResourceOverviewSelectResourcesTitle {
-            get {
-                return ResourceManager.GetString("ResourceOverviewSelectResourcesTitle", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to Pick a resource in the list to see its overview. Ctrl+click (Cmd+click on macOS) or Shift+click to select several resources and compare them side by side..
-        /// </summary>
-        public static string ResourceOverviewSelectResourcesDescription {
-            get {
-                return ResourceManager.GetString("ResourceOverviewSelectResourcesDescription", resourceCulture);
-            }
-        }
-        
-        /// <summary>
         ///   Looks up a localized string similar to Relationship graph.
         /// </summary>
         public static string ResourceOverviewRelationshipGraph {

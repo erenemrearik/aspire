@@ -449,12 +449,6 @@
   <data name="GraphPageTitle" xml:space="preserve">
     <value>Graph</value>
   </data>
-  <data name="ResourceOverviewSelectResourcesTitle" xml:space="preserve">
-    <value>Select resources</value>
-  </data>
-  <data name="ResourceOverviewSelectResourcesDescription" xml:space="preserve">
-    <value>Pick a resource in the list to see its overview. Ctrl+click (Cmd+click on macOS) or Shift+click to select several resources and compare them side by side.</value>
-  </data>
   <data name="ResourceOverviewRelationshipGraph" xml:space="preserve">
     <value>Relationship graph</value>
   </data>

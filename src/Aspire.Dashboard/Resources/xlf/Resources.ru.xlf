@@ -362,16 +362,6 @@
         <target state="new">Relationships</target>
         <note />
       </trans-unit>
-      <trans-unit id="ResourceOverviewSelectResourcesDescription">
-        <source>Pick a resource in the list to see its overview. Ctrl+click (Cmd+click on macOS) or Shift+click to select several resources and compare them side by side.</source>
-        <target state="new">Pick a resource in the list to see its overview. Ctrl+click (Cmd+click on macOS) or Shift+click to select several resources and compare them side by side.</target>
-        <note />
-      </trans-unit>
-      <trans-unit id="ResourceOverviewSelectResourcesTitle">
-        <source>Select resources</source>
-        <target state="new">Select resources</target>
-        <note />
-      </trans-unit>
       <trans-unit id="ResourceOverviewSelectionSummary">
         <source>Summary of the selected resources</source>
         <target state="new">Summary of the selected resources</target>

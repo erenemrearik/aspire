@@ -610,24 +610,6 @@ namespace Aspire.Dashboard.Resources {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to No resource selected.
-        /// </summary>
-        public static string ResourceHeaderNoSelection {
-            get {
-                return ResourceManager.GetString("ResourceHeaderNoSelection", resourceCulture);
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to Select a resource in the list. Ctrl+click (Cmd+click on macOS) selects several resources, Shift+click selects a range..
-        /// </summary>
-        public static string ResourceHeaderNoSelectionDescription {
-            get {
-                return ResourceManager.GetString("ResourceHeaderNoSelectionDescription", resourceCulture);
-            }
-        }
-        
-        /// <summary>
         ///   Looks up a localized string similar to Resize resource list.
         /// </summary>
         public static string ResourcePaneResize {

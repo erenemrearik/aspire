@@ -30,11 +30,24 @@
     }
     else if (ResourceName is null)
     {
-        <div class="overview-prompt">
-            <FluentIcon Width="40px" Value="@(new Icons.Regular.Size24.CursorClick())" Color="Color.Custom" CustomColor="var(--colorNeutralForeground3)" />
-            <h2>@Loc[nameof(Dashboard.Resources.Resources.ResourceOverviewSelectResourcesTitle)]</h2>
-            <p>@Loc[nameof(Dashboard.Resources.Resources.ResourceOverviewSelectResourcesDescription)]</p>
-        </div>
+        var allResourceNames = ResourcesLayout.GetAllResourceNames();
+        if (allResourceNames.Count == 0)
+        {
+            <div class="overview-message">
+                <span>@Loc[nameof(Dashboard.Resources.Resources.ResourcesNoResources)]</span>
+            </div>
+        }
+        else
+        {
+            <div class="overview-selection-grid" role="list" aria-label="@LayoutLoc[nameof(Dashboard.Resources.Layout.ResourceHeaderAllResources)]">
+                @foreach (var name in allResourceNames)
+                {
+                    <div role="listitem" class="overview-selection-item" @key="name">
+                        @SelectionCard(name)
+                    </div>
+                }
+            </div>
+        }
     }
     else if (Resource is not { } resource)
     {

@@ -57,6 +57,7 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
     private bool _isDrawerOpen;
     private bool _isFilterPopupVisible;
     private bool _pendingLandingRedirect;
+    private bool _hasLocation;
     private string? _lastLocation;
     private IReadOnlyList<string> _selectedResourceNames = [];
     private List<SelectedResourceItem> _selectedItems = [];
@@ -379,6 +380,8 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
     private void UpdateFromLocation(string location)
     {
         var parsedLocation = ParseLocation(NavigationManager.ToBaseRelativePath(location));
+        var wasAllResources = _hasLocation && _selectedResourceNames.Count == 0;
+        _hasLocation = true;
 
         CurrentTab = parsedLocation.Tab;
         RouteResourceName = parsedLocation.RouteResourceName;
@@ -387,7 +390,10 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
             _selectedResourceNames = parsedLocation.SelectedResourceNames;
         }
 
-        _pendingLandingRedirect = parsedLocation.Tab == ResourceTab.Overview && parsedLocation.SelectedResourceNames.Count == 0;
+        // The overview without a selection lists all resources. Entering the resources view that way, for example
+        // from the navigation rail, restores the last selection instead. Switching to the overview tab while all
+        // resources are already shown keeps them.
+        _pendingLandingRedirect = parsedLocation.Tab == ResourceTab.Overview && parsedLocation.SelectedResourceNames.Count == 0 && !wasAllResources;
         UpdateSelection();
     }
 
@@ -1071,6 +1077,32 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
         NavigationManager.NavigateTo(GetSelectionUrl(selection));
     }
 
+    private async Task OnAllResourcesClickAsync()
+    {
+        _selectionAnchor = null;
+
+        // Remember the cleared selection so entering the overview later doesn't select a resource again.
+        await SetStoredSelectionAsync([]);
+        NavigationManager.NavigateTo(GetSelectionUrl([]));
+    }
+
+    /// <summary>
+    /// Gets the names of the resources that "All resources" stands for, in the order of the resource list. The pane's
+    /// filters don't apply because they only narrow down the list.
+    /// </summary>
+    internal List<string> GetAllResourceNames()
+    {
+        var names = _resourceByName.Values
+            .Where(r => !r.IsParameter && !r.IsResourceHidden(_filter.ShowHiddenResources))
+            .OrderBy(r => r.ResourceType)
+            .ThenBy(r => r, ResourceViewModelNameComparer.Instance)
+            .Select(GetResourceName)
+            .ToList();
+
+        names.AddRange(_telemetryOnlyResources.Select(r => r.Name));
+        return names;
+    }
+
     private List<string> GetVisibleRowNames()
     {
         List<string> names;
@@ -1104,7 +1136,7 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
         var isTelemetryOnly = SelectedTelemetryOnlyResource is not null;
         var isMultiSelection = IsMultiSelection;
 
-        if (resource is not null || isMultiSelection || _selectedItems.Count == 0 && CurrentTab == ResourceTab.Overview)
+        if (resource is not null || isMultiSelection || _selectedItems.Count == 0)
         {
             yield return CreateTab(ResourceTab.Overview, Loc[nameof(Resources.Layout.ResourceTabOverview)], new Icons.Regular.Size16.Board());
         }

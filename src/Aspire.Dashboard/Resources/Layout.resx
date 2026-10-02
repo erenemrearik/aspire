@@ -273,12 +273,6 @@
   <data name="ResourceHeaderSelectedResources" xml:space="preserve">
     <value>{0} selected resources</value>
   </data>
-  <data name="ResourceHeaderNoSelection" xml:space="preserve">
-    <value>No resource selected</value>
-  </data>
-  <data name="ResourceHeaderNoSelectionDescription" xml:space="preserve">
-    <value>Select a resource in the list. Ctrl+click (Cmd+click on macOS) selects several resources, Shift+click selects a range.</value>
-  </data>
   <data name="ResourcePaneResize" xml:space="preserve">
     <value>Resize resource list</value>
   </data>

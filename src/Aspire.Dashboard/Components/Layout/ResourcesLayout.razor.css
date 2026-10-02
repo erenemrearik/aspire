@@ -383,6 +383,29 @@
     background: var(--resource-brand-soft);
 }
 
+/* The "All resources" row clears the selection, so it's separated from the resources it stands for. */
+.resource-row-all {
+    margin-bottom: 9px;
+}
+
+.resource-row-all::after {
+    content: "";
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: -5px;
+    height: 1px;
+    background: var(--colorNeutralStroke2);
+}
+
+.resource-row-all .resource-row-icon {
+    color: var(--colorNeutralForeground2);
+}
+
+.resource-row-all.selected .resource-row-icon {
+    color: var(--colorBrandForeground1);
+}
+
 .resource-row-icon-state {
     position: absolute;
     right: -1px;
