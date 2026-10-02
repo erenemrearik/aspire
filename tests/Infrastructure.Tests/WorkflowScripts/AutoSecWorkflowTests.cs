@@ -65,6 +65,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("fixes-no-open-alert")]
     [InlineData("fixes-no-open-alert-other-directory")]
     [InlineData("fixes-no-open-alert-vulnerable-copy-remains")]
+    [InlineData("fixes-no-open-alert-later-vulnerable-range")]
+    [InlineData("head-sha-mismatch-after-gates")]
     [InlineData("no-checks")]
     [InlineData("checks-not-green")]
     [InlineData("statuses-not-green")]
@@ -172,6 +174,17 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             case "fixes-no-open-alert":
                 scenario["alerts"]![0]!["first_patched_version"] = "4.17.22";
                 break;
+            case "fixes-no-open-alert-later-vulnerable-range":
+                // 4.17.21 is past the first patched version but inside a later range the
+                // advisory also lists.
+                expectedReason = "fixes-no-open-alert";
+                scenario["alerts"]![0]!["advisory_ranges"] = new JsonArray("< 4.17.21", ">= 4.17.21, < 4.17.25");
+                break;
+            case "head-sha-mismatch-after-gates":
+                // Dependabot pushes after the gates pass but before the review is submitted.
+                expectedReason = "head-sha-mismatch";
+                scenario["liveHeadSha"] = new string('c', 40);
+                break;
             case "malware-requires-review":
                 scenario["malwareNumbers"] = new JsonArray(7);
                 break;
@@ -254,6 +267,27 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["mode"] = "call",
             ["fn"] = "isBreakingChange",
             ["args"] = new JsonArray(from, to),
+        });
+
+        Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("1.2.4", "< 1.2.5", true)]
+    [InlineData("1.2.5", "< 1.2.5", false)]
+    [InlineData("1.3.2", ">= 1.3.0, < 1.3.4", true)]
+    [InlineData("1.3.4", ">= 1.3.0, < 1.3.4", false)]
+    [InlineData("2.0.0", "= 2.0.0", true)]
+    [InlineData("2.0.1", "<= 2.0.0", false)]
+    [InlineData("1.0.0", "~> 1.0", true)]
+    public async Task EvaluatesAdvisoryVulnerableRanges(string version, string range, bool expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "inVulnerableRanges",
+            ["args"] = new JsonArray(version, new JsonArray(range)),
         });
 
         Assert.Equal(expected, result["value"]!.GetValue<bool>());
@@ -657,6 +691,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["ecosystem"] = "npm",
             ["package"] = "lodash",
             ["manifest_path"] = "extension/yarn.lock",
+            ["vulnerable_version_range"] = "< 4.17.21",
             ["first_patched_version"] = "4.17.21",
         }),
         ["checkRuns"] = new JsonArray(new JsonObject { ["name"] = "ci", ["status"] = "completed", ["conclusion"] = "success" }),

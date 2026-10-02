@@ -75,8 +75,8 @@ open Dependabot PRs. Pure code findings are out of scope.
   - no package source or feed is added (only the dnceng public feeds and sources the
     file already uses are accepted)
   - a changed manifest in the alert's own directory carries the fixed version, and no
-    copy of the package there stays below it
-  - CI and statuses are green
+    copy of the package there stays below it or inside any range the advisory lists
+  - CI and statuses are green, and the PR head is unchanged when the review is submitted
   - every package version the diff introduces, listed in the PR body or not, stays
     within the same major version (same minor for `0.x`) and was published at least
     7 days ago

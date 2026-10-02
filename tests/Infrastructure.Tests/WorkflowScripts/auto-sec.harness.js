@@ -5,7 +5,9 @@
 //   { mode: "call", fn, args }                    -> { value }
 //   { mode: "lookup", ecosystem, name, version, now, responses, nugetConfigText } -> { value, urls }
 //   { mode: "approve", now, staged, agentItems, pr, prOverrides, files, contents, alerts,
-//     malwareNumbers, checkRuns, statuses, reviews, responses } -> { value, reviews, summary, info, warnings }
+//     malwareNumbers, checkRuns, statuses, reviews, responses, liveHeadSha } -> { value, reviews, summary, info, warnings }
+// Alerts may carry `vulnerable_version_range` and `advisory_ranges` (every range the
+// advisory lists for the package).
 // `responses` maps a URL to `{ status, body }`; unknown URLs return 404.
 // `prOverrides` maps a PR number to fields that replace `pr` for that number.
 const fs = require('node:fs');
@@ -36,6 +38,7 @@ function createFetch(responses, urls) {
 
 function createGitHub(request, created) {
     const notFound = () => Object.assign(new Error('Not Found'), { status: 404 });
+    const getCalls = new Map();
     const pages = {
         files: () => request.files.map(filename => ({ filename, status: 'modified' })),
         checks: () => request.checkRuns ?? [],
@@ -45,6 +48,11 @@ function createGitHub(request, created) {
         pulls: {
             get: async ({ pull_number: pullNumber }) => {
                 const pr = { ...request.pr, number: pullNumber, ...(request.prOverrides?.[pullNumber] ?? {}) };
+                // `liveHeadSha` simulates a push that lands after the gates were evaluated.
+                getCalls.set(pullNumber, (getCalls.get(pullNumber) ?? 0) + 1);
+                if (request.liveHeadSha && getCalls.get(pullNumber) > 1) {
+                    pr.head_sha = request.liveHeadSha;
+                }
                 return {
                     data: {
                         number: pr.number,
@@ -90,7 +98,16 @@ function createGitHub(request, created) {
             return alerts.map(alert => ({
                 number: alert.number,
                 dependency: { package: { ecosystem: alert.ecosystem, name: alert.package }, manifest_path: alert.manifest_path },
-                security_vulnerability: { first_patched_version: alert.first_patched_version ? { identifier: alert.first_patched_version } : null },
+                security_vulnerability: {
+                    vulnerable_version_range: alert.vulnerable_version_range ?? null,
+                    first_patched_version: alert.first_patched_version ? { identifier: alert.first_patched_version } : null,
+                },
+                security_advisory: {
+                    vulnerabilities: (alert.advisory_ranges ?? []).map(range => ({
+                        package: { ecosystem: alert.ecosystem, name: alert.package },
+                        vulnerable_version_range: range,
+                    })),
+                },
             }));
         }
         throw new Error(`Unexpected paginate route ${route}`);

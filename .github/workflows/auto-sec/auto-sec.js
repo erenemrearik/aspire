@@ -616,7 +616,46 @@ function alertFixedByUpdate(alert, ecosystem, update, headContents) {
     if (comparison === null || comparison < 0) {
         return false;
     }
-    return alertDirectoryCarries(alert, ecosystem, update, headContents, version => (compareVersions(version, patched) ?? -1) >= 0);
+    // `first_patched_version` only bounds the range the installed version fell in; an
+    // advisory can list disjoint vulnerable ranges, so every occurrence must also sit
+    // outside all of them.
+    return alertDirectoryCarries(alert, ecosystem, update, headContents,
+        version => (compareVersions(version, patched) ?? -1) >= 0 && !inVulnerableRanges(version, alertVulnerableRanges(alert)));
+}
+
+// The approval job's alerts carry every advisory range (`vulnerable_ranges`); the agent's
+// pre-collected alerts.json carries only the alert's own `vulnerable_version_range`.
+function alertVulnerableRanges(alert) {
+    return alert.vulnerable_ranges ?? (alert.vulnerable_version_range ? [alert.vulnerable_version_range] : []);
+}
+
+/**
+ * True when `version` falls in any GitHub advisory range, or a range cannot be evaluated
+ * (fail closed). Ranges use the advisory database syntax: comma-separated comparator
+ * terms that must all hold, for example `< 1.2.5`, `>= 1.3.0, < 1.3.4`, `= 2.0.0`.
+ * See https://docs.github.com/rest/dependabot/alerts.
+ */
+function inVulnerableRanges(version, ranges) {
+    return ranges.some(range => {
+        const terms = String(range).split(',').map(term => term.trim()).filter(Boolean);
+        if (!terms.length) {
+            return true;
+        }
+        return terms.every(term => {
+            const match = /^(<=|>=|<|>|=)\s*(\S+)$/.exec(term);
+            const comparison = match ? compareVersions(version, match[2]) : null;
+            if (comparison === null) {
+                return true;
+            }
+            switch (match[1]) {
+                case '<': return comparison < 0;
+                case '<=': return comparison <= 0;
+                case '>': return comparison > 0;
+                case '>=': return comparison >= 0;
+                default: return comparison === 0;
+            }
+        });
+    });
 }
 
 /**
@@ -951,12 +990,24 @@ async function getFileText(github, owner, repo, path, ref) {
 }
 
 function normalizeAlert(alert) {
+    const ecosystem = alert.dependency?.package?.ecosystem ?? '';
+    const name = alert.dependency?.package?.name ?? '';
+    // Keep every range the advisory lists for this package, not just the one matching
+    // the installed version, so a target in a later vulnerable interval is rejected.
+    const ranges = [
+        alert.security_vulnerability?.vulnerable_version_range,
+        ...(alert.security_advisory?.vulnerabilities ?? [])
+            .filter(vulnerability => vulnerability.package?.ecosystem === ecosystem
+                && normalizePackageName(ecosystem, vulnerability.package?.name ?? '') === normalizePackageName(ecosystem, name))
+            .map(vulnerability => vulnerability.vulnerable_version_range),
+    ].filter(range => typeof range === 'string' && range.trim());
     return {
         number: alert.number,
-        ecosystem: alert.dependency?.package?.ecosystem ?? '',
-        package: alert.dependency?.package?.name ?? '',
+        ecosystem,
+        package: name,
         manifest_path: alert.dependency?.manifest_path ?? '',
         first_patched_version: alert.security_vulnerability?.first_patched_version?.identifier ?? null,
+        vulnerable_ranges: [...new Set(ranges)],
         malware: false,
     };
 }
@@ -1086,6 +1137,14 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
             core.warning(`Gate evaluation failed for #${request.prNumber}: ${error.message}`);
         }
 
+        if (result.decision === 'approve' && !staged) {
+            // The gates take many requests; Dependabot can rebase meanwhile, and an
+            // approval on the older commit could still count for the new head.
+            const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: request.prNumber });
+            if (live.head?.sha !== request.headSha) {
+                result = { ...result, decision: 'skip', reasons: ['head-sha-mismatch'] };
+            }
+        }
         if (result.decision === 'approve') {
             approvals++;
         }
@@ -1146,6 +1205,7 @@ module.exports = {
     evaluateApprovalGates,
     extractSources,
     findNewSources,
+    inVulnerableRanges,
     isAllowedManifest,
     isBreakingChange,
     isCooldownSatisfied,
