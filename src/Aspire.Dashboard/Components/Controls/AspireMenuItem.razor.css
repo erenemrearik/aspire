@@ -6,6 +6,9 @@ span.aspire-menu-secondary-action-container {
     grid-row: 1;
     justify-content: center;
     gap: 8px;
+    /* FluentUI centers the 16px checkmark in a 32px track (8px from the edge). The 20px action
+       button insets its 16px icon by 2px, so 6px here mirrors that 8px on the trailing edge. */
+    padding-inline-end: 6px;
 }
 
 /* Keep secondary text from touching the item text when the menu is at its maximum width. */
@@ -48,8 +51,11 @@ fluent-menu-item:focus-within > span[slot="end"] ::deep .aspire-menu-secondary-a
     visibility: visible;
 }
 
+/* Only reveal for keyboard focus: focus is restored to the action after its item is reordered, and with
+   :focus-within a mouse-toggled action would stay visible on the moved item after the pointer left it. */
 fluent-menu-item:hover > span[slot="end"] ::deep .aspire-menu-secondary-action,
-::deep .aspire-menu-secondary-action:focus-within,
+::deep .aspire-menu-secondary-action:focus-visible,
+::deep .aspire-menu-secondary-action:has(:focus-visible),
 ::deep .aspire-menu-secondary-action.selected {
     opacity: 1;
     visibility: visible;

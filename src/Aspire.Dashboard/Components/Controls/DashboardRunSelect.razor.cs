@@ -21,7 +21,7 @@ public partial class DashboardRunSelect : ComponentBase
     private static readonly Icon s_historyIcon = new Icons.Regular.Size24.History();
     private static readonly Icon s_liveIcon = new Icons.Filled.Size12.Play();
     private static readonly Icon s_helpIcon = new Icons.Regular.Size16.QuestionCircle();
-    private static readonly Icon s_keepIcon = new Icons.Regular.Size16.LockOpen();
+    private static readonly Icon s_keepIcon = new Icons.Regular.Size16.LockClosed();
     private static readonly Icon s_keptIcon = new Icons.Filled.Size16.LockClosed();
     private readonly string _runMenuItemIdPrefix = $"dashboard-run-{Guid.NewGuid():N}";
 
@@ -231,6 +231,6 @@ public partial class DashboardRunSelect : ComponentBase
 
         // Round to whole seconds: sub-second precision is noise for a run's length.
         var duration = TimeSpan.FromSeconds(Math.Round((endedAtUtc - run.StartedAtUtc).TotalSeconds));
-        return DurationFormatter.FormatDuration(duration, CultureInfo.CurrentCulture);
+        return $"({DurationFormatter.FormatDuration(duration, CultureInfo.CurrentCulture)})";
     }
 }

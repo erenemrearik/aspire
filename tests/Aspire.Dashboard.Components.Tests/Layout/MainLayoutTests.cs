@@ -366,7 +366,7 @@ public partial class MainLayoutTests : DashboardTestContext
         Assert.Equal("352 days ago", incompatibleItem.Text);
         Assert.True(incompatibleItem.IsDisabled);
         Assert.Equal("This recording can't be viewed because it was created by an incompatible version of the dashboard.", incompatibleItem.Tooltip);
-        Assert.IsType<Icons.Regular.Size16.LockOpen>(incompatibleItem.SecondaryActionIcon);
+        Assert.IsType<Icons.Regular.Size16.LockClosed>(incompatibleItem.SecondaryActionIcon);
         Assert.NotNull(incompatibleItem.OnSecondaryActionClick);
         var incompatibleMenuItem = cut.WaitForElements("fluent-menu-item")[1];
         Assert.True(incompatibleMenuItem.HasAttribute("disabled"));
@@ -492,7 +492,7 @@ public partial class MainLayoutTests : DashboardTestContext
                 Assert.IsType<Icons.Filled.Size12.Play>(item.StartIcon);
                 Assert.Equal(Color.Success, item.StartIconColor);
                 Assert.Null(item.Description);
-                Assert.IsType<Icons.Regular.Size16.LockOpen>(item.SecondaryActionIcon);
+                Assert.IsType<Icons.Regular.Size16.LockClosed>(item.SecondaryActionIcon);
                 Assert.Equal("Protect from deletion", item.SecondaryActionAriaLabel);
                 Assert.False(item.IsSecondaryActionSelected);
             },
@@ -506,12 +506,12 @@ public partial class MainLayoutTests : DashboardTestContext
             {
                 Assert.Equal("352 days ago", item.Text);
                 Assert.Equal(expectedHistoricalRunText, item.Tooltip);
-                Assert.Equal("1h", item.Description);
+                Assert.Equal("(1h)", item.Description);
                 Assert.Null(item.StartIcon);
                 Assert.Equal(MenuItemRole.Radio, item.Role);
                 Assert.False(item.Checked);
                 Assert.IsType<Icons.Regular.Size16.Checkmark>(item.Icon);
-                Assert.IsType<Icons.Regular.Size16.LockOpen>(item.SecondaryActionIcon);
+                Assert.IsType<Icons.Regular.Size16.LockClosed>(item.SecondaryActionIcon);
                 Assert.Equal("Protect from deletion", item.SecondaryActionAriaLabel);
                 Assert.False(item.IsSecondaryActionSelected);
             },
@@ -550,7 +550,7 @@ public partial class MainLayoutTests : DashboardTestContext
         Assert.Empty(menuItems[1].QuerySelectorAll("span[slot='start']"));
         Assert.Equal("Live view", Assert.Single(menuItems[0].QuerySelectorAll(".aspire-menu-item-label")).TextContent.Trim());
         Assert.Single(menuItems[0].QuerySelectorAll(".aspire-menu-item-label svg"));
-        Assert.Equal("1h", Assert.Single(menuItems[1].QuerySelectorAll(".aspire-menu-item-description")).TextContent);
+        Assert.Equal("(1h)", Assert.Single(menuItems[1].QuerySelectorAll(".aspire-menu-item-description")).TextContent);
         Assert.Single(menuItems[0].QuerySelectorAll("[slot='indicator']"));
         Assert.Single(menuItems[1].QuerySelectorAll("[slot='indicator']"));
         Assert.Equal("menuitemradio", menuItems[0].GetAttribute("role"));
@@ -812,7 +812,7 @@ public partial class MainLayoutTests : DashboardTestContext
         DashboardRunDescriptor CreateRun(DateTimeOffset? endedAtUtc, bool isCurrent = false) =>
             new("run", DashboardRunStore.SchemaVersion, startedAtUtc, endedAtUtc, CleanShutdown: endedAtUtc is not null, "TestApp", string.Empty, isCurrent);
 
-        Assert.Equal("26m 6s", DashboardRunSelect.FormatRunDuration(CreateRun(startedAtUtc.AddMinutes(26).AddSeconds(6.4))));
+        Assert.Equal("(26m 6s)", DashboardRunSelect.FormatRunDuration(CreateRun(startedAtUtc.AddMinutes(26).AddSeconds(6.4))));
         Assert.Null(DashboardRunSelect.FormatRunDuration(CreateRun(endedAtUtc: null)));
         Assert.Null(DashboardRunSelect.FormatRunDuration(CreateRun(startedAtUtc.AddMinutes(-1))));
         Assert.Null(DashboardRunSelect.FormatRunDuration(CreateRun(startedAtUtc.AddMinutes(5), isCurrent: true)));
@@ -858,7 +858,7 @@ public partial class MainLayoutTests : DashboardTestContext
 
         var items = cut.FindComponent<AspireMenuButton>().Instance.Items;
         Assert.Equal("Live view", items[0].Text);
-        Assert.IsType<Icons.Regular.Size16.LockOpen>(items[0].SecondaryActionIcon);
+        Assert.IsType<Icons.Regular.Size16.LockClosed>(items[0].SecondaryActionIcon);
         Assert.False(items[0].IsSecondaryActionSelected);
         Assert.True(items[1].IsDivider);
         Assert.True(items[2].IsGroupHeader);
