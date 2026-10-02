@@ -53,6 +53,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("package-source-changed")]
     [InlineData("package-source-changed-other-org")]
     [InlineData("breaking-change")]
+    [InlineData("breaking-change-grouped-transition")]
     [InlineData("cooldown-not-satisfied")]
     [InlineData("malware-requires-review")]
     [InlineData("fixes-no-open-alert")]
@@ -88,6 +89,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 // Same host as the approved dnceng feeds, but another Azure DevOps organization.
                 expectedReason = "package-source-changed";
                 scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21", "https://pkgs.dev.azure.com/contoso/_packaging/feed/");
+                break;
+            case "breaking-change-grouped-transition":
+                // The same target version reached from two starting versions: only the
+                // second transition crosses a major version.
+                expectedReason = "breaking-change";
+                pr["head_ref"] = "dependabot/npm_and_yarn/npm_and_yarn-1a2b3c4d5e";
+                pr["title"] = "Bump the npm_and_yarn group across 2 directories with 2 updates";
+                pr["body"] = "Updates `lodash` from 4.17.20 to 4.17.21\nUpdates `lodash` from 3.10.1 to 4.17.21";
                 break;
             case "breaking-change":
                 pr["title"] = "Bump lodash from 4.17.20 to 5.0.0 in /extension";
@@ -217,6 +226,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("https://pkgs.dev.azure.com/contoso/_packaging/feed/npm/registry/a/-/a-1.0.0.tgz", "https://pkgs.dev.azure.com/contoso/_packaging/feed/")]
     [InlineData("https://pkgs.dev.azure.com/dnceng/internal/_packaging/feed/npm/registry/a", "https://pkgs.dev.azure.com/dnceng/internal/_packaging/feed/")]
     [InlineData("https://registry.example.com/a/-/a-1.0.0.tgz", "https://registry.example.com/")]
+    [InlineData("https://registry.npmjs.org:443/a/-/a-1.0.0.tgz", "")]
+    [InlineData("https://registry.npmjs.org:8443/a/-/a-1.0.0.tgz", "https://registry.npmjs.org:8443/")]
     public async Task FindsPackageSourcesAddedOnHead(string headUrl, string expected)
     {
         var result = await RunHarnessAsync(new JsonObject
@@ -295,12 +306,80 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["fn"] = "parseDependabotUpdates",
             ["args"] = new JsonArray(
                 "Bump the npm_and_yarn group across 2 directories with 2 updates",
-                "Updates `lodash` from 4.17.20 to 4.17.21\nUpdates `@types/node` from 20.1.0 to 20.1.4\nUpdates `lodash` from 4.17.20 to 4.17.21"),
+                "Updates `lodash` from 4.17.20 to 4.17.21\nUpdates `@types/node` from 20.1.0 to 20.1.4\nUpdates `lodash` from 4.17.20 to 4.17.21\nUpdates `lodash` from 4.17.19 to 4.17.21"),
         });
 
         Assert.Equal(
-            """[{"name":"lodash","from":"4.17.20","to":"4.17.21"},{"name":"@types/node","from":"20.1.0","to":"20.1.4"}]""",
+            """[{"name":"lodash","from":"4.17.20","to":"4.17.21"},{"name":"@types/node","from":"20.1.0","to":"20.1.4"},{"name":"lodash","from":"4.17.19","to":"4.17.21"}]""",
             result["value"]!.ToJsonString());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("app/yarn.lock", "lodash@^4.17.20:\n  version \"4.17.20\"\nminimist@^4.17.21:\n  version \"4.17.21\"\n", "lodash", "4.17.21", false)]
+    [InlineData("app/yarn.lock", "\"lodash@^4.17.20\", lodash@^4.17.21:\n  version \"4.17.21\"\n", "lodash", "4.17.21", true)]
+    [InlineData("app/yarn.lock", "\"lodash@npm:^4.17.20\":\n  version: 4.17.21\n", "lodash", "4.17.21", true)]
+    [InlineData("app/yarn.lock", "lodash-es@^4.17.21:\n  version \"4.17.21\"\n", "lodash", "4.17.21", false)]
+    [InlineData("app/yarn.lock", "parent@^1.0.0:\n  version \"1.0.0\"\n  dependencies:\n    lodash \"4.17.21\"\n", "lodash", "4.17.21", false)]
+    [InlineData("app/package-lock.json", """{"packages":{"node_modules/lodash":{"version":"4.17.20"},"node_modules/minimist":{"version":"4.17.21"}}}""", "lodash", "4.17.21", false)]
+    [InlineData("app/package-lock.json", """{"packages":{"node_modules/a/node_modules/@scope/lodash":{"version":"4.17.21"}}}""", "@scope/lodash", "4.17.21", true)]
+    [InlineData("app/npm-shrinkwrap.json", """{"dependencies":{"a":{"version":"1.0.0","dependencies":{"lodash":{"version":"4.17.21"}}}}}""", "lodash", "4.17.21", true)]
+    [InlineData("app/package.json", """{"dependencies":{"lodash":"^4.17.20","minimist":"^4.17.21"}}""", "lodash", "4.17.21", false)]
+    [InlineData("app/package.json", """{"devDependencies":{"lodash":"~4.17.21"}}""", "lodash", "4.17.21", true)]
+    [InlineData("app/package.json", """{"resolutions":{"**/lodash":"4.17.21"}}""", "lodash", "4.17.21", true)]
+    [InlineData("app/pnpm-lock.yaml", "packages:\n\n  lodash@4.17.20:\n    resolution: {}\n\n  minimist@4.17.21:\n    resolution: {}\n", "lodash", "4.17.21", false)]
+    [InlineData("app/pnpm-lock.yaml", "packages:\n\n  '@babel/parser@7.29.3':\n    resolution: {}\n", "@babel/parser", "7.29.3", true)]
+    [InlineData("app/pnpm-lock.yaml", "packages:\n  /lodash/4.17.21:\n    resolution: {}\n", "lodash", "4.17.21", true)]
+    [InlineData("app/uv.lock", "[[package]]\nname = \"jinja2\"\nversion = \"3.1.5\"\n\n[[package]]\nname = \"markupsafe\"\nversion = \"3.1.6\"\n", "jinja2", "3.1.6", false)]
+    [InlineData("app/uv.lock", "[[package]]\nname = \"Jinja2\"\nversion = \"3.1.6\"\n", "jinja2", "3.1.6", true)]
+    [InlineData("app/pyproject.toml", "dependencies = [\"jinja2>=3.1.5\", \"markupsafe==3.1.6\"]\n", "jinja2", "3.1.6", false)]
+    [InlineData("app/pyproject.toml", "dependencies = [\"typing_extensions[x] >= 4.12.2, < 5; python_version < '3.11'\"]\n", "typing-extensions", "4.12.2", true)]
+    [InlineData("Directory.Packages.props", "<PackageVersion Include=\"A\" Version=\"9.0.4\" />\n<PackageVersion Include=\"B\" Version=\"9.0.5\" />", "A", "9.0.5", false)]
+    [InlineData("Directory.Packages.props", "<PackageVersion Version=\"9.0.5\" Include=\"System.Text.Json\" />", "system.text.json", "9.0.5", true)]
+    [InlineData("app/requirements.txt", "jinja2==3.1.6\n", "jinja2", "3.1.6", false)]
+    public async Task BindsVersionToItsOwnManifestEntry(string path, string text, string name, string version, bool expected)
+    {
+        var ecosystem = Path.GetFileName(path) switch
+        {
+            "Directory.Packages.props" => "nuget",
+            "uv.lock" or "pyproject.toml" or "requirements.txt" => "pip",
+            _ => "npm",
+        };
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "manifestMentionsVersion",
+            ["args"] = new JsonArray(path, text, ecosystem, name, version),
+        });
+
+        Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task ReportsAlertsCoveredByDependabotPr()
+    {
+        var alerts = new JsonArray(
+            new JsonObject { ["number"] = 1, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
+            new JsonObject { ["number"] = 2, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "other/yarn.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
+            new JsonObject { ["number"] = 3, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = "4.17.22", ["malware"] = false },
+            new JsonObject { ["number"] = 4, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = null, ["malware"] = true },
+            new JsonObject { ["number"] = 5, ["ecosystem"] = "pip", ["package"] = "lodash", ["manifest_path"] = "app/uv.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false });
+        var updates = new JsonArray(new JsonObject { ["name"] = "lodash", ["from"] = "4.17.20", ["to"] = "4.17.21" });
+        var headContents = new JsonObject
+        {
+            ["app/yarn.lock"] = YarnLockEntry("lodash", "4.17.21"),
+            ["other/yarn.lock"] = YarnLockEntry("lodash", "4.17.20"),
+        };
+
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "coveredAlerts",
+            ["args"] = new JsonArray(alerts, "npm", updates, headContents),
+        });
+
+        Assert.Equal([1, 4], result["value"]!.AsArray().Select(n => n!.GetValue<int>()));
     }
 
     [Fact]
@@ -444,6 +523,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.DoesNotContain("NuGet.config", protectedFiles, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("global.json", protectedFiles, StringComparison.Ordinal);
         Assert.DoesNotContain(".npmrc", protectedFiles, StringComparison.Ordinal);
+
+        // Approval requests carry only identifiers; free text would be persisted in the
+        // agent output artifact.
+        var approvalInputs = GetSection(source, "^      inputs:", "^      steps:");
+        Assert.Equal(
+            ["head_sha", "pr_number"],
+            Regex.Matches(approvalInputs, "^        ([a-z_]+):\r?$", RegexOptions.Multiline).Select(match => match.Groups[1].Value).Order(StringComparer.Ordinal));
+        Assert.Contains("covered_alerts: m.coveredAlerts(alerts, ecosystem, updates, headContents)", source, StringComparison.Ordinal);
     }
 
     private static JsonObject Response(JsonNode body) => new() { ["status"] = 200, ["body"] = body };

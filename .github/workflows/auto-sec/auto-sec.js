@@ -47,6 +47,15 @@ const ALLOWED_MANIFEST_BASENAMES = new Set([
     'directory.packages.props',
 ]);
 
+const DEFAULT_PORTS = {
+    'http': 80,
+    'https': 443,
+    'git+http': 80,
+    'git+https': 443,
+    'ssh': 22,
+    'git+ssh': 22,
+};
+
 const SUCCESSFUL_CHECK_CONCLUSIONS = new Set(['success', 'skipped', 'neutral']);
 
 // Dependabot branch names look like `dependabot/<package-manager>/<dir>/<pkg>-<version>`.
@@ -170,13 +179,17 @@ function stripTrailingPunctuation(value) {
 //   body (grouped): "Updates `lodash` from 4.17.20 to 4.17.21"
 // Grouped titles ("Bump the npm_and_yarn group across 2 directories with 3 updates")
 // carry no versions, so the body is authoritative and the title is a fallback.
+// Updates are keyed by the full transition: a grouped PR can move the same package to
+// the same version from different starting versions in different directories
+// (2.0.0 -> 2.0.1 and 1.9.0 -> 2.0.1), and each transition is checked separately.
 function parseDependabotUpdates(title, body) {
     const updates = new Map();
     const add = (name, from, to) => {
+        const cleanFrom = stripTrailingPunctuation(from);
         const cleanTo = stripTrailingPunctuation(to);
-        const key = `${name.toLowerCase()}@${cleanTo}`;
+        const key = `${name.toLowerCase()}@${cleanFrom}->${cleanTo}`;
         if (!updates.has(key)) {
-            updates.set(key, { name, from: stripTrailingPunctuation(from), to: cleanTo });
+            updates.set(key, { name, from: cleanFrom, to: cleanTo });
         }
     };
 
@@ -223,8 +236,13 @@ function isAllowedManifest(path) {
 //   https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz -> https://registry.npmjs.org/
 // Azure Artifacts feeds are keyed through `/_packaging/<feed>/`; any other URL on an Azure
 // DevOps host is keyed by organization and project; everything else is keyed by host.
-function sourceKey(scheme, host, path) {
-    const origin = `${scheme.toLowerCase()}://${host.toLowerCase()}`;
+// A non-default port is part of the origin (`https://registry.npmjs.org:8443/` is a
+// different server than `https://registry.npmjs.org/`); the scheme's default port is
+// dropped so `:443` on an https URL compares equal to no port.
+function sourceKey(scheme, host, port, path) {
+    const loweredScheme = scheme.toLowerCase();
+    const portSuffix = port && DEFAULT_PORTS[loweredScheme] !== Number(port) ? `:${Number(port)}` : '';
+    const origin = `${loweredScheme}://${host.toLowerCase()}${portSuffix}`;
     const feed = /^(\/(?:[^/?#]+\/){0,2}_packaging\/[^/?#]+\/)/i.exec(path);
     if (feed) {
         return `${origin}${feed[1].toLowerCase()}`;
@@ -238,8 +256,8 @@ function sourceKey(scheme, host, path) {
 
 function extractSources(text) {
     const sources = new Set();
-    for (const match of String(text ?? '').matchAll(/\b(https?|git\+https?|git\+ssh|ssh):\/\/(?:[^@/\s"']+@)?([A-Za-z0-9.-]+)(?::\d+)?(\/[^\s"'<>]*)?/g)) {
-        sources.add(sourceKey(match[1], match[2], match[3] ?? '/'));
+    for (const match of String(text ?? '').matchAll(/\b(https?|git\+https?|git\+ssh|ssh):\/\/(?:[^@/\s"']+@)?([A-Za-z0-9.-]+)(?::(\d+))?(\/[^\s"'<>]*)?/g)) {
+            sources.add(sourceKey(match[1], match[2], match[3], match[4] ?? '/'));
     }
     return sources;
 }
@@ -265,34 +283,219 @@ function isCooldownSatisfied(publishedAt, now, days = COOLDOWN_DAYS) {
     return now.getTime() - published >= days * 24 * 60 * 60 * 1000;
 }
 
-function escapeRegExp(value) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Split an npm package spec into name and version range at the `@` that follows the name.
+// The leading `@` of a scoped name is part of the name:
+//   lodash@^4.17.20          -> lodash, ^4.17.20
+//   @babel/parser@7.29.3     -> @babel/parser, 7.29.3
+//   lodash@npm:^4.17.20      -> lodash, npm:^4.17.20 (yarn berry)
+function splitNpmSpec(spec) {
+    const index = spec.indexOf('@', 1);
+    return index < 0 ? { name: spec, range: '' } : { name: spec.slice(0, index), range: spec.slice(index + 1) };
 }
 
-// True when `text` names `name` and, within the next few lines, `version`. Lockfiles and
-// manifests keep a package and its resolved version on the same or adjacent lines:
-//   yarn.lock:                "lodash@^4.17.20:\n  version \"4.17.21\""
-//   package-lock.json:        "\"node_modules/lodash\": {\n  \"version\": \"4.17.21\","
-//   uv.lock:                  "name = \"jinja2\"\nversion = \"3.1.6\""
-//   Directory.Packages.props: "<PackageVersion Include=\"System.Text.Json\" Version=\"9.0.5\" />"
-// Name boundaries keep `lodash` from matching `lodash.merge` or `lodash-es`, and pip names
-// treat runs of `-`, `_` and `.` as equal (PEP 503).
-function manifestMentionsVersion(text, ecosystem, name, version) {
-    const normalized = normalizePackageName(ecosystem, name);
-    const namePattern = ecosystem === 'pip'
-        ? normalized.split('-').map(escapeRegExp).join('[-_.]+')
-        : escapeRegExp(normalized);
-    const nameRegex = new RegExp(`(?<![A-Za-z0-9_.-])${namePattern}(?![A-Za-z0-9_.-])`, 'i');
-    const versionRegex = new RegExp(`(?<![0-9A-Za-z.])${escapeRegExp(version)}(?![0-9A-Za-z-])(?!\\.\\d)`, 'i');
-    const lines = String(text ?? '').split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-        if (nameRegex.test(lines[i]) && lines.slice(i, i + 6).some(line => versionRegex.test(line))) {
-            return true;
+// Reduce a range to its version: `^4.17.21`, `~4.17.21`, `>=4.17.21`, `=4.17.21` and
+// `v4.17.21` all become `4.17.21`. Compound ranges (`>=1 <2`) keep only the first bound.
+function stripRangeOperators(range) {
+    return String(range ?? '').trim().replace(/^npm:/, '').replace(/^[\^~=<>v\s]+/, '').split(/[\s,|]/)[0];
+}
+
+// Name targeted by an `overrides` or `resolutions` key. Keys can be a bare name, a spec
+// with a range, or a glob path ending in the package:
+//   lodash, lodash@^4, **/lodash, parent/lodash, **/@scope/pkg, @scope/pkg@1
+function overrideKeyName(key) {
+    const segments = key.split('/');
+    const last = segments.length >= 2 && segments[segments.length - 2].startsWith('@')
+        ? segments.slice(-2).join('/')
+        : segments[segments.length - 1];
+    return splitNpmSpec(last).name;
+}
+
+function readJson(text) {
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
+
+// package.json pins a range per dependency map; `overrides` nest by package name and
+// `resolutions` keys can be glob paths (`**/lodash`), so both are searched recursively.
+function packageJsonVersions(text, matches) {
+    const json = readJson(text);
+    if (!json) {
+        return [];
+    }
+    const versions = [];
+    for (const map of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+        for (const [key, value] of Object.entries(json[map] ?? {})) {
+            if (matches(key) && typeof value === 'string') {
+                versions.push(stripRangeOperators(value));
+            }
         }
     }
-    return false;
+    const visit = node => {
+        for (const [key, value] of Object.entries(node ?? {})) {
+            if (typeof value === 'string' && matches(overrideKeyName(key))) {
+                versions.push(stripRangeOperators(value));
+            } else if (value && typeof value === 'object') {
+                if (matches(overrideKeyName(key)) && typeof value['.'] === 'string') {
+                    versions.push(stripRangeOperators(value['.']));
+                }
+                visit(value);
+            }
+        }
+    };
+    visit(json.overrides);
+    visit(json.resolutions);
+    return versions;
 }
 
+// package-lock.json / npm-shrinkwrap.json:
+//   v2/v3: { "packages": { "node_modules/a/node_modules/lodash": { "version": "4.17.21" } } }
+//   v1:    { "dependencies": { "lodash": { "version": "4.17.21", "dependencies": { ... } } } }
+function packageLockVersions(text, matches) {
+    const json = readJson(text);
+    if (!json) {
+        return [];
+    }
+    const versions = [];
+    for (const [path, entry] of Object.entries(json.packages ?? {})) {
+        const index = path.lastIndexOf('node_modules/');
+        if (index >= 0 && matches(path.slice(index + 'node_modules/'.length)) && typeof entry?.version === 'string') {
+            versions.push(entry.version);
+        }
+    }
+    const visit = dependencies => {
+        for (const [key, entry] of Object.entries(dependencies ?? {})) {
+            if (matches(key) && typeof entry?.version === 'string') {
+                versions.push(entry.version);
+            }
+            visit(entry?.dependencies);
+        }
+    };
+    visit(json.dependencies);
+    return versions;
+}
+
+// yarn.lock blocks start with an unindented header listing every spec the entry
+// resolves, followed by two-space indented fields:
+//   classic: "lodash@^4.17.20", lodash@^4.17.21:\n  version "4.17.21"
+//   berry:   "lodash@npm:^4.17.20":\n  version: 4.17.21
+// Nested `dependencies:` entries are indented further and never bind a version here.
+function yarnLockVersions(text, matches) {
+    const versions = [];
+    let inBlock = false;
+    for (const line of String(text ?? '').split(/\r?\n/)) {
+        if (/^\S/.test(line)) {
+            inBlock = !line.startsWith('#') && line.trimEnd().endsWith(':')
+                && line.trimEnd().slice(0, -1).split(',')
+                    .map(spec => spec.trim().replace(/^"|"$/g, ''))
+                    .some(spec => matches(splitNpmSpec(spec).name));
+            continue;
+        }
+        const version = inBlock ? /^ {2}version:?\s+"?([^"\s]+)"?\s*$/.exec(line) : null;
+        if (version) {
+            versions.push(version[1]);
+        }
+    }
+    return versions;
+}
+
+// pnpm-lock.yaml lists each resolved package as a two-space indented key, with optional
+// quotes, an optional leading `/`, and an optional peer suffix:
+//   v9:  '@babel/parser@7.29.3':     lodash@4.17.21(react@18.0.0):
+//   v6:  /lodash@4.17.21:
+//   v5:  /lodash/4.17.21:            /@babel/parser/7.29.3:
+function pnpmLockVersions(text, matches) {
+    const versions = [];
+    for (const [, rawKey] of String(text ?? '').matchAll(/^ {2}(\S.*?):\s*$/gm)) {
+        const key = rawKey.replace(/^'|'$/g, '').replace(/\(.*$/, '');
+        const trimmed = key.replace(/^\//, '');
+        let { name, range } = splitNpmSpec(trimmed);
+        if (!range && key.startsWith('/')) {
+            const slash = trimmed.lastIndexOf('/');
+            name = trimmed.slice(0, slash);
+            range = trimmed.slice(slash + 1);
+        }
+        if (range && matches(name)) {
+            versions.push(range);
+        }
+    }
+    return versions;
+}
+
+// uv.lock: [[package]]\nname = "jinja2"\nversion = "3.1.6"
+function uvLockVersions(text, matches) {
+    const versions = [];
+    for (const block of String(text ?? '').split(/^\[\[package\]\]\s*$/m).slice(1)) {
+        const body = block.split(/^\[/m)[0];
+        const name = /^name\s*=\s*"([^"]+)"/m.exec(body);
+        const version = /^version\s*=\s*"([^"]+)"/m.exec(body);
+        if (name && version && matches(name[1])) {
+            versions.push(version[1]);
+        }
+    }
+    return versions;
+}
+
+// pyproject.toml PEP 508 requirement strings (https://peps.python.org/pep-0508/):
+//   "jinja2>=3.1.6", "jinja2[i18n]==3.1.6; python_version >= '3.9'", "jinja2 ~= 3.1.6, < 4"
+// Only the lower or exact bound proves the version, so `<`, `<=` and `!=` are ignored.
+function pyprojectVersions(text, matches) {
+    const versions = [];
+    for (const [, requirement] of String(text ?? '').matchAll(/["']([A-Za-z0-9][A-Za-z0-9._-]*\s*(?:\[[^\]]*\])?\s*(?:===|==|~=|>=|>)[^"']*)["']/g)) {
+        const name = /^[A-Za-z0-9][A-Za-z0-9._-]*/.exec(requirement)[0];
+        if (!matches(name)) {
+            continue;
+        }
+        for (const [, version] of requirement.split(';')[0].matchAll(/(?:===|==|~=|>=|>)\s*([^\s,;]+)/g)) {
+            versions.push(version);
+        }
+    }
+    return versions;
+}
+
+// Directory.Packages.props: <PackageVersion Include="System.Text.Json" Version="9.0.5" />
+// The attributes may appear in either order.
+function packagesPropsVersions(text, matches) {
+    const versions = [];
+    for (const [element] of String(text ?? '').replace(/<!--[\s\S]*?-->/g, '').matchAll(/<PackageVersion\b[^>]*>/gi)) {
+        const include = xmlAttribute(element, 'Include');
+        const version = xmlAttribute(element, 'Version');
+        if (include && version && matches(include)) {
+            versions.push(version.replace(/^\[|\]$/g, ''));
+        }
+    }
+    return versions;
+}
+
+const MANIFEST_VERSION_READERS = {
+    'package.json': packageJsonVersions,
+    'package-lock.json': packageLockVersions,
+    'npm-shrinkwrap.json': packageLockVersions,
+    'yarn.lock': yarnLockVersions,
+    'pnpm-lock.yaml': pnpmLockVersions,
+    'uv.lock': uvLockVersions,
+    'pyproject.toml': pyprojectVersions,
+    'directory.packages.props': packagesPropsVersions,
+};
+
+/**
+ * True when the manifest at `path` binds `name` to `version` in one of its own package
+ * entries. Each manifest format is parsed so a version is only attributed to the entry
+ * that declares it, never to a neighbouring package. Package names compare
+ * case-insensitively, with pip names normalized per PEP 503. An unrecognized manifest
+ * returns false so the caller fails closed.
+ */
+function manifestMentionsVersion(path, text, ecosystem, name, version) {
+    const reader = MANIFEST_VERSION_READERS[basenameOf(String(path ?? '')).toLowerCase()];
+    if (!reader) {
+        return false;
+    }
+    const wanted = normalizePackageName(ecosystem, name);
+    const matches = candidate => normalizePackageName(ecosystem, candidate) === wanted;
+    return reader(text, matches).some(found => found === version || compareVersions(found, version) === 0);
+}
 function updateMatchesAlert(alert, ecosystem, update) {
     return alert.ecosystem === ecosystem
         && normalizePackageName(ecosystem, alert.package) === normalizePackageName(ecosystem, update.name);
@@ -315,7 +518,29 @@ function alertFixedByUpdate(alert, ecosystem, update, headContents) {
     }
     const alertDirectory = directoryOf(alert.manifest_path ?? '');
     return Object.entries(headContents ?? {}).some(([path, text]) =>
-        directoryOf(path) === alertDirectory && manifestMentionsVersion(text, ecosystem, update.name, update.to));
+        directoryOf(path) === alertDirectory && manifestMentionsVersion(path, text, ecosystem, update.name, update.to));
+}
+
+/**
+ * Alert numbers a Dependabot PR covers, so the agent does not duplicate the fix in the
+ * auto-sec PR. Non-malware alerts use the same proof as the approval gate
+ * (`alertFixedByUpdate`). Malware alerts have no patched version; they are covered when
+ * a changed manifest in the alert's directory moves the flagged package to the PR's new
+ * version, and the approval gate still leaves those PRs to a human reviewer.
+ */
+function coveredAlerts(alerts, ecosystem, updates, headContents) {
+    if (!ecosystem) {
+        return [];
+    }
+    return (alerts ?? [])
+        .filter(alert => updates.some(update => alert.malware
+            ? updateMatchesAlert(alert, ecosystem, update)
+                && Object.entries(headContents ?? {}).some(([path, text]) =>
+                    directoryOf(path) === directoryOf(alert.manifest_path ?? '')
+                    && manifestMentionsVersion(path, text, ecosystem, update.name, update.to))
+            : alertFixedByUpdate(alert, ecosystem, update, headContents)))
+        .map(alert => alert.number)
+        .sort((a, b) => a - b);
 }
 
 /**
@@ -777,6 +1002,7 @@ module.exports = {
     MAX_APPROVALS,
     alertFixedByUpdate,
     compareVersions,
+    coveredAlerts,
     ecosystemFromBranch,
     evaluateApprovalGates,
     extractSources,

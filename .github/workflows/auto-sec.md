@@ -106,28 +106,53 @@ pre-agent-steps:
             other_rule_counts: ([ .[] | select(.rule as $r | ($rules | index($r)) | not) ] | group_by(.rule) | map({rule: .[0].rule, count: length}))
           }' > .auto-sec/code-scanning.json
 
-      # Open Dependabot PRs with their parsed updates and CI rollup. Bodies are
-      # parsed by the same module the approval job uses, then dropped.
+      # Open Dependabot PRs with their parsed updates, CI rollup, and the alerts each
+      # one provably covers. Coverage uses the same module as the approval gate:
+      # the head version of every changed manifest is fetched and must bind the
+      # alert package to the new version in the alert's own directory. Bodies are
+      # parsed and then dropped.
       gh pr list --repo "${REPO}" --author "app/dependabot" --state open --limit 200 \
         --json number,title,body,headRefName,headRefOid,isDraft,files,statusCheckRollup \
         > .auto-sec/dependabot-prs-raw.json
       node -e '
         const fs = require("node:fs");
+        const { execFileSync } = require("node:child_process");
         const m = require("./.github/workflows/auto-sec/auto-sec.js");
         const prs = JSON.parse(fs.readFileSync(".auto-sec/dependabot-prs-raw.json", "utf8"));
+        const alerts = JSON.parse(fs.readFileSync(".auto-sec/alerts.json", "utf8"));
         const ok = new Set(["SUCCESS", "SKIPPED", "NEUTRAL"]);
+        const headText = (path, sha) => {
+          const encoded = path.split("/").map(encodeURIComponent).join("/");
+          try {
+            return execFileSync("gh", ["api", "-H", "Accept: application/vnd.github.raw", `repos/${process.env.REPO}/contents/${encoded}?ref=${sha}`],
+              { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+          } catch {
+            return null;
+          }
+        };
         const out = prs.map(pr => {
           const rollup = pr.statusCheckRollup ?? [];
           const state = c => c.conclusion || c.state || c.status || "";
+          const ecosystem = m.ecosystemFromBranch(pr.headRefName);
+          const updates = m.parseDependabotUpdates(pr.title, pr.body);
+          const files = (pr.files ?? []).map(f => f.path);
+          const headContents = {};
+          for (const path of files.filter(m.isAllowedManifest)) {
+            const text = headText(path, pr.headRefOid);
+            if (text !== null) {
+              headContents[path] = text;
+            }
+          }
           return {
             number: pr.number,
             title: pr.title,
             head_ref: pr.headRefName,
             head_sha: pr.headRefOid,
             draft: pr.isDraft,
-            ecosystem: m.ecosystemFromBranch(pr.headRefName),
-            updates: m.parseDependabotUpdates(pr.title, pr.body),
-            files: (pr.files ?? []).map(f => f.path),
+            ecosystem,
+            updates,
+            files,
+            covered_alerts: m.coveredAlerts(alerts, ecosystem, updates, headContents),
             checks: { total: rollup.length, green: rollup.filter(c => ok.has(String(state(c)).toUpperCase())).length },
           };
         });
@@ -227,10 +252,6 @@ safe-outputs:
           description: "Full 40-character head commit SHA the request was evaluated against."
           required: true
           type: string
-        rationale:
-          description: "Short reason using package names and versions only (no advisory details)."
-          required: false
-          type: string
       steps:
         - name: Check out gate module
           uses: actions/checkout@v7.0.1
@@ -305,21 +326,22 @@ The pre-agent step wrote these files (read them with `cat`/`jq`):
   an action or package version; `other_rule_counts` are code findings that are out
   of scope for this workflow.
 - `.auto-sec/dependabot-prs.json`: open Dependabot PRs with parsed `updates`
-  (`name`, `from`, `to`), changed `files`, and a `checks` rollup.
+  (`name`, `from`, `to`), changed `files`, a `checks` rollup, and
+  `covered_alerts`: the alert numbers the PR provably fixes, computed by the same
+  module the approval job uses.
 - `.auto-sec/auto-sec-prs.json`: open pull requests labeled `auto-sec`.
 - `.github/dependabot.yml`: the repository Dependabot configuration (its
   `cooldown.default-days: 7` is the policy the cooldown rule enforces).
 
 ## Step 1: Match alerts to Dependabot PRs
 
-An open Dependabot PR fixes an alert when its ecosystem matches, an `updates` entry
-names the alert package (case-insensitive; for pip treat `-`, `_`, `.` as equal), a
-changed file sits in the same directory as the alert `manifest_path`, and the new
-version is at or above `first_patched_version`.
+Use each PR's `covered_alerts` as the only source of truth for which alerts it
+fixes. Do not match alerts to PRs yourself: a PR covers an alert only when the
+alert number is listed in that PR's `covered_alerts`.
 
-For every PR that fixes at least one alert and is **not** a GitHub Actions update,
-emit one `approve_dependabot_pr` item with `pr_number`, the full `head_sha`, and a
-short `rationale` (package and versions only). The approval job verifies green CI,
+For every PR with a non-empty `covered_alerts` that is **not** a GitHub Actions
+update, emit one `approve_dependabot_pr` item with `pr_number` and the full
+`head_sha`. The approval job verifies green CI,
 the cooldown, the manifest-only diff, the package source, and the version change
 itself, and skips PRs that fail any check, so request approval even when CI is
 still running. Still treat alerts as covered by the PR; do not duplicate the fix in
