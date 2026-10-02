@@ -90,7 +90,7 @@ public class ResourceNotificationService : IDisposable
     /// </summary>
     /// <remarks>
     /// This method returns a task that will complete when the resource reaches the specified target state. If the resource
-    /// is already in the target state, the method will return immediately.<br/>
+    /// is already in the target state, the method will return immediately without logging wait or completion messages.<br/>
     /// If the resource doesn't reach one of the target states before <paramref name="cancellationToken"/> is signaled, this method
     /// will throw <see cref="OperationCanceledException"/>.
     /// </remarks>
@@ -111,7 +111,7 @@ public class ResourceNotificationService : IDisposable
     /// </summary>
     /// <remarks>
     /// This method returns a task that will complete when the resource reaches one of the specified target states. If the resource
-    /// is already in the target state, the method will return immediately.<br/>
+    /// is already in the target state, the method will return immediately without logging wait or completion messages.<br/>
     /// If the resource doesn't reach one of the target states before <paramref name="cancellationToken"/> is signaled, this method
     /// will throw <see cref="OperationCanceledException"/>.
     /// </remarks>
@@ -123,19 +123,24 @@ public class ResourceNotificationService : IDisposable
                                                      Justification = "targetState(s) parameters are mutually exclusive.")]
     public async Task<string> WaitForResourceAsync(string resourceName, IEnumerable<string> targetStates, CancellationToken cancellationToken = default)
     {
-        if (_logger.IsEnabled(LogLevel.Debug))
+        var waitTask = WaitForResourceCoreAsync(
+            resourceName,
+            re => re.Snapshot.State?.Text is { Length: > 0 } stateText && targetStates.Contains(stateText, StringComparers.ResourceState),
+            $"Resource '{resourceName}' failed to reach one of the target states: [{string.Join(", ", targetStates)}] before the operation was cancelled.",
+            cancellationToken);
+        var loggedWait = !waitTask.IsCompletedSuccessfully;
+        if (loggedWait && _logger.IsEnabled(LogLevel.Debug))
         {
             _logger.LogDebug("Waiting for resource '{ResourceName}' to enter one of the target state: {TargetStates}", resourceName, string.Join(", ", targetStates));
         }
 
-        var resourceEvent = await WaitForResourceCoreAsync(
-            resourceName,
-            re => re.Snapshot.State?.Text is { Length: > 0 } stateText && targetStates.Contains(stateText, StringComparers.ResourceState),
-            $"Resource '{resourceName}' failed to reach one of the target states: [{string.Join(", ", targetStates)}] before the operation was cancelled.",
-            cancellationToken).ConfigureAwait(false);
-
+        var resourceEvent = await waitTask.ConfigureAwait(false);
         var finalState = resourceEvent.Snapshot.State!.Text!;
-        _logger.LogDebug("Finished waiting for resource '{ResourceName}'. Resource state is '{State}'.", resourceName, finalState);
+        if (loggedWait)
+        {
+            _logger.LogDebug("Finished waiting for resource '{ResourceName}'. Resource state is '{State}'.", resourceName, finalState);
+        }
+
         return finalState;
     }
 
@@ -660,6 +665,7 @@ public class ResourceNotificationService : IDisposable
     /// </summary>
     /// <remarks>
     /// This method returns a task that will complete when the specified predicate returns <see langword="true" />.<br/>
+    /// If the predicate matches a current resource snapshot, the method will return immediately without logging wait or completion messages.<br/>
     /// If the predicate isn't satisfied before <paramref name="cancellationToken"/> is signaled, this method
     /// will throw <see cref="OperationCanceledException"/>.
     /// </remarks>
@@ -671,13 +677,22 @@ public class ResourceNotificationService : IDisposable
                                                      Justification = "predicate and targetState(s) parameters are mutually exclusive.")]
     public async Task<ResourceEvent> WaitForResourceAsync(string resourceName, Func<ResourceEvent, bool> predicate, CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Waiting for resource '{ResourceName}' to match predicate.", resourceName);
-        var resourceEvent = await WaitForResourceCoreAsync(
+        var waitTask = WaitForResourceCoreAsync(
             resourceName,
             predicate,
             $"Resource '{resourceName}' failed to meet the predicate condition before the operation was cancelled.",
-            cancellationToken).ConfigureAwait(false);
-        _logger.LogDebug("Finished waiting for resource '{ResourceName}'.", resourceName);
+            cancellationToken);
+        var loggedWait = !waitTask.IsCompletedSuccessfully;
+        if (loggedWait)
+        {
+            _logger.LogDebug("Waiting for resource '{ResourceName}' to match predicate.", resourceName);
+        }
+
+        var resourceEvent = await waitTask.ConfigureAwait(false);
+        if (loggedWait)
+        {
+            _logger.LogDebug("Finished waiting for resource '{ResourceName}'.", resourceName);
+        }
 
         return resourceEvent;
     }
