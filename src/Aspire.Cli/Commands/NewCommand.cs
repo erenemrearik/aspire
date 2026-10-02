@@ -438,14 +438,17 @@ internal sealed class NewCommand : BaseCommand
 
                 try
                 {
-                    var packages = (await selectedChannel.GetTemplatePackagesAsync(
-                        ExecutionContext.WorkingDirectory,
-                        templateDiscoveryMappings,
-                        filterLocalPackagesToPinnedVersion: !isUnqualifiedLocalResolution,
-                        string.IsNullOrWhiteSpace(source)
-                            ? NuGetPackageSearchPolicy.AmbientOverlay
-                            : NuGetPackageSearchPolicy.Exclusive,
-                        cancellationToken))
+                    var discoveredPackages = string.IsNullOrWhiteSpace(source)
+                        ? await selectedChannel.GetTemplatePackagesFromChannelAsync(
+                            ExecutionContext.WorkingDirectory,
+                            filterLocalPackagesToPinnedVersion: !isUnqualifiedLocalResolution,
+                            cancellationToken)
+                        : await selectedChannel.GetTemplatePackagesAsync(
+                            ExecutionContext.WorkingDirectory,
+                            templateDiscoveryMappings,
+                            filterLocalPackagesToPinnedVersion: !isUnqualifiedLocalResolution,
+                            cancellationToken);
+                    var packages = discoveredPackages
                         .Where(p => Semver.SemVersion.TryParse(p.Version, Semver.SemVersionStyles.Strict, out _))
                         .ToArray();
                     var hasPrHives = ExecutionContext.GetHiveCount() > 0;

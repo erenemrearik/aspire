@@ -6,12 +6,6 @@ using Aspire.Cli.Projects;
 
 namespace Aspire.Cli.NuGet;
 
-internal enum NuGetPackageSearchPolicy
-{
-    AmbientOverlay,
-    Exclusive
-}
-
 /// <summary>
 /// Provides the effective NuGet configuration for one package or template invocation.
 /// </summary>

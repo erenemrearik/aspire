@@ -556,14 +556,9 @@ internal sealed class AddCommand : BaseCommand
         {
             foreach (var package in distinctPackageIds)
             {
-                var packages = await channel.GetPackageVersionsAsync(
-                    package.Package.Id,
-                    workingDirectory,
-                    sourceMappings ?? channel.Mappings,
-                    sourceMappings is null
-                        ? NuGetPackageSearchPolicy.AmbientOverlay
-                        : NuGetPackageSearchPolicy.Exclusive,
-                    cancellationToken);
+                var packages = sourceMappings is null
+                    ? await channel.GetPackageVersionsAsync(package.Package.Id, workingDirectory, cancellationToken)
+                    : await channel.GetPackageVersionsAsync(package.Package.Id, workingDirectory, sourceMappings, cancellationToken);
                 versions.AddRange(packages.Select(p => (FriendlyName: package.FriendlyName, Package: p, Channel: channel)));
             }
         }

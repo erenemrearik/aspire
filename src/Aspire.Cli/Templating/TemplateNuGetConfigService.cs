@@ -7,7 +7,6 @@ using Aspire.Cli.Commands;
 using Aspire.Cli.DotNet;
 using Aspire.Cli.Exceptions;
 using Aspire.Cli.Interaction;
-using Aspire.Cli.NuGet;
 using Aspire.Cli.Packaging;
 using Aspire.Cli.Utils;
 using NuGetPackage = Aspire.Shared.NuGetPackageCli;
@@ -305,25 +304,25 @@ internal sealed class TemplateNuGetConfigService(
 
             await Parallel.ForEachAsync(channels, cancellationToken, async (channel, ct) =>
             {
-                var templateSearchMappings = string.IsNullOrWhiteSpace(query.SourceOverride)
-                    ? channel.Mappings
-                    : PackageSourceOverrideMappings.CreateForSourceOnlyOperations(query.SourceOverride);
-                var templatePackages = await channel.GetTemplatePackagesAsync(
-                    executionContext.WorkingDirectory,
-                    templateSearchMappings,
-                    // Init and explicit source/version overrides historically enumerate the source
-                    // before this service selects a version. Keep pin filtering only for channel
-                    // resolution in `aspire new`; unqualified local resolution selects the exact
-                    // CLI identity version below from the complete candidate set.
-                    filterLocalPackagesToPinnedVersion:
-                        query.IncludePrHives &&
-                        !isUnqualifiedLocalResolution &&
-                        string.IsNullOrWhiteSpace(query.VersionOverride) &&
-                        string.IsNullOrWhiteSpace(query.SourceOverride),
-                    string.IsNullOrWhiteSpace(query.SourceOverride)
-                        ? NuGetPackageSearchPolicy.AmbientOverlay
-                        : NuGetPackageSearchPolicy.Exclusive,
-                    ct);
+                // Init and explicit source/version overrides historically enumerate the source
+                // before this service selects a version. Keep pin filtering only for channel
+                // resolution in `aspire new`; unqualified local resolution selects the exact
+                // CLI identity version below from the complete candidate set.
+                var filterLocalPackagesToPinnedVersion =
+                    query.IncludePrHives &&
+                    !isUnqualifiedLocalResolution &&
+                    string.IsNullOrWhiteSpace(query.VersionOverride) &&
+                    string.IsNullOrWhiteSpace(query.SourceOverride);
+                var templatePackages = string.IsNullOrWhiteSpace(query.SourceOverride)
+                    ? await channel.GetTemplatePackagesFromChannelAsync(
+                        executionContext.WorkingDirectory,
+                        filterLocalPackagesToPinnedVersion,
+                        ct)
+                    : await channel.GetTemplatePackagesAsync(
+                        executionContext.WorkingDirectory,
+                        PackageSourceOverrideMappings.CreateForSourceOnlyOperations(query.SourceOverride),
+                        filterLocalPackagesToPinnedVersion,
+                        ct);
                 lock (resultsLock)
                 {
                     results.AddRange(templatePackages.Select(p => (p, channel)));
@@ -428,16 +427,12 @@ internal sealed class TemplateNuGetConfigService(
         CancellationToken cancellationToken)
     {
         using var searchConfiguration = string.IsNullOrWhiteSpace(sourceOverride)
-            ? await selection.Channel.CreateSearchConfigurationAsync(
+            ? await selection.Channel.CreateChannelSearchConfigurationAsync(
                 executionContext.WorkingDirectory,
-                selection.Channel.Mappings,
-                NuGetPackageSearchPolicy.AmbientOverlay,
                 cancellationToken)
-            : await selection.Channel.CreateSearchConfigurationAsync(
+            : await selection.Channel.CreateSourceOverrideSearchConfigurationAsync(
                 executionContext.WorkingDirectory,
-                PackageSourceOverrideMappings.CreateForSourceOnlyOperations(sourceOverride),
-                NuGetPackageSearchPolicy.Exclusive,
-                cancellationToken);
+                PackageSourceOverrideMappings.CreateForSourceOnlyOperations(sourceOverride));
 
         var collector = new OutputCollector();
 
