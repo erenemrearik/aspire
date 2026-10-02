@@ -46,5 +46,5 @@ internal static class ResourceSelectHelpers
     }
 
     internal static bool HasUsableTerminal(ResourceViewModel resource)
-        => resource.HasTerminal() && resource.TryGetTerminalReplicaInfo(out _, out _);
+        => resource.HasTerminal();
 }

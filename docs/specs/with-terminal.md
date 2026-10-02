@@ -392,8 +392,9 @@ See the
 
 Resource terminals are displayed on the **Terminals** page at `/terminals`,
 after Metrics as the final page link in desktop and mobile navigation. Its resource
-selector contains only terminal-enabled resources with replica metadata, with
-individual replicas selectable and no All option. The page restores the last
+selector contains only terminal-enabled resources, with individual replicas
+selectable and no All option. Replica index and count metadata are not required
+for terminal availability or selection. The page restores the last
 selected resource from browser session storage, otherwise defaulting to
 **(None)**, even when only one terminal resource is available. Without a selected
 resource, the page displays a terminal icon and "Select a resource to view its

@@ -197,6 +197,22 @@ public class TerminalsTests : DashboardTestContext
         Assert.Empty(cut.FindComponents<LogViewer>());
     }
 
+    [Fact]
+    public void TerminalWithoutReplicaMetadata_RemainsSelectableAndConnectsByInstanceName()
+    {
+        var terminal = TerminalSetupHelpers.CreateTerminalResource("shell-instance", displayName: "shell");
+        var resource = ModelTestHelpers.CreateResource("shell-instance", displayName: "shell",
+            properties: terminal.Properties.Where(p => p.Key == KnownProperties.Terminal.Enabled).ToDictionary());
+        TerminalsSetupHelpers.SetupPage(this, CreateClient(resource));
+        var cut = RenderPage("shell");
+
+        Assert.Equal("http://localhost/terminals/resource/shell", Services.GetRequiredService<NavigationManager>().Uri);
+        Assert.Equal("shell-instance", cut.FindComponent<TerminalView>().Instance.ResourceName);
+        Assert.Equal(new string?[] { null, "shell-instance" },
+            cut.FindComponent<ResourceSelect>().Instance.Resources!.Select(r => r.Id?.InstanceId));
+        TerminalSetupHelpers.AssertSingleTerminalConnection(this, "ws://localhost/api/terminal?resource=shell-instance");
+    }
+
     [Theory]
     [InlineData(KnownResourceState.Waiting)]
     [InlineData(KnownResourceState.Starting)]
