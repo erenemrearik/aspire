@@ -241,9 +241,9 @@ namespace Aspire.Dashboard.Resources {
             }
         }
 
-        public static string TerminalFocusControlsHint {
+        public static string TerminalFocusControlsDescription {
             get {
-                return ResourceManager.GetString("TerminalFocusControlsHint", resourceCulture);
+                return ResourceManager.GetString("TerminalFocusControlsDescription", resourceCulture);
             }
         }
 
