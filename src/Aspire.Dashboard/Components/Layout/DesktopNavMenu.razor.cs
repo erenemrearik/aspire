@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Aspire.Dashboard.Configuration;
+using Aspire.Dashboard.Model;
 using Aspire.Dashboard.Utils;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
@@ -12,9 +13,10 @@ using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons;
 namespace Aspire.Dashboard.Components.Layout;
 
 /// <summary>
-/// The top-level navigation displayed in the desktop header. With a resource service the dashboard is organized
-/// around the app model (Home, Resources, Parameters, Graph) and telemetry is reached from a resource's tabs.
-/// Without a resource service there is no app model, so the telemetry pages are the top-level sections.
+/// The top-level navigation displayed as a vertical icon rail on the left of the desktop layout. With a resource
+/// service the dashboard is organized around the app model (Home, Resources, Tags, Parameters, Graph, Terminals,
+/// Extensions) and telemetry is reached from a resource's tabs. Without a resource service there is no app model, so
+/// the telemetry pages are the top-level sections.
 /// </summary>
 public partial class DesktopNavMenu : ComponentBase, IDisposable
 {
@@ -25,6 +27,20 @@ public partial class DesktopNavMenu : ComponentBase, IDisposable
     internal static Icon ResourcesIcon(bool active = false) =>
         active ? new Icons.Filled.Size24.AppFolder()
                   : new Icons.Regular.Size24.AppFolder();
+
+    internal static Icon TagsIcon(bool active = false) =>
+        active ? new Icons.Filled.Size24.TagMultiple()
+                  : new Icons.Regular.Size24.TagMultiple();
+
+    // WindowConsole only ships at Size20 in this Fluent version, so callers scale it to 24px. The Size24 alternatives
+    // (WindowDevTools, Code) read as "developer tools" rather than "terminal".
+    internal static Icon TerminalsIcon(bool active = false) =>
+        active ? new Icons.Filled.Size20.WindowConsole()
+                  : new Icons.Regular.Size20.WindowConsole();
+
+    internal static Icon ExtensionsIcon(bool active = false) =>
+        active ? new Icons.Filled.Size24.PuzzlePiece()
+                  : new Icons.Regular.Size24.PuzzlePiece();
 
     internal static Icon ParametersIcon(bool active = false) =>
         active ? new Icons.Filled.Size24.Key()
@@ -56,13 +72,32 @@ public partial class DesktopNavMenu : ComponentBase, IDisposable
     [Inject]
     public required IOptionsMonitor<DashboardOptions> DashboardOptions { get; init; }
 
+    [Inject]
+    public required ResourcePaneState ResourcePaneState { get; init; }
+
     private NavSection _activeSection;
 
     protected override void OnInitialized()
     {
         NavigationManager.LocationChanged += OnLocationChanged;
+        ResourcePaneState.Changed += OnResourcePaneChanged;
         _activeSection = GetSection(NavigationManager.ToBaseRelativePath(NavigationManager.Uri), DashboardClient.IsEnabled);
     }
+
+    private void OnResourcePaneChanged()
+    {
+        if (_activeSection == NavSection.Resources)
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // Resource pages share one route whichever way the resource list next to them is organized, so the URL alone
+    // cannot tell Resources and Tags apart. The resource list's mode decides which of the two is current.
+    private NavSection GetDisplayedSection() =>
+        _activeSection == NavSection.Resources && ResourcePaneState.Mode == ResourcePaneMode.Tags
+            ? NavSection.Tags
+            : _activeSection;
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
@@ -79,12 +114,15 @@ public partial class DesktopNavMenu : ComponentBase, IDisposable
         if (DashboardClient.IsEnabled)
         {
             yield return new NavItem(NavSection.Home, DashboardUrls.HomeUrl(), Loc[nameof(Resources.Layout.NavMenuHomeTab)], HomeIcon(), HomeIcon(active: true));
-            yield return new NavItem(NavSection.Resources, DashboardUrls.ResourceOverviewUrl(), Loc[nameof(Resources.Layout.NavMenuResourcesTab)], ResourcesIcon(), ResourcesIcon(active: true));
+            yield return new NavItem(NavSection.Resources, DashboardUrls.ResourceListUrl(), Loc[nameof(Resources.Layout.NavMenuResourcesTab)], ResourcesIcon(), ResourcesIcon(active: true));
+            yield return new NavItem(NavSection.Tags, DashboardUrls.TagsUrl(), Loc[nameof(Resources.Layout.NavMenuTagsTab)], TagsIcon(), TagsIcon(active: true));
             yield return new NavItem(NavSection.Parameters, DashboardUrls.ParametersUrl(), Loc[nameof(Resources.Layout.NavMenuParametersTab)], ParametersIcon(), ParametersIcon(active: true));
             if (DashboardOptions.CurrentValue.UI.DisableResourceGraph != true)
             {
                 yield return new NavItem(NavSection.Graph, DashboardUrls.GraphUrl(), Loc[nameof(Resources.Layout.NavMenuGraphTab)], GraphIcon(), GraphIcon(active: true));
             }
+            yield return new NavItem(NavSection.Terminals, DashboardUrls.TerminalsUrl(), Loc[nameof(Resources.Layout.NavMenuTerminalsTab)], TerminalsIcon(), TerminalsIcon(active: true));
+            yield return new NavItem(NavSection.Extensions, DashboardUrls.ExtensionsUrl(), Loc[nameof(Resources.Layout.NavMenuExtensionsTab)], ExtensionsIcon(), ExtensionsIcon(active: true));
         }
         else
         {
@@ -124,6 +162,8 @@ public partial class DesktopNavMenu : ComponentBase, IDisposable
             "" => NavSection.Home,
             DashboardUrls.ParametersBasePath => NavSection.Parameters,
             DashboardUrls.GraphBasePath => NavSection.Graph,
+            DashboardUrls.TerminalsBasePath => NavSection.Terminals,
+            DashboardUrls.ExtensionsBasePath => NavSection.Extensions,
             DashboardUrls.ResourceOverviewBasePath or
             DashboardUrls.ConsoleLogBasePath or
             DashboardUrls.StructuredLogsBasePath or
@@ -136,6 +176,7 @@ public partial class DesktopNavMenu : ComponentBase, IDisposable
     public void Dispose()
     {
         NavigationManager.LocationChanged -= OnLocationChanged;
+        ResourcePaneState.Changed -= OnResourcePaneChanged;
     }
 
     internal enum NavSection
@@ -143,8 +184,11 @@ public partial class DesktopNavMenu : ComponentBase, IDisposable
         None,
         Home,
         Resources,
+        Tags,
         Parameters,
         Graph,
+        Terminals,
+        Extensions,
         StructuredLogs,
         Traces,
         Metrics

@@ -133,6 +133,15 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
+        ///   Looks up a localized string similar to Extend the dashboard with views and tools for your app..
+        /// </summary>
+        public static string ExtensionsPageDescription {
+            get {
+                return ResourceManager.GetString("ExtensionsPageDescription", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Aspire.
         /// </summary>
         public static string MainLayoutAspire {
@@ -268,6 +277,15 @@ namespace Aspire.Dashboard.Resources {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Extensions.
+        /// </summary>
+        public static string NavMenuExtensionsTab {
+            get {
+                return ResourceManager.GetString("NavMenuExtensionsTab", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Metrics.
         /// </summary>
         public static string NavMenuMetricsTab {
@@ -291,6 +309,24 @@ namespace Aspire.Dashboard.Resources {
         public static string NavMenuStructuredLogsTab {
             get {
                 return ResourceManager.GetString("NavMenuStructuredLogsTab", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Tags.
+        /// </summary>
+        public static string NavMenuTagsTab {
+            get {
+                return ResourceManager.GetString("NavMenuTagsTab", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Terminals.
+        /// </summary>
+        public static string NavMenuTerminalsTab {
+            get {
+                return ResourceManager.GetString("NavMenuTerminalsTab", resourceCulture);
             }
         }
         
@@ -358,6 +394,15 @@ namespace Aspire.Dashboard.Resources {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Coming soon.
+        /// </summary>
+        public static string PlaceholderPageComingSoon {
+            get {
+                return ResourceManager.GetString("PlaceholderPageComingSoon", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Resources.
         /// </summary>
         public static string ResourcePaneLandmark {
@@ -385,6 +430,24 @@ namespace Aspire.Dashboard.Resources {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Add tags to a resource from its overview to group related resources here..
+        /// </summary>
+        public static string ResourcePaneNoTagsDescription {
+            get {
+                return ResourceManager.GetString("ResourcePaneNoTagsDescription", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to No tags yet.
+        /// </summary>
+        public static string ResourcePaneNoTagsTitle {
+            get {
+                return ResourceManager.GetString("ResourcePaneNoTagsTitle", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Show resource list.
         /// </summary>
         public static string ResourcePaneOpen {
@@ -408,6 +471,24 @@ namespace Aspire.Dashboard.Resources {
         public static string ResourcePaneStateFilters {
             get {
                 return ResourceManager.GetString("ResourcePaneStateFilters", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to {0}, {1}.
+        /// </summary>
+        public static string ResourcePaneTagGroupLabel {
+            get {
+                return ResourceManager.GetString("ResourcePaneTagGroupLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Untagged.
+        /// </summary>
+        public static string ResourcePaneUntaggedGroup {
+            get {
+                return ResourceManager.GetString("ResourcePaneUntaggedGroup", resourceCulture);
             }
         }
         
@@ -552,6 +633,15 @@ namespace Aspire.Dashboard.Resources {
         public static string ResourcePaneResize {
             get {
                 return ResourceManager.GetString("ResourcePaneResize", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Open and switch between the terminals of your resources from one place..
+        /// </summary>
+        public static string TerminalsPageDescription {
+            get {
+                return ResourceManager.GetString("TerminalsPageDescription", resourceCulture);
             }
         }
     }

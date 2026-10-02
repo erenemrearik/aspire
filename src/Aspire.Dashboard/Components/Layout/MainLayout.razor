@@ -7,8 +7,8 @@
 <div class="layout @(!RunSelection.SelectedRun.IsCurrent ? "historical-run" : null)" style="@(_isNavMenuOpen ? "overflow: hidden;" : string.Empty)">
     @if (ViewportInformation.IsDesktop)
     {
-        @* Full-width top header. The brand lockup (logo + app name) leads, followed by the top-level
-           navigation, so the header is the single place to switch between the dashboard's main views. *@
+        @* Full-width top header with the brand lockup (logo + app name) and app-wide actions. The dashboard's main
+           views are switched from the icon rail below the logo. *@
         <header>
             <div class="brand-logo-container">
                 <a href="/" class="logo"
@@ -20,7 +20,6 @@
             <a href="/" class="application-name">
                 <ApplicationName/>
             </a>
-            <DesktopNavMenu />
             <div class="flex-filler"></div>
             @if (RunStore.SupportsRunSelection)
             {
@@ -69,6 +68,7 @@
             </FluentButton>
             <UserProfile/>
         </header>
+        <DesktopNavMenu />
     }
     else
     {

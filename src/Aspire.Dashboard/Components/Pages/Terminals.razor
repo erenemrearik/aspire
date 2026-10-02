@@ -1,0 +1,10 @@
+@page "/terminals"
+@using Aspire.Dashboard.Components.Layout
+@using Aspire.Dashboard.Resources
+@inject IStringLocalizer<Dashboard.Resources.Layout> Loc
+
+<PageTitle><ApplicationName ResourceName="@nameof(Dashboard.Resources.Layout.NavMenuTerminalsTab)" Loc="@Loc" /></PageTitle>
+
+<ComingSoonPlaceholder Icon="@DesktopNavMenu.TerminalsIcon()"
+                       Title="@Loc[nameof(Dashboard.Resources.Layout.NavMenuTerminalsTab)]"
+                       Description="@Loc[nameof(Dashboard.Resources.Layout.TerminalsPageDescription)]" />

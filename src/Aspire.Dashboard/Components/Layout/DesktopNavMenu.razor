@@ -3,15 +3,23 @@
 @inject IStringLocalizer<Aspire.Dashboard.Resources.StructuredLogs> StructuredLogsLoc
 @inject IDashboardClient DashboardClient
 
-<nav class="header-nav" aria-label="@Loc[nameof(Layout.NavMenuLandmark)]">
+@* Icon-only links keep the rail narrow. Each label is the link's accessible name and is shown in a tooltip, which
+   unlike a native title attribute also appears on keyboard focus. *@
+<nav class="main-rail" aria-label="@Loc[nameof(Layout.NavMenuLandmark)]">
+    @{
+        var displayedSection = GetDisplayedSection();
+    }
     @foreach (var item in GetItems())
     {
-        var isActive = item.Section == _activeSection;
-        <a href="@item.Href"
-           class="header-nav-item @(isActive ? "active" : null)"
+        var isActive = item.Section == displayedSection;
+        var id = $"main-rail-{item.Section.ToString().ToLowerInvariant()}";
+        <a id="@id"
+           href="@item.Href"
+           class="main-rail-item @(isActive ? "active" : null)"
+           aria-label="@item.Text"
            aria-current="@(isActive ? "page" : null)">
-            <FluentIcon Value="@(isActive ? item.ActiveIcon : item.Icon)" Width="20px" Color="Color.Custom" CustomColor="currentColor" />
-            <span class="header-nav-text">@item.Text</span>
+            <FluentIcon Value="@(isActive ? item.ActiveIcon : item.Icon)" Width="24px" Color="Color.Custom" CustomColor="currentColor" />
         </a>
+        <FluentTooltip Anchor="@id" Positioning="Positioning.After">@item.Text</FluentTooltip>
     }
 </nav>

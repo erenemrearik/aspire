@@ -182,6 +182,116 @@
     text-transform: uppercase;
 }
 
+.resource-tag-group + .resource-tag-group {
+    margin-top: 4px;
+}
+
+.resource-tag-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 30px;
+    padding: 4px 8px 4px 4px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--colorNeutralForeground1);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: start;
+    cursor: pointer;
+}
+
+.resource-tag-header:hover {
+    background: var(--colorNeutralBackground3);
+}
+
+.resource-tag-header:focus-visible {
+    outline: 2px solid var(--colorStrokeFocus2);
+    outline-offset: -2px;
+}
+
+.resource-tag-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    color: var(--colorNeutralForeground2);
+}
+
+.resource-tag-header.collapsed .resource-tag-chevron ::deep svg {
+    transform: rotate(-90deg);
+}
+
+.resource-tag-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.untagged .resource-tag-name {
+    color: var(--colorNeutralForeground2);
+    font-weight: 400;
+}
+
+.resource-tag-count {
+    flex: 0 0 auto;
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: var(--colorNeutralBackground3);
+    color: var(--colorNeutralForeground2);
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
+}
+
+/* Rows of a group are indented under its header so the grouping reads at a glance. */
+.resource-tag-group .resource-row-link {
+    padding-inline-start: 14px;
+}
+
+.pane-collapsed .resource-tag-group .resource-row-link {
+    padding: 4px;
+}
+
+.resource-tag-divider {
+    height: 1px;
+    margin: 6px 8px;
+    background: var(--colorNeutralStroke2);
+}
+
+.resource-tag-group:first-child .resource-tag-divider {
+    display: none;
+}
+
+.resource-tags-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin: 8px 4px 12px;
+    padding: 16px 12px;
+    border: 1px dashed var(--colorNeutralStroke2);
+    border-radius: 8px;
+    text-align: center;
+}
+
+.resource-tags-empty-title {
+    margin-top: 4px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.resource-tags-empty-description {
+    color: var(--colorNeutralForeground2);
+    font-size: 12px;
+}
+
 .resource-row {
     display: flex;
     align-items: center;

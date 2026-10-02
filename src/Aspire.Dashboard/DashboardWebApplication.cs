@@ -137,6 +137,7 @@ public sealed class DashboardWebApplication : IAsyncDisposable
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(Components.Layout.ResourcesLayout))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(ConsoleLogs))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(Error))]
+    [DynamicDependency(RuntimeActivatedComponentMembers, typeof(Components.Pages.Extensions))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(Home))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(Login))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(Metrics))]
@@ -144,6 +145,7 @@ public sealed class DashboardWebApplication : IAsyncDisposable
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(ResourceOverview))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(Components.Pages.Resources))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(StructuredLogs))]
+    [DynamicDependency(RuntimeActivatedComponentMembers, typeof(Components.Pages.Terminals))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(TerminalWindow))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(TraceDetail))]
     [DynamicDependency(RuntimeActivatedComponentMembers, typeof(Traces))]
@@ -359,6 +361,7 @@ public sealed class DashboardWebApplication : IAsyncDisposable
         builder.Services.AddGrpc();
         builder.Services.AddSingleton<DashboardRunStore>();
         builder.Services.AddSingleton<IDashboardRunStore>(services => services.GetRequiredService<DashboardRunStore>());
+        builder.Services.AddSingleton<ResourceTagStore>();
         // TryAdd for the same reason as IDashboardClient above: the factory decides which resource repository the
         // dashboard reads from, so a substituted client is only actually reachable if its factory survives too.
         builder.Services.TryAddSingleton<IRepositoryFactory, RepositoryFactory>();
@@ -418,6 +421,7 @@ public sealed class DashboardWebApplication : IAsyncDisposable
         builder.Services.AddScoped<DashboardDialogService>();
         builder.Services.AddScoped<DashboardMessageBarService>();
         builder.Services.AddScoped<ResourceMenuBuilder>();
+        builder.Services.AddScoped<ResourcePaneState>();
         builder.Services.AddScoped<StructuredLogMenuBuilder>();
         builder.Services.AddScoped<SpanMenuBuilder>();
         builder.Services.AddScoped<TraceMenuBuilder>();

@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Globalization;
@@ -12,6 +12,8 @@ internal static class DashboardUrls
     public const string ResourceOverviewBasePath = "resources";
     public const string ParametersBasePath = "parameters";
     public const string GraphBasePath = "graph";
+    public const string TerminalsBasePath = "terminals";
+    public const string ExtensionsBasePath = "extensions";
     public const string ConsoleLogBasePath = "consolelogs";
     public const string MetricsBasePath = "metrics";
     public const string StructuredLogsBasePath = "structuredlogs";
@@ -54,6 +56,22 @@ internal static class DashboardUrls
     public const string ResourceSelectionQueryName = "resource";
 
     /// <summary>
+    /// The query string parameter that switches the dashboard's resource list between listing resources and grouping
+    /// them by tag, for example <c>/resources?pane=tags</c>.
+    /// </summary>
+    public const string ResourcePaneQueryName = "pane";
+
+    /// <summary>
+    /// The <see cref="ResourcePaneQueryName"/> value that lists resources.
+    /// </summary>
+    public const string ResourcePaneResourcesValue = "resources";
+
+    /// <summary>
+    /// The <see cref="ResourcePaneQueryName"/> value that groups resources by tag.
+    /// </summary>
+    public const string ResourcePaneTagsValue = "tags";
+
+    /// <summary>
     /// Adds the selected resources to a URL using <see cref="ResourceSelectionQueryName"/>.
     /// </summary>
     public static string AddResourceSelection(string url, IEnumerable<string> resources)
@@ -85,6 +103,20 @@ internal static class DashboardUrls
 
         return url;
     }
+
+    /// <summary>
+    /// Gets the URL of the resources view with the resource list listing resources.
+    /// </summary>
+    public static string ResourceListUrl() => AddQueryString($"/{ResourceOverviewBasePath}", ResourcePaneQueryName, ResourcePaneResourcesValue);
+
+    /// <summary>
+    /// Gets the URL of the resources view with the resource list grouped by tag.
+    /// </summary>
+    public static string TagsUrl() => AddQueryString($"/{ResourceOverviewBasePath}", ResourcePaneQueryName, ResourcePaneTagsValue);
+
+    public static string TerminalsUrl() => $"/{TerminalsBasePath}";
+
+    public static string ExtensionsUrl() => $"/{ExtensionsBasePath}";
 
     public static string ParametersUrl(string? hiddenStates = null, string? hiddenHealthStates = null)
     {

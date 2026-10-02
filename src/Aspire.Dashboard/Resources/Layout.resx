@@ -282,4 +282,34 @@
   <data name="ResourcePaneResize" xml:space="preserve">
     <value>Resize resource list</value>
   </data>
+  <data name="NavMenuTagsTab" xml:space="preserve">
+    <value>Tags</value>
+  </data>
+  <data name="NavMenuTerminalsTab" xml:space="preserve">
+    <value>Terminals</value>
+  </data>
+  <data name="NavMenuExtensionsTab" xml:space="preserve">
+    <value>Extensions</value>
+  </data>
+  <data name="ResourcePaneUntaggedGroup" xml:space="preserve">
+    <value>Untagged</value>
+  </data>
+  <data name="ResourcePaneNoTagsTitle" xml:space="preserve">
+    <value>No tags yet</value>
+  </data>
+  <data name="ResourcePaneNoTagsDescription" xml:space="preserve">
+    <value>Add tags to a resource from its overview to group related resources here.</value>
+  </data>
+  <data name="ResourcePaneTagGroupLabel" xml:space="preserve">
+    <value>{0}, {1}</value>
+  </data>
+  <data name="PlaceholderPageComingSoon" xml:space="preserve">
+    <value>Coming soon</value>
+  </data>
+  <data name="TerminalsPageDescription" xml:space="preserve">
+    <value>Open and switch between the terminals of your resources from one place.</value>
+  </data>
+  <data name="ExtensionsPageDescription" xml:space="preserve">
+    <value>Extend the dashboard with views and tools for your app.</value>
+  </data>
 </root>

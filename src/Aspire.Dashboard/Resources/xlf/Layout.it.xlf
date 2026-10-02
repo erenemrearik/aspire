@@ -42,6 +42,11 @@
         <target state="new">Unpin run</target>
         <note />
       </trans-unit>
+      <trans-unit id="ExtensionsPageDescription">
+        <source>Extend the dashboard with views and tools for your app.</source>
+        <target state="new">Extend the dashboard with views and tools for your app.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="MainLayoutAspire">
         <source>Aspire</source>
         <target state="translated">Aspire</target>
@@ -122,6 +127,11 @@
         <target state="translated">Console</target>
         <note />
       </trans-unit>
+      <trans-unit id="NavMenuExtensionsTab">
+        <source>Extensions</source>
+        <target state="new">Extensions</target>
+        <note />
+      </trans-unit>
       <trans-unit id="NavMenuGraphTab">
         <source>Graph</source>
         <target state="new">Graph</target>
@@ -157,6 +167,16 @@
         <target state="translated">Strutturato</target>
         <note />
       </trans-unit>
+      <trans-unit id="NavMenuTagsTab">
+        <source>Tags</source>
+        <target state="new">Tags</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="NavMenuTerminalsTab">
+        <source>Terminals</source>
+        <target state="new">Terminals</target>
+        <note />
+      </trans-unit>
       <trans-unit id="NavMenuTracesTab">
         <source>Traces</source>
         <target state="translated">Tracce</target>
@@ -165,6 +185,11 @@
       <trans-unit id="PageLayoutViewFilters">
         <source>View filters</source>
         <target state="translated">Visualizza filtri</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="PlaceholderPageComingSoon">
+        <source>Coming soon</source>
+        <target state="new">Coming soon</target>
         <note />
       </trans-unit>
       <trans-unit id="ResourceHeaderAllResources">
@@ -232,6 +257,16 @@
         <target state="new">Resources</target>
         <note />
       </trans-unit>
+      <trans-unit id="ResourcePaneNoTagsDescription">
+        <source>Add tags to a resource from its overview to group related resources here.</source>
+        <target state="new">Add tags to a resource from its overview to group related resources here.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="ResourcePaneNoTagsTitle">
+        <source>No tags yet</source>
+        <target state="new">No tags yet</target>
+        <note />
+      </trans-unit>
       <trans-unit id="ResourcePaneOpen">
         <source>Show resource list</source>
         <target state="new">Show resource list</target>
@@ -247,6 +282,11 @@
         <target state="new">Filter by state</target>
         <note />
       </trans-unit>
+      <trans-unit id="ResourcePaneTagGroupLabel">
+        <source>{0}, {1}</source>
+        <target state="new">{0}, {1}</target>
+        <note />
+      </trans-unit>
       <trans-unit id="ResourcePaneTelemetryOnly">
         <source>Sends telemetry, not part of the app model</source>
         <target state="new">Sends telemetry, not part of the app model</target>
@@ -255,6 +295,11 @@
       <trans-unit id="ResourcePaneTelemetryOnlyGroup">
         <source>Telemetry only</source>
         <target state="new">Telemetry only</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="ResourcePaneUntaggedGroup">
+        <source>Untagged</source>
+        <target state="new">Untagged</target>
         <note />
       </trans-unit>
       <trans-unit id="ResourcePaneUnviewedErrors">
@@ -275,6 +320,11 @@
       <trans-unit id="ResourceTabsLandmark">
         <source>Resource views</source>
         <target state="new">Resource views</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="TerminalsPageDescription">
+        <source>Open and switch between the terminals of your resources from one place.</source>
+        <target state="new">Open and switch between the terminals of your resources from one place.</target>
         <note />
       </trans-unit>
     </body>

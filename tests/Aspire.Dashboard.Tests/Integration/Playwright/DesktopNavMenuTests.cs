@@ -20,13 +20,13 @@ public sealed class DesktopNavMenuTests : PlaywrightTestsBase<DashboardServerFix
 
     [Fact]
     [OuterloopTest("Resource-intensive Playwright browser test")]
-    public async Task HeaderNav_NavigatesBetweenSectionsAndMarksActiveItem()
+    public async Task MainRail_NavigatesBetweenSectionsAndMarksActiveItem()
     {
         await RunTestAsync(async page =>
         {
             await page.GotoAsync("/");
 
-            var nav = page.Locator(".header-nav");
+            var nav = page.Locator(".main-rail");
             await AssertActiveItemAsync(Resources.Layout.NavMenuHomeTab);
 
             var navigationCount = await page.EvaluateAsync<int>("() => performance.getEntriesByType('navigation').length");
@@ -57,14 +57,15 @@ public sealed class DesktopNavMenuTests : PlaywrightTestsBase<DashboardServerFix
             await Assertions.Expect(gridContainer).ToBeVisibleAsync();
             await Assertions.Expect(graphContainer).ToBeHiddenAsync();
 
-            // Header links are handled by Blazor's router, so switching sections doesn't reload the document.
+            // Rail links are handled by Blazor's router, so switching sections doesn't reload the document.
             Assert.Equal(navigationCount, await page.EvaluateAsync<int>("() => performance.getEntriesByType('navigation').length"));
 
-            async Task AssertActiveItemAsync(string expectedText)
+            async Task AssertActiveItemAsync(string expectedName)
             {
+                // Rail items are icon-only, so their label is the accessible name rather than the text content.
                 var activeItem = nav.Locator("a[aria-current='page']");
                 await Assertions.Expect(activeItem).ToHaveCountAsync(1);
-                await Assertions.Expect(activeItem).ToHaveTextAsync(expectedText);
+                await Assertions.Expect(activeItem).ToHaveAccessibleNameAsync(expectedName);
             }
         });
     }

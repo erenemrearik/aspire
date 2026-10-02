@@ -153,6 +153,53 @@ public sealed class ResourcePaneInteractionTests : PlaywrightTestsBase<Dashboard
         });
     }
 
+    [Fact]
+    [OuterloopTest("Resource-intensive Playwright browser test")]
+    public async Task ResourceTag_AddedFromOverviewGroupsResourceInTagsPane()
+    {
+        var resourceName = MockDashboardClient.TestResource1.DisplayName;
+        const string tag = "Frontend team";
+
+        await RunTestAsync(async page =>
+        {
+            await page.GotoAsync($"/resources/{resourceName}");
+
+            await page.GetByRole(AriaRole.Button, new PageGetByRoleOptions { Name = Resources.Resources.ResourceTagsAdd, Exact = true }).ClickAsync();
+            var input = page.GetByRole(AriaRole.Combobox);
+            await input.FillAsync("  frontend   team ");
+            await Assertions.Expect(page.GetByRole(AriaRole.Option)).ToHaveTextAsync(string.Format(CultureInfo.CurrentCulture, Resources.Resources.ResourceTagsCreate, "frontend team"));
+            await input.PressAsync("Enter");
+
+            // The editor stays open with an empty input so several tags can be added in a row.
+            await Assertions.Expect(page.Locator(".tag-chip-name")).ToHaveTextAsync("frontend team");
+            await Assertions.Expect(input).ToBeFocusedAsync();
+            await Assertions.Expect(input).ToHaveValueAsync(string.Empty);
+            await input.PressAsync("Backspace");
+            await Assertions.Expect(page.Locator(".tag-chip-name")).ToHaveCountAsync(0);
+            await input.FillAsync(tag);
+            await input.PressAsync("Enter");
+            await input.PressAsync("Escape");
+            await Assertions.Expect(page.Locator(".tag-chip-name")).ToHaveTextAsync(tag);
+
+            var rail = page.Locator(".main-rail");
+            await rail.GetByRole(AriaRole.Link, new LocatorGetByRoleOptions { Name = Resources.Layout.NavMenuTagsTab, Exact = true }).ClickAsync();
+
+            var pane = page.Locator(".resource-pane");
+            var tagGroup = pane.GetByRole(AriaRole.Group, new LocatorGetByRoleOptions { Name = tag });
+            await Assertions.Expect(tagGroup.GetByRole(AriaRole.Link, new LocatorGetByRoleOptions { Name = resourceName })).ToBeVisibleAsync();
+            await Assertions.Expect(rail.Locator("a[aria-current='page']")).ToHaveAccessibleNameAsync(Resources.Layout.NavMenuTagsTab);
+
+            // The pane mode is remembered when reloading a resource URL without a pane query.
+            await page.GotoAsync($"/resources/{resourceName}");
+            await Assertions.Expect(tagGroup).ToBeVisibleAsync();
+
+            await rail.GetByRole(AriaRole.Link, new LocatorGetByRoleOptions { Name = Resources.Layout.NavMenuResourcesTab, Exact = true }).ClickAsync();
+            await Assertions.Expect(tagGroup).ToHaveCountAsync(0);
+            await Assertions.Expect(pane.GetByRole(AriaRole.Link, new LocatorGetByRoleOptions { Name = resourceName })).ToBeVisibleAsync();
+            await Assertions.Expect(rail.Locator("a[aria-current='page']")).ToHaveAccessibleNameAsync(Resources.Layout.NavMenuResourcesTab);
+        });
+    }
+
     private static ResourceLogs CreateResourceLogs(string resourceName)
     {
         return new ResourceLogs

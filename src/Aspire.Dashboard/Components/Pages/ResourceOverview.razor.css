@@ -57,6 +57,19 @@
     }
 }
 
+/* Tags fit on one line next to the card title, so the card stays short. */
+.overview-tags-card {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    padding-block: 10px;
+}
+
+.overview-tags-card .overview-card-header {
+    margin-bottom: 0;
+}
+
 .overview-card-header {
     display: flex;
     align-items: center;

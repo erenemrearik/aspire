@@ -132,7 +132,7 @@ public class ResourcesTests : PlaywrightTestsBase<ResourcesTests.ResourcesDashbo
 
             var navigationCount = await page.EvaluateAsync<int>("() => performance.getEntriesByType('navigation').length");
 
-            var graphLink = page.Locator(".header-nav").GetByRole(AriaRole.Link, new LocatorGetByRoleOptions { Name = Dashboard.Resources.Layout.NavMenuGraphTab, Exact = true });
+            var graphLink = page.Locator(".main-rail").GetByRole(AriaRole.Link, new LocatorGetByRoleOptions { Name = Dashboard.Resources.Layout.NavMenuGraphTab, Exact = true });
             await graphLink.ClickAsync();
             await Assertions.Expect(graphLink).ToHaveAttributeAsync("aria-current", "page");
 

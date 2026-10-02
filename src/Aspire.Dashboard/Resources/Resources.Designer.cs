@@ -627,6 +627,69 @@ namespace Aspire.Dashboard.Resources {
         }
 
         /// <summary>
+        ///   Looks up a localized string similar to Add tag.
+        /// </summary>
+        public static string ResourceTagsAdd {
+            get {
+                return ResourceManager.GetString("ResourceTagsAdd", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Create tag "{0}".
+        /// </summary>
+        public static string ResourceTagsCreate {
+            get {
+                return ResourceManager.GetString("ResourceTagsCreate", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Add a tag to {0}.
+        /// </summary>
+        public static string ResourceTagsInputLabel {
+            get {
+                return ResourceManager.GetString("ResourceTagsInputLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Tag name.
+        /// </summary>
+        public static string ResourceTagsInputPlaceholder {
+            get {
+                return ResourceManager.GetString("ResourceTagsInputPlaceholder", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Tags.
+        /// </summary>
+        public static string ResourceTagsLabel {
+            get {
+                return ResourceManager.GetString("ResourceTagsLabel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Remove tag {0}.
+        /// </summary>
+        public static string ResourceTagsRemove {
+            get {
+                return ResourceManager.GetString("ResourceTagsRemove", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Tags.
+        /// </summary>
+        public static string ResourceTagsSuggestions {
+            get {
+                return ResourceManager.GetString("ResourceTagsSuggestions", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Showing &lt;strong&gt;{0} resources&lt;/strong&gt;.
         /// </summary>
         public static string TotalItemsFooterPluralText {

@@ -5,6 +5,7 @@
 @using Aspire.Dashboard.Model
 @using Aspire.Dashboard.Resources
 @using Humanizer
+@using Microsoft.AspNetCore.Components.Rendering
 
 @if (!IsResourcePaneEnabled)
 {
@@ -12,7 +13,10 @@
 }
 else
 {
-    var paneRows = GetPaneRows().ToList();
+    var isTagsMode = PaneState.Mode == ResourcePaneMode.Tags;
+    var paneRows = isTagsMode ? new List<ResourceGridViewModel>() : GetPaneRows().ToList();
+    var tagGroups = isTagsMode ? GetTagGroups() : new List<ResourceTagGroup>();
+    var paneResourceCount = isTagsMode ? tagGroups.SelectMany(g => g.Resources).DistinctBy(r => r.Name).Count() : paneRows.Count;
     var isDesktop = ViewportInformation.IsDesktop;
     var showCollapsedPane = isDesktop && _isPaneCollapsed;
 
@@ -117,65 +121,74 @@ else
                         <FluentSpinner Size="SpinnerSize.Small" />
                     </div>
                 }
-                else if (paneRows.Count == 0 && _telemetryOnlyResources.Count == 0)
+                else if (paneResourceCount == 0 && _telemetryOnlyResources.Count == 0 && !(isTagsMode && TagStore.GetAllTags().Count == 0))
                 {
                     <div class="resource-pane-message">@ResourcesLoc[nameof(Dashboard.Resources.Resources.ResourcesNoResources)]</div>
                 }
 
-                @foreach (var row in paneRows)
+                @if (isTagsMode)
                 {
-                    var resource = row.Resource;
-                    var resourceName = GetResourceName(resource);
-                    var isSelected = IsSelected(resourceName);
-                    var stateViewModel = ResourceStateViewModel.GetStateViewModel(resource, ColumnsLoc);
-                    var errorCount = GetUnviewedErrorCount(resource);
+                    @if (_isLoaded && !showCollapsedPane && TagStore.GetAllTags().Count == 0)
+                    {
+                        <div class="resource-tags-empty">
+                            <FluentIcon Value="@(new Icons.Regular.Size24.TagMultiple())" Width="24px" Color="Color.Custom" CustomColor="var(--colorNeutralForeground3)" />
+                            <span class="resource-tags-empty-title">@Loc[nameof(Dashboard.Resources.Layout.ResourcePaneNoTagsTitle)]</span>
+                            <span class="resource-tags-empty-description">@Loc[nameof(Dashboard.Resources.Layout.ResourcePaneNoTagsDescription)]</span>
+                        </div>
+                    }
 
-                    <div class="resource-row @(isSelected ? "selected" : string.Empty)" @key="resource.Name">
-                        <a class="resource-row-link"
-                           href="@GetRowUrl(resourceName)"
-                           style="@(showCollapsedPane || row.Depth == 0 ? null : $"--resource-row-depth: {row.Depth}")"
-                           aria-current="@GetRowAriaCurrent(isSelected)"
-                           title="@($"{resource.ResourceType}: {resourceName}")"
-                           @onclick="@(e => OnRowClickAsync(e, resourceName))"
-                           @onclick:preventDefault="true">
-                            <span class="resource-row-icon">
-                                <FluentIcon Width="16px"
-                                            Color="Color.Custom"
-                                            CustomColor="@ColorGenerator.Instance.GetColorVariableByKey(resourceName)"
-                                            Value="@ResourceIconHelpers.GetIconForResource(IconResolver, resource, IconSize.Size16)" />
-                                @if (showCollapsedPane)
-                                {
-                                    <span class="state-dot resource-row-icon-state @GetStateClass(resource)"></span>
-                                }
-                            </span>
-                            @if (!showCollapsedPane)
+                    @foreach (var group in tagGroups)
+                    {
+                        var groupName = group.Tag ?? Loc[nameof(Dashboard.Resources.Layout.ResourcePaneUntaggedGroup)].Value;
+                        // The icon-only pane has no room for group headers, so it lists every group's resources.
+                        var isGroupCollapsed = !showCollapsedPane && IsTagGroupCollapsed(group);
+                        var countText = string.Format(CultureInfo.CurrentCulture, group.Resources.Count == 1 ? Loc[nameof(Dashboard.Resources.Layout.ResourcePaneCountSingular)] : Loc[nameof(Dashboard.Resources.Layout.ResourcePaneCountPlural)], group.Resources.Count);
+
+                        <div class="resource-tag-group @(group.Tag is null ? "untagged" : string.Empty)" role="group" aria-label="@groupName" @key="@($"tag:{GetTagGroupKey(group)}")">
+                            @if (showCollapsedPane)
                             {
-                                <span class="resource-row-text">
-                                    <span class="resource-row-name"><FluentHighlighter HighlightedText="@_filter.TextFilter" Text="@resourceName" /></span>
-                                    <span class="resource-row-sub">
-                                        <span class="state-dot @GetStateClass(resource)"></span>
-                                        <span>@stateViewModel.Text</span>
-                                        <span class="resource-row-sep" aria-hidden="true">·</span>
-                                        <span class="resource-row-type">@resource.ResourceType</span>
+                                <div class="resource-tag-divider" title="@groupName"></div>
+                            }
+                            else
+                            {
+                                <button type="button"
+                                        class="resource-tag-header @(isGroupCollapsed ? "collapsed" : string.Empty)"
+                                        aria-expanded="@((!isGroupCollapsed).ToString().ToLowerInvariant())"
+                                        aria-label="@string.Format(CultureInfo.CurrentCulture, Loc[nameof(Dashboard.Resources.Layout.ResourcePaneTagGroupLabel)], groupName, countText)"
+                                        @onclick="@(() => ToggleTagGroup(group))">
+                                    <span class="resource-tag-chevron" aria-hidden="true">
+                                        <FluentIcon Value="@(new Icons.Regular.Size12.ChevronDown())" Color="Color.Custom" CustomColor="currentColor" />
                                     </span>
-                                </span>
-                                @if (errorCount > 0)
+                                    @if (group.Tag is { } tag)
+                                    {
+                                        <FluentIcon Value="@(new Icons.Filled.Size16.Tag())" Width="16px" Color="Color.Custom" CustomColor="@ColorGenerator.Instance.GetColorVariableByKey(tag)" />
+                                        <span class="resource-tag-name"><FluentHighlighter HighlightedText="@_filter.TextFilter" Text="@tag" /></span>
+                                    }
+                                    else
+                                    {
+                                        <FluentIcon Value="@(new Icons.Regular.Size16.Tag())" Width="16px" Color="Color.Custom" CustomColor="var(--colorNeutralForeground3)" />
+                                        <span class="resource-tag-name">@groupName</span>
+                                    }
+                                    <span class="resource-tag-count" aria-hidden="true">@group.Resources.Count</span>
+                                </button>
+                            }
+
+                            @if (!isGroupCollapsed)
+                            {
+                                foreach (var resource in group.Resources)
                                 {
-                                    <span class="error-badge" title="@string.Format(CultureInfo.CurrentCulture, Loc[nameof(Dashboard.Resources.Layout.ResourcePaneUnviewedErrors)], errorCount)">@errorCount</span>
+                                    RenderResourceRow(__builder, resource, row: null, showCollapsedPane);
                                 }
                             }
-                        </a>
-                        @if (!showCollapsedPane && row.Children.Count > 0)
-                        {
-                            <button type="button"
-                                    class="resource-row-toggle @(row.IsCollapsed ? "collapsed" : string.Empty)"
-                                    aria-label="@ControlsStringsLoc[nameof(ControlsStrings.ToggleNesting)]"
-                                    aria-expanded="@((!row.IsCollapsed).ToString().ToLowerInvariant())"
-                                    @onclick="@(() => OnToggleCollapseAsync(row))">
-                                <FluentIcon Value="@(new Icons.Regular.Size12.ChevronDown())" Color="Color.Default" />
-                            </button>
-                        }
-                    </div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    foreach (var row in paneRows)
+                    {
+                        RenderResourceRow(__builder, row.Resource, row, showCollapsedPane);
+                    }
                 }
 
                 @if (_telemetryOnlyResources.Count > 0)
@@ -217,7 +230,7 @@ else
             @if (!showCollapsedPane)
             {
                 <div class="resource-pane-foot">
-                    <span>@string.Format(CultureInfo.CurrentCulture, paneRows.Count == 1 ? Loc[nameof(Dashboard.Resources.Layout.ResourcePaneCountSingular)] : Loc[nameof(Dashboard.Resources.Layout.ResourcePaneCountPlural)], paneRows.Count)</span>
+                    <span>@string.Format(CultureInfo.CurrentCulture, paneResourceCount == 1 ? Loc[nameof(Dashboard.Resources.Layout.ResourcePaneCountSingular)] : Loc[nameof(Dashboard.Resources.Layout.ResourcePaneCountPlural)], paneResourceCount)</span>
                     <AspireMenuButton ButtonAppearance="ButtonAppearance.Transparent"
                                       Icon="@(new Icons.Regular.Size16.MoreHorizontal())"
                                       ItemsProvider="@(() => _paneMenuItems)"
@@ -428,4 +441,63 @@ else
             </div>
         </section>
     </div>
+}
+
+@code {
+    // Rows are rendered by a method rather than a RenderFragment so each row's @key stays among its siblings.
+    private void RenderResourceRow(RenderTreeBuilder __builder, ResourceViewModel resource, ResourceGridViewModel? row, bool showCollapsedPane)
+    {
+        var resourceName = GetResourceName(resource);
+        var isSelected = IsSelected(resourceName);
+        var stateViewModel = ResourceStateViewModel.GetStateViewModel(resource, ColumnsLoc);
+        var errorCount = GetUnviewedErrorCount(resource);
+        var depth = row?.Depth ?? 0;
+
+        <div class="resource-row @(isSelected ? "selected" : string.Empty)" @key="resource.Name">
+            <a class="resource-row-link"
+               href="@GetRowUrl(resourceName)"
+               style="@(showCollapsedPane || depth == 0 ? null : $"--resource-row-depth: {depth}")"
+               aria-current="@GetRowAriaCurrent(isSelected)"
+               title="@($"{resource.ResourceType}: {resourceName}")"
+               @onclick="@(e => OnRowClickAsync(e, resourceName))"
+               @onclick:preventDefault="true">
+                <span class="resource-row-icon">
+                    <FluentIcon Width="16px"
+                                Color="Color.Custom"
+                                CustomColor="@ColorGenerator.Instance.GetColorVariableByKey(resourceName)"
+                                Value="@ResourceIconHelpers.GetIconForResource(IconResolver, resource, IconSize.Size16)" />
+                    @if (showCollapsedPane)
+                    {
+                        <span class="state-dot resource-row-icon-state @GetStateClass(resource)"></span>
+                    }
+                </span>
+                @if (!showCollapsedPane)
+                {
+                    <span class="resource-row-text">
+                        <span class="resource-row-name"><FluentHighlighter HighlightedText="@_filter.TextFilter" Text="@resourceName" /></span>
+                        <span class="resource-row-sub">
+                            <span class="state-dot @GetStateClass(resource)"></span>
+                            <span>@stateViewModel.Text</span>
+                            <span class="resource-row-sep" aria-hidden="true">·</span>
+                            <span class="resource-row-type">@resource.ResourceType</span>
+                        </span>
+                    </span>
+                    @if (errorCount > 0)
+                    {
+                        <span class="error-badge" title="@string.Format(CultureInfo.CurrentCulture, Loc[nameof(Dashboard.Resources.Layout.ResourcePaneUnviewedErrors)], errorCount)">@errorCount</span>
+                    }
+                }
+            </a>
+            @if (!showCollapsedPane && row is { Children.Count: > 0 })
+            {
+                <button type="button"
+                        class="resource-row-toggle @(row.IsCollapsed ? "collapsed" : string.Empty)"
+                        aria-label="@ControlsStringsLoc[nameof(ControlsStrings.ToggleNesting)]"
+                        aria-expanded="@((!row.IsCollapsed).ToString().ToLowerInvariant())"
+                        @onclick="@(() => OnToggleCollapseAsync(row))">
+                    <FluentIcon Value="@(new Icons.Regular.Size12.ChevronDown())" Color="Color.Default" />
+                </button>
+            }
+        </div>
+    }
 }

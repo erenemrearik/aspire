@@ -92,7 +92,6 @@ public class AppBarTests : PlaywrightTestsBase<DashboardServerFixture>
                     const rect = selector => header.querySelector(selector).getBoundingClientRect();
                     const brand = rect('.brand-logo-container > a.logo');
                     const application = rect('.application-name');
-                    const nav = rect('.header-nav');
                     const actions = [...header.querySelectorAll('.header-button')]
                         .map(element => element.getBoundingClientRect());
                     const visibleChildren = [...header.children]
@@ -107,8 +106,6 @@ public class AppBarTests : PlaywrightTestsBase<DashboardServerFixture>
                         brandRight: brand.right,
                         applicationLeft: application.left,
                         applicationRight: application.right,
-                        navLeft: nav.left,
-                        navRight: nav.right,
                         firstActionLeft: actions[0].left,
                         widestAction: Math.max(...actions.map(action => action.width)),
                         lastActionRight: actions[actions.length - 1].right,
@@ -123,8 +120,7 @@ public class AppBarTests : PlaywrightTestsBase<DashboardServerFixture>
             Assert.InRange(root.GetProperty("height").GetDouble(), 50, 54);
             Assert.True(root.GetProperty("sameRow").GetBoolean());
             Assert.True(root.GetProperty("brandRight").GetDouble() <= root.GetProperty("applicationLeft").GetDouble());
-            Assert.True(root.GetProperty("applicationRight").GetDouble() <= root.GetProperty("navLeft").GetDouble());
-            Assert.True(root.GetProperty("navRight").GetDouble() <= root.GetProperty("firstActionLeft").GetDouble());
+            Assert.True(root.GetProperty("applicationRight").GetDouble() <= root.GetProperty("firstActionLeft").GetDouble());
             Assert.InRange(root.GetProperty("widestAction").GetDouble(), 31, 33);
             Assert.InRange(
                 root.GetProperty("headerRight").GetDouble() - root.GetProperty("lastActionRight").GetDouble(),

@@ -3,6 +3,7 @@
 
 using Aspire.Dashboard.Components.Layout;
 using Aspire.Dashboard.Components.Pages;
+using Aspire.Dashboard.Model;
 using Aspire.Dashboard.Utils;
 using Xunit;
 using NavSection = Aspire.Dashboard.Components.Layout.DesktopNavMenu.NavSection;
@@ -24,6 +25,8 @@ public class ResourcesNavigationTests
     [InlineData("metrics/resource/frontend", nameof(NavSection.Resources))]
     [InlineData("parameters", nameof(NavSection.Parameters))]
     [InlineData("graph#node", nameof(NavSection.Graph))]
+    [InlineData("terminals", nameof(NavSection.Terminals))]
+    [InlineData("extensions", nameof(NavSection.Extensions))]
     [InlineData("login", nameof(NavSection.None))]
     public void GetSection_WithResourceService(string path, string expectedSection)
     {
@@ -33,12 +36,26 @@ public class ResourcesNavigationTests
     [Theory]
     [InlineData("", nameof(NavSection.None))]
     [InlineData("resources/frontend", nameof(NavSection.None))]
+    [InlineData("terminals", nameof(NavSection.None))]
     [InlineData("structuredlogs", nameof(NavSection.StructuredLogs))]
     [InlineData("traces/detail/abc", nameof(NavSection.Traces))]
     [InlineData("metrics?meter=m", nameof(NavSection.Metrics))]
     public void GetSection_WithoutResourceService(string path, string expectedSection)
     {
         Assert.Equal(Enum.Parse<NavSection>(expectedSection), DesktopNavMenu.GetSection(path, hasResourceService: false));
+    }
+
+    [Theory]
+    [InlineData("resources?pane=tags", ResourcePaneMode.Tags)]
+    [InlineData("resources?pane=TAGS", ResourcePaneMode.Tags)]
+    [InlineData("resources?resource=api&pane=resources", ResourcePaneMode.Resources)]
+    [InlineData("consolelogs/resource/api?pane=tags#end", ResourcePaneMode.Tags)]
+    [InlineData("resources", null)]
+    [InlineData("resources?resource=api", null)]
+    [InlineData("resources?pane=unknown", null)]
+    public void ParsePaneMode_ReturnsModeFromQuery(string path, ResourcePaneMode? expectedMode)
+    {
+        Assert.Equal(expectedMode, ResourcesLayout.ParsePaneMode(path));
     }
 
     [Theory]

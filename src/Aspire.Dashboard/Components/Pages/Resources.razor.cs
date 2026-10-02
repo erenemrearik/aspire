@@ -975,7 +975,14 @@ public partial class Resources : ComponentBase, IComponentWithTelemetry, IAsyncD
         public ConcurrentDictionary<string, bool> ResourceStatesToVisibility { get; } = new(StringComparers.ResourceState);
         public ConcurrentDictionary<string, bool> ResourceHealthStatusesToVisibility { get; } = new(StringComparer.Ordinal);
 
-        public bool Filter(ResourceViewModel resource)
+        public bool Filter(ResourceViewModel resource) => Filter(resource, TextFilter);
+
+        /// <summary>
+        /// Filters a resource with a text filter other than <see cref="TextFilter"/>. Views that match the text
+        /// against more than the resource, such as the tags a resource is grouped by, pass an empty text filter and
+        /// match the text themselves.
+        /// </summary>
+        public bool Filter(ResourceViewModel resource, string textFilter)
         {
             // In Parameters view, only show parameters; in Table and Graph views, exclude parameters
             if (SelectedViewKind == ResourceViewKind.Parameters && !resource.IsParameter)
@@ -991,7 +998,7 @@ public partial class Resources : ComponentBase, IComponentWithTelemetry, IAsyncD
             return (SelectedViewKind == ResourceViewKind.Parameters || IsKeyValueTrue(resource.ResourceType, ResourceTypesToVisibility))
                    && IsKeyValueTrue(resource.State ?? string.Empty, ResourceStatesToVisibility)
                    && IsKeyValueTrue(resource.HealthStatus?.Humanize() ?? string.Empty, ResourceHealthStatusesToVisibility)
-                   && (TextFilter.Length == 0 || resource.MatchesFilter(TextFilter))
+                   && (textFilter.Length == 0 || resource.MatchesFilter(textFilter))
                    && !resource.IsResourceHidden(ShowHiddenResources);
 
             static bool IsKeyValueTrue(string key, IDictionary<string, bool> dictionary) => dictionary.TryGetValue(key, out var value) && value;

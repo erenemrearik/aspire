@@ -55,6 +55,15 @@
         var isInstrumented = hasTelemetry && TelemetryRepository.GetResource(_telemetryKey!.Value) is { UninstrumentedPeer: false };
 
         <div class="overview-grid">
+            <section class="overview-card overview-tags-card span-12" aria-labelledby="overview-tags-title">
+                <div class="overview-card-header">
+                    <FluentIcon Value="@(new Icons.Regular.Size16.Tag())" Color="Color.Primary" />
+                    <h2 id="overview-tags-title">@Loc[nameof(Dashboard.Resources.Resources.ResourceTagsLabel)]</h2>
+                </div>
+                @* Tags are keyed by display name so they apply to every replica and survive the random replica suffix changing between runs. *@
+                <ResourceTagEditor ResourceName="@resource.DisplayName" />
+            </section>
+
             <section class="overview-card span-4" aria-labelledby="overview-status-title">
                 <div class="overview-card-header">
                     <FluentIcon Value="@(new Icons.Regular.Size16.Info())" Color="Color.Primary" />

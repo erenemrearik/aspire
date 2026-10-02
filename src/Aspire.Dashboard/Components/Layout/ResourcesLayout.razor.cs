@@ -39,6 +39,7 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
 
     private readonly ConcurrentDictionary<string, ResourceViewModel> _resourceByName = new(StringComparers.ResourceName);
     private readonly HashSet<string> _collapsedResourceNames = new(StringComparers.ResourceName);
+    private readonly HashSet<string> _collapsedTagGroups = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _cts = new();
     private readonly List<MenuButtonItem> _resourceMenuItems = [];
     private readonly List<MenuButtonItem> _paneMenuItems = [];
@@ -89,6 +90,12 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
 
     [Inject]
     public required IconResolver IconResolver { get; init; }
+
+    [Inject]
+    public required ResourceTagStore TagStore { get; init; }
+
+    [Inject]
+    public required ResourcePaneState PaneState { get; init; }
 
     [Inject]
     public required IStringLocalizer<Resources.Layout> Loc { get; init; }
@@ -191,6 +198,16 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
         {
             _paneWidth = Math.Clamp(paneWidthResult.Value, MinimumPaneWidthPx, MaximumPaneWidthPx);
         }
+
+        // The URL selects the mode when navigating from the main navigation. Other resource URLs, such as a row's
+        // link, don't include it, so the last mode is remembered.
+        var paneModeResult = await LocalStorage.GetUnprotectedAsync<string>(BrowserStorageKeys.ResourcePaneMode);
+        if (paneModeResult.Success && Enum.TryParse<ResourcePaneMode>(paneModeResult.Value, ignoreCase: true, out var storedPaneMode))
+        {
+            PaneState.SetMode(storedPaneMode);
+        }
+        await ApplyPaneModeFromLocationAsync(_lastLocation);
+        TagStore.Changed += OnTagsChanged;
 
         var showHiddenResources = await SessionStorage.GetAsync<bool>(BrowserStorageKeys.ResourcesShowHiddenResources);
         if (showHiddenResources.Success)
@@ -299,6 +316,7 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
         _lastLocation = location;
         var previousSelection = _selectedResourceNames;
         UpdateFromLocation(location);
+        await ApplyPaneModeFromLocationAsync(location);
         _isDrawerOpen = false;
         await TryRedirectLandingAsync();
         await PersistSelectedResourcesAsync();
@@ -378,6 +396,56 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
     /// selected resources, the metrics page uses it for the resource whose instruments are displayed.
     /// </summary>
     internal string? RouteResourceName { get; private set; }
+
+    private async Task ApplyPaneModeFromLocationAsync(string location)
+    {
+        if (ParsePaneMode(NavigationManager.ToBaseRelativePath(location)) is not { } mode)
+        {
+            return;
+        }
+
+        PaneState.SetMode(mode);
+        try
+        {
+            await LocalStorage.SetUnprotectedAsync(BrowserStorageKeys.ResourcePaneMode, mode.ToString());
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit disconnected while navigating. There is nothing to persist to.
+        }
+    }
+
+    /// <summary>
+    /// Gets the resource list mode from a URL such as <c>/resources?pane=tags</c>, or <c>null</c> when the URL
+    /// doesn't specify one.
+    /// </summary>
+    internal static ResourcePaneMode? ParsePaneMode(string baseRelativePath)
+    {
+        var queryIndex = baseRelativePath.IndexOf('?');
+        if (queryIndex < 0)
+        {
+            return null;
+        }
+
+        var query = baseRelativePath[queryIndex..];
+        var fragmentIndex = query.IndexOf('#');
+        if (fragmentIndex >= 0)
+        {
+            query = query[..fragmentIndex];
+        }
+
+        if (!QueryHelpers.ParseQuery(query).TryGetValue(DashboardUrls.ResourcePaneQueryName, out var values))
+        {
+            return null;
+        }
+
+        return values.ToString().ToLowerInvariant() switch
+        {
+            DashboardUrls.ResourcePaneResourcesValue => ResourcePaneMode.Resources,
+            DashboardUrls.ResourcePaneTagsValue => ResourcePaneMode.Tags,
+            _ => null
+        };
+    }
 
     internal static ResourceLocation ParseLocation(string baseRelativePath)
     {
@@ -573,6 +641,64 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
         return ResourceGridViewModel.OrderNestedResources(filteredResources, r => _collapsedResourceNames.Contains(r.PersistentKey))
             .Where(r => !r.IsHidden);
     }
+
+    /// <summary>
+    /// Gets the resource list grouped by tag. A resource is listed under each of its tags, and resources without tags
+    /// are listed last. The text filter matches either the tag, which lists all of its resources, or the resources.
+    /// </summary>
+    internal List<ResourceTagGroup> GetTagGroups()
+    {
+        var textFilter = _filter.TextFilter;
+        var resources = _resourceByName.Values
+            .Where(r => _filter.Filter(r, textFilter: string.Empty))
+            .OrderBy(r => r.ResourceType)
+            .ThenBy(r => r, ResourceViewModelNameComparer.Instance)
+            .ToList();
+
+        var tagsByResource = TagStore.GetTagsByResource();
+        var groups = new List<ResourceTagGroup>();
+        foreach (var tag in TagStore.GetAllTags())
+        {
+            var tagMatchesFilter = textFilter.Length == 0 || tag.Contains(textFilter, StringComparisons.UserTextSearch);
+            var taggedResources = resources
+                .Where(r => tagsByResource.TryGetValue(r.DisplayName, out var tags) && tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+                .Where(r => tagMatchesFilter || r.MatchesFilter(textFilter))
+                .ToList();
+
+            if (taggedResources.Count > 0)
+            {
+                groups.Add(new ResourceTagGroup(tag, taggedResources));
+            }
+        }
+
+        var untaggedResources = resources
+            .Where(r => !tagsByResource.ContainsKey(r.DisplayName))
+            .Where(r => textFilter.Length == 0 || r.MatchesFilter(textFilter))
+            .ToList();
+
+        if (untaggedResources.Count > 0)
+        {
+            groups.Add(new ResourceTagGroup(Tag: null, untaggedResources));
+        }
+
+        return groups;
+    }
+
+    private bool IsTagGroupCollapsed(ResourceTagGroup group) => _collapsedTagGroups.Contains(GetTagGroupKey(group));
+
+    private void ToggleTagGroup(ResourceTagGroup group)
+    {
+        var key = GetTagGroupKey(group);
+        if (!_collapsedTagGroups.Remove(key))
+        {
+            _collapsedTagGroups.Add(key);
+        }
+    }
+
+    // Tags can't be empty, so the empty string identifies the group of untagged resources.
+    private static string GetTagGroupKey(ResourceTagGroup group) => group.Tag ?? string.Empty;
+
+    private void OnTagsChanged() => _ = InvokeAsync(StateHasChanged);
 
     private List<StateCount> GetStateCounts()
     {
@@ -947,7 +1073,23 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
 
     private List<string> GetVisibleRowNames()
     {
-        var names = GetPaneRows().Select(r => GetResourceName(r.Resource)).ToList();
+        List<string> names;
+        if (PaneState.Mode == ResourcePaneMode.Tags)
+        {
+            // A resource with several tags is listed several times. Ranges use its first position.
+            var showAllGroups = ViewportInformation.IsDesktop && _isPaneCollapsed;
+            names = GetTagGroups()
+                .Where(g => showAllGroups || !IsTagGroupCollapsed(g))
+                .SelectMany(g => g.Resources)
+                .Select(GetResourceName)
+                .Distinct(StringComparers.ResourceName)
+                .ToList();
+        }
+        else
+        {
+            names = GetPaneRows().Select(r => GetResourceName(r.Resource)).ToList();
+        }
+
         names.AddRange(_telemetryOnlyResources.Select(r => r.Name));
         return names;
     }
@@ -1001,6 +1143,7 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
     public async ValueTask DisposeAsync()
     {
         _cts.Cancel();
+        TagStore.Changed -= OnTagsChanged;
         _logsSubscription?.Dispose();
         _telemetryResourcesSubscription?.Dispose();
         await TaskHelpers.WaitIgnoreCancelAsync(_resourceSubscriptionTask);
@@ -1037,6 +1180,8 @@ public sealed partial class ResourcesLayout : LayoutComponentBase, IAsyncDisposa
     private sealed record TelemetryOnlyResource(string Name, OtlpResource Resource);
 
     private sealed record SelectedResourceItem(string Name, ResourceViewModel? Resource, TelemetryOnlyResource? TelemetryOnly);
+
+    internal sealed record ResourceTagGroup(string? Tag, List<ResourceViewModel> Resources);
 
     private sealed record StateCount(string State, int Count, ResourceViewModel Example);
 

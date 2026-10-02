@@ -530,4 +530,25 @@
   <data name="HomeResourceStatesLabel" xml:space="preserve">
     <value>Resource states</value>
   </data>
+  <data name="ResourceTagsLabel" xml:space="preserve">
+    <value>Tags</value>
+  </data>
+  <data name="ResourceTagsAdd" xml:space="preserve">
+    <value>Add tag</value>
+  </data>
+  <data name="ResourceTagsInputPlaceholder" xml:space="preserve">
+    <value>Tag name</value>
+  </data>
+  <data name="ResourceTagsInputLabel" xml:space="preserve">
+    <value>Add a tag to {0}</value>
+  </data>
+  <data name="ResourceTagsRemove" xml:space="preserve">
+    <value>Remove tag {0}</value>
+  </data>
+  <data name="ResourceTagsCreate" xml:space="preserve">
+    <value>Create tag "{0}"</value>
+  </data>
+  <data name="ResourceTagsSuggestions" xml:space="preserve">
+    <value>Tags</value>
+  </data>
 </root>

@@ -427,6 +427,41 @@
         <target state="new">Warnings</target>
         <note />
       </trans-unit>
+      <trans-unit id="ResourceTagsAdd">
+        <source>Add tag</source>
+        <target state="new">Add tag</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="ResourceTagsCreate">
+        <source>Create tag "{0}"</source>
+        <target state="new">Create tag "{0}"</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="ResourceTagsInputLabel">
+        <source>Add a tag to {0}</source>
+        <target state="new">Add a tag to {0}</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="ResourceTagsInputPlaceholder">
+        <source>Tag name</source>
+        <target state="new">Tag name</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="ResourceTagsLabel">
+        <source>Tags</source>
+        <target state="new">Tags</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="ResourceTagsRemove">
+        <source>Remove tag {0}</source>
+        <target state="new">Remove tag {0}</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="ResourceTagsSuggestions">
+        <source>Tags</source>
+        <target state="new">Tags</target>
+        <note />
+      </trans-unit>
       <trans-unit id="ResourcesActionsColumnHeader">
         <source>Actions</source>
         <target state="translated">動作</target>
