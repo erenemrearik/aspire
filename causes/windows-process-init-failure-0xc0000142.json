@@ -153,6 +153,13 @@
       "job": "Tests / No-package tests (regular, Aspire.Azure.Data.Tables.Tests, Azure.Data.Tables, Azure.Data.Tables, ... / Azure.Data.Tables (windows-latest)",
       "pr_number": 19887,
       "observed_at": "2026-09-18T08:42:00Z"
+    },
+    {
+      "run_id": 36954198288,
+      "run_url": "https://github.com/microsoft/aspire/actions/runs/36954198288",
+      "job": "Tests / Run VS Code extension E2E tests / VS Code extension E2E (Windows, diagnostic-logs)",
+      "pr_number": 0,
+      "observed_at": "2026-10-02T02:56:46Z"
     }
   ],
   "issue_url": "https://github.com/microsoft/aspire/issues/18720"
