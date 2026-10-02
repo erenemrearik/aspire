@@ -15,23 +15,21 @@
 const COOLDOWN_DAYS = 7;
 const DEPENDABOT_LOGIN = 'dependabot[bot]';
 const DEFAULT_BOT_LOGIN = 'aspire-repo-bot[bot]';
-const MAX_APPROVAL_REQUESTS = 10;
+// At most this many reviews are submitted per run. Requests beyond the limit are still
+// evaluated (bounded by MAX_EVALUATED_REQUESTS) so ineligible or already-approved PRs
+// at the front of the agent's list cannot starve eligible ones on every run.
+const MAX_APPROVALS = 10;
+const MAX_EVALUATED_REQUESTS = 100;
 
-// Package hosts that are always acceptable in a lockfile or manifest. Any other host
-// must already be present in the file on the PR base, so a bump can never move a
-// dependency to a new registry or source feed.
-const APPROVED_HOSTS = ['pkgs.dev.azure.com', 'dnceng.pkgs.visualstudio.com'];
-
-// NuGet feeds from NuGet.config. A NuGet bump is only proposed when the version
-// already restores from one of these; otherwise it is reported as blocked on mirroring.
-const APPROVED_NUGET_FEEDS = [
-    'dotnet-public',
-    'dotnet-eng',
-    'dotnet-tools',
-    'dotnet9',
-    'dotnet10',
-    'dotnet11',
-    'dotnet-libraries',
+// Package sources that are always acceptable in a lockfile or manifest: the
+// repository's dnceng public Azure Artifacts feeds only. Any other source must
+// already be present in the file on the PR base, so a bump can never move a
+// dependency to a new registry or feed. Sources are compared as keys built by
+// `sourceKey`, never as bare hosts, because pkgs.dev.azure.com hosts every
+// Azure DevOps organization's feeds.
+const APPROVED_SOURCE_PREFIXES = [
+    'https://pkgs.dev.azure.com/dnceng/public/_packaging/',
+    'https://dnceng.pkgs.visualstudio.com/public/_packaging/',
 ];
 
 const APPROVED_NPM_REGISTRY = 'https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/';
@@ -101,12 +99,38 @@ function compareVersions(left, right) {
     if (b.prerelease === '') {
         return -1;
     }
-    return a.prerelease < b.prerelease ? -1 : 1;
+    return comparePrerelease(a.prerelease, b.prerelease);
 }
 
-// Semver treats any change to the left-most non-zero component as breaking:
-// 1.x -> 2.x, 0.3.x -> 0.4.x and 0.0.3 -> 0.0.4 are all major changes. Unparseable
-// versions and downgrades fail closed and are treated as breaking.
+// SemVer 2.0.0 section 11 (https://semver.org/#spec-item-11): compare dot-separated
+// identifiers left to right. Numeric identifiers compare numerically and sort before
+// alphanumeric ones, alphanumeric identifiers compare in ASCII order, and a shorter
+// identifier list sorts first when all preceding identifiers are equal
+// (alpha < alpha.1 < alpha.beta < beta < beta.2 < beta.11 < rc.1).
+function comparePrerelease(left, right) {
+    const a = left.split('.');
+    const b = right.split('.');
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+        const aNumeric = /^\d+$/.test(a[i]);
+        const bNumeric = /^\d+$/.test(b[i]);
+        if (aNumeric && bNumeric) {
+            const difference = Number(a[i]) - Number(b[i]);
+            if (difference !== 0) {
+                return difference < 0 ? -1 : 1;
+            }
+        } else if (aNumeric !== bNumeric) {
+            return aNumeric ? -1 : 1;
+        } else if (a[i] !== b[i]) {
+            return a[i] < b[i] ? -1 : 1;
+        }
+    }
+    return a.length === b.length ? 0 : (a.length < b.length ? -1 : 1);
+}
+
+// A change to the major version is breaking, and for 0.x a change to the minor version
+// is too (0.3.x -> 0.4.x). Patch updates within the same 0.x minor (0.0.3 -> 0.0.4)
+// are accepted, matching the policy documented in auto-sec.md and the README.
+// Unparseable versions and downgrades fail closed and are treated as breaking.
 function isBreakingChange(from, to) {
     const a = parseVersion(from);
     const b = parseVersion(to);
@@ -114,15 +138,12 @@ function isBreakingChange(from, to) {
         return true;
     }
 
-    const [aMajor, aMinor, aPatch] = a.parts;
-    const [bMajor, bMinor, bPatch] = b.parts;
+    const [aMajor, aMinor] = a.parts;
+    const [bMajor, bMinor] = b.parts;
     if (aMajor !== bMajor) {
         return true;
     }
     if (aMajor === 0 && aMinor !== bMinor) {
-        return true;
-    }
-    if (aMajor === 0 && aMinor === 0 && aPatch !== bPatch) {
         return true;
     }
     return compareVersions(from, to) !== -1;
@@ -192,20 +213,47 @@ function isAllowedManifest(path) {
     return ALLOWED_MANIFEST_BASENAMES.has(basenameOf(path).toLowerCase());
 }
 
-function extractHosts(text) {
-    const hosts = new Set();
-    for (const match of String(text ?? '').matchAll(/\b(?:https?|git\+https?|git\+ssh|ssh):\/\/(?:[^@/\s"']+@)?([A-Za-z0-9.-]+)/g)) {
-        hosts.add(match[1].toLowerCase());
+// Reduce a package URL to the identity of the source that serves it, so two URLs from
+// the same feed compare equal while feeds on a shared multi-tenant host do not:
+//   https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.21.tgz
+//     -> https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/
+//   https://pkgs.dev.azure.com/contoso/_packaging/feed/npm/registry/lodash
+//     -> https://pkgs.dev.azure.com/contoso/_packaging/feed/
+//   https://pkgs.dev.azure.com/contoso/project/_apis/...   -> https://pkgs.dev.azure.com/contoso/project/
+//   https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz -> https://registry.npmjs.org/
+// Azure Artifacts feeds are keyed through `/_packaging/<feed>/`; any other URL on an Azure
+// DevOps host is keyed by organization and project; everything else is keyed by host.
+function sourceKey(scheme, host, path) {
+    const origin = `${scheme.toLowerCase()}://${host.toLowerCase()}`;
+    const feed = /^(\/(?:[^/?#]+\/){0,2}_packaging\/[^/?#]+\/)/i.exec(path);
+    if (feed) {
+        return `${origin}${feed[1].toLowerCase()}`;
     }
-    return hosts;
+    if (host.toLowerCase() === 'pkgs.dev.azure.com' || /\.pkgs\.visualstudio\.com$/i.test(host)) {
+        const scope = /^(\/(?:[^/?#]+\/){0,2})/.exec(`${path}/`);
+        return `${origin}${scope[1].toLowerCase()}`;
+    }
+    return `${origin}/`;
 }
 
-// Hosts present in the head version of a file that are neither approved nor already
+function extractSources(text) {
+    const sources = new Set();
+    for (const match of String(text ?? '').matchAll(/\b(https?|git\+https?|git\+ssh|ssh):\/\/(?:[^@/\s"']+@)?([A-Za-z0-9.-]+)(?::\d+)?(\/[^\s"'<>]*)?/g)) {
+        sources.add(sourceKey(match[1], match[2], match[3] ?? '/'));
+    }
+    return sources;
+}
+
+function isApprovedSource(source) {
+    return APPROVED_SOURCE_PREFIXES.some(prefix => source.startsWith(prefix));
+}
+
+// Sources present in the head version of a file that are neither approved nor already
 // present on the base version. A non-empty result means the PR introduces a new source.
-function findNewHosts(baseText, headText) {
-    const baseHosts = extractHosts(baseText);
-    return [...extractHosts(headText)]
-        .filter(host => !baseHosts.has(host) && !APPROVED_HOSTS.includes(host))
+function findNewSources(baseText, headText) {
+    const baseSources = extractSources(baseText);
+    return [...extractSources(headText)]
+        .filter(source => !baseSources.has(source) && !isApprovedSource(source))
         .sort();
 }
 
@@ -217,23 +265,57 @@ function isCooldownSatisfied(publishedAt, now, days = COOLDOWN_DAYS) {
     return now.getTime() - published >= days * 24 * 60 * 60 * 1000;
 }
 
-function alertFixedByUpdate(alert, ecosystem, update, changedDirectories) {
-    if (alert.ecosystem !== ecosystem) {
-        return false;
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// True when `text` names `name` and, within the next few lines, `version`. Lockfiles and
+// manifests keep a package and its resolved version on the same or adjacent lines:
+//   yarn.lock:                "lodash@^4.17.20:\n  version \"4.17.21\""
+//   package-lock.json:        "\"node_modules/lodash\": {\n  \"version\": \"4.17.21\","
+//   uv.lock:                  "name = \"jinja2\"\nversion = \"3.1.6\""
+//   Directory.Packages.props: "<PackageVersion Include=\"System.Text.Json\" Version=\"9.0.5\" />"
+// Name boundaries keep `lodash` from matching `lodash.merge` or `lodash-es`, and pip names
+// treat runs of `-`, `_` and `.` as equal (PEP 503).
+function manifestMentionsVersion(text, ecosystem, name, version) {
+    const normalized = normalizePackageName(ecosystem, name);
+    const namePattern = ecosystem === 'pip'
+        ? normalized.split('-').map(escapeRegExp).join('[-_.]+')
+        : escapeRegExp(normalized);
+    const nameRegex = new RegExp(`(?<![A-Za-z0-9_.-])${namePattern}(?![A-Za-z0-9_.-])`, 'i');
+    const versionRegex = new RegExp(`(?<![0-9A-Za-z.])${escapeRegExp(version)}(?![0-9A-Za-z-])(?!\\.\\d)`, 'i');
+    const lines = String(text ?? '').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+        if (nameRegex.test(lines[i]) && lines.slice(i, i + 6).some(line => versionRegex.test(line))) {
+            return true;
+        }
     }
-    if (normalizePackageName(ecosystem, alert.package) !== normalizePackageName(ecosystem, update.name)) {
+    return false;
+}
+
+function updateMatchesAlert(alert, ecosystem, update) {
+    return alert.ecosystem === ecosystem
+        && normalizePackageName(ecosystem, alert.package) === normalizePackageName(ecosystem, update.name);
+}
+
+/**
+ * True when `update` provably fixes `alert`. Grouped Dependabot PRs can update the same
+ * package in several directories, so a match on package name alone is not enough: a
+ * changed manifest in the alert's own directory must name the package at the new version
+ * on the PR head. `headContents` maps each changed manifest path to its head text.
+ * Malware alerts are never counted as fixed (see `evaluateApprovalGates`).
+ */
+function alertFixedByUpdate(alert, ecosystem, update, headContents) {
+    if (alert.malware || !updateMatchesAlert(alert, ecosystem, update)) {
         return false;
-    }
-    if (!changedDirectories.has(directoryOf(alert.manifest_path ?? ''))) {
-        return false;
-    }
-    // Malware alerts have no patched version; replacing the flagged version with a
-    // clean one is the fix, so require only that the version actually changes.
-    if (alert.malware) {
-        return update.from !== update.to;
     }
     const comparison = alert.first_patched_version ? compareVersions(update.to, alert.first_patched_version) : null;
-    return comparison !== null && comparison >= 0;
+    if (comparison === null || comparison < 0) {
+        return false;
+    }
+    const alertDirectory = directoryOf(alert.manifest_path ?? '');
+    return Object.entries(headContents ?? {}).some(([path, text]) =>
+        directoryOf(path) === alertDirectory && manifestMentionsVersion(text, ecosystem, update.name, update.to));
 }
 
 /**
@@ -244,7 +326,7 @@ function alertFixedByUpdate(alert, ecosystem, update, changedDirectories) {
  */
 function evaluateApprovalGates(input) {
     const reasons = [];
-    const { pr, expectedHeadSha, files, alerts, checkRuns, statuses, hostChanges, packageInfo, reviews, now } = input;
+    const { pr, expectedHeadSha, files, alerts, checkRuns, statuses, sourceChanges, headContents, packageInfo, reviews, now } = input;
     const botLogin = input.botLogin ?? DEFAULT_BOT_LOGIN;
 
     if (pr.user_login !== DEPENDABOT_LOGIN) {
@@ -272,7 +354,7 @@ function evaluateApprovalGates(input) {
     if (files.some(file => !isAllowedManifest(file.filename))) {
         reasons.push('non-manifest-file-changed');
     }
-    if (hostChanges.some(change => change.newHosts.length > 0)) {
+    if (sourceChanges.some(change => change.newSources.length > 0)) {
         reasons.push('package-source-changed');
     }
 
@@ -287,10 +369,15 @@ function evaluateApprovalGates(input) {
         reasons.push('cooldown-not-satisfied');
     }
 
-    const changedDirectories = new Set(files.map(file => directoryOf(file.filename)));
+    // Malware alerts have no patched version, so no version check can prove the update
+    // removes the flagged release. Fail closed and leave any PR touching one to a human.
+    if (ecosystem && alerts.some(alert => alert.malware && updates.some(update => updateMatchesAlert(alert, ecosystem, update)))) {
+        reasons.push('malware-requires-review');
+    }
+
     const fixedAlerts = ecosystem
         ? alerts
-            .filter(alert => updates.some(update => alertFixedByUpdate(alert, ecosystem, update, changedDirectories)))
+            .filter(alert => updates.some(update => alertFixedByUpdate(alert, ecosystem, update, headContents)))
             .map(alert => alert.number)
             .sort((a, b) => a - b)
         : [];
@@ -335,11 +422,125 @@ async function fetchJson(fetchImpl, url) {
     return response.json();
 }
 
+function xmlAttribute(element, name) {
+    const match = new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`, 'i').exec(element);
+    return match ? match[1] : null;
+}
+
+function xmlSection(xml, tag) {
+    const match = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'i').exec(xml);
+    return match ? match[1] : '';
+}
+
+/**
+ * Parse the parts of a NuGet.config that decide where a package restores from:
+ *   <packageSources><add key="dotnet-public" value="https://.../index.json" /></packageSources>
+ *   <packageSourceMapping><packageSource key="dotnet-public"><package pattern="*" /></packageSource></packageSourceMapping>
+ *   <disabledPackageSources><add key="dotnet-public" value="true" /></disabledPackageSources>
+ * Returns `{ sources: [{ key, url }], mapping: Map<key, pattern[]> }`.
+ */
+function parseNuGetConfig(xml) {
+    const text = String(xml ?? '').replace(/<!--[\s\S]*?-->/g, '');
+    const disabled = new Set();
+    for (const [element] of xmlSection(text, 'disabledPackageSources').matchAll(/<add\b[^>]*>/gi)) {
+        if ((xmlAttribute(element, 'value') ?? '').toLowerCase() === 'true') {
+            disabled.add((xmlAttribute(element, 'key') ?? '').toLowerCase());
+        }
+    }
+
+    const sources = [];
+    for (const [element] of xmlSection(text, 'packageSources').matchAll(/<add\b[^>]*>/gi)) {
+        const key = xmlAttribute(element, 'key');
+        const url = xmlAttribute(element, 'value');
+        if (key && url && !disabled.has(key.toLowerCase())) {
+            sources.push({ key, url });
+        }
+    }
+
+    const mapping = new Map();
+    for (const match of xmlSection(text, 'packageSourceMapping').matchAll(/<packageSource\b([^>]*)>([\s\S]*?)<\/packageSource>/gi)) {
+        const key = xmlAttribute(match[1], 'key');
+        if (key) {
+            const patterns = [...match[2].matchAll(/<package\b[^>]*>/gi)].map(([element]) => xmlAttribute(element, 'pattern')).filter(Boolean);
+            mapping.set(key.toLowerCase(), patterns);
+        }
+    }
+
+    return { sources, mapping };
+}
+
+// Package source mapping precedence
+// (https://learn.microsoft.com/nuget/consume-packages/package-source-mapping#package-pattern-precedence):
+// an exact package ID beats every prefix pattern, a longer `prefix*` beats a shorter one,
+// and every source that declares the winning pattern is eligible. A trailing `*` is the
+// only wildcard, so any other `*` is a literal character. Returns -1 when nothing matches.
+function nugetPatternSpecificity(pattern, packageId) {
+    const id = packageId.toLowerCase();
+    const value = pattern.toLowerCase();
+    if (value.endsWith('*')) {
+        const prefix = value.slice(0, -1);
+        return id.startsWith(prefix) ? prefix.length : -1;
+    }
+    return value === id ? Number.MAX_SAFE_INTEGER : -1;
+}
+
+// The sources NuGet would consult for `packageId`. Without package source mapping every
+// enabled source is eligible.
+function selectNuGetSources(config, packageId) {
+    if (config.mapping.size === 0) {
+        return config.sources;
+    }
+
+    let best = -1;
+    let eligible = new Set();
+    for (const [key, patterns] of config.mapping) {
+        const specificity = Math.max(-1, ...patterns.map(pattern => nugetPatternSpecificity(pattern, packageId)));
+        if (specificity > best) {
+            best = specificity;
+            eligible = new Set([key]);
+        } else if (specificity === best && specificity >= 0) {
+            eligible.add(key);
+        }
+    }
+    return best < 0 ? [] : config.sources.filter(source => eligible.has(source.key.toLowerCase()));
+}
+
+// Resolve the flat-container base URL from a NuGet v3 service index, e.g.
+//   { "resources": [{ "@id": "https://.../nuget/v3/flat2/", "@type": "PackageBaseAddress/3.0.0" }] }
+async function getPackageBaseAddress(fetchImpl, serviceIndexUrl) {
+    const index = await fetchJson(fetchImpl, serviceIndexUrl);
+    const resource = (index?.resources ?? []).find(entry => String(entry?.['@type'] ?? '').startsWith('PackageBaseAddress/'));
+    const address = resource?.['@id'];
+    return typeof address === 'string' ? (address.endsWith('/') ? address : `${address}/`) : null;
+}
+
+async function isNuGetVersionAvailable(fetchImpl, nugetConfigText, id, normalizedVersion) {
+    // Only the repository's own dnceng feeds count; a mapped source outside them can never
+    // make a version "available" for an auto-sec bump.
+    const sources = selectNuGetSources(parseNuGetConfig(nugetConfigText), id)
+        .filter(source => APPROVED_SOURCE_PREFIXES.some(prefix => source.url.toLowerCase().startsWith(prefix)));
+    for (const source of sources) {
+        const baseAddress = await getPackageBaseAddress(fetchImpl, source.url);
+        if (!baseAddress) {
+            continue;
+        }
+        const versions = await fetchJson(fetchImpl, `${baseAddress}${id}/index.json`);
+        if ((versions?.versions ?? []).some(entry => entry.toLowerCase() === normalizedVersion)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * Look up publish date and approved-feed availability for one package version.
  * Returns `{ ecosystem, name, version, published_at, cooldown_satisfied, available_on_approved_feed }`.
+ *
+ * NuGet availability follows the repository NuGet.config (`nugetConfigText`): only the
+ * sources its package source mapping assigns to the package are probed. When no config
+ * text is supplied, `available_on_approved_feed` is `null` (unknown).
  */
-async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetch, now = new Date() } = {}) {
+async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetch, now = new Date(), nugetConfigText = null } = {}) {
     let publishedAt = null;
     let available = false;
 
@@ -364,13 +565,7 @@ async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetc
             const normalizedVersion = version.toLowerCase();
             const leaf = await fetchJson(fetchImpl, `https://api.nuget.org/v3/registration5-semver1/${id}/${normalizedVersion}.json`);
             publishedAt = leaf?.published ?? null;
-            for (const feed of APPROVED_NUGET_FEEDS) {
-                const index = await fetchJson(fetchImpl, `https://pkgs.dev.azure.com/dnceng/public/_packaging/${feed}/nuget/v3/flat2/${id}/index.json`);
-                if ((index?.versions ?? []).some(entry => entry.toLowerCase() === normalizedVersion)) {
-                    available = true;
-                    break;
-                }
-            }
+            available = nugetConfigText ? await isNuGetVersionAvailable(fetchImpl, nugetConfigText, id, normalizedVersion) : null;
             break;
         }
         default:
@@ -403,7 +598,7 @@ function readApprovalRequests(agentOutput) {
         seen.add(prNumber);
         requests.push({ prNumber, headSha });
     }
-    return requests.slice(0, MAX_APPROVAL_REQUESTS);
+    return requests.slice(0, MAX_EVALUATED_REQUESTS);
 }
 
 async function getFileText(github, owner, repo, path, ref) {
@@ -448,11 +643,14 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
 
     // Compare full base/head file contents instead of the PR patch: GitHub omits the
     // patch for large lockfiles, and a missing patch must not hide a registry change.
-    const hostChanges = [];
+    // The head text also proves which manifests an update actually touched.
+    const sourceChanges = [];
+    const headContents = {};
     for (const file of files.filter(entry => isAllowedManifest(entry.filename))) {
         const baseText = await getFileText(github, owner, repo, file.filename, pr.base_sha);
         const headText = await getFileText(github, owner, repo, file.filename, pr.head_sha);
-        hostChanges.push({ filename: file.filename, newHosts: findNewHosts(baseText, headText) });
+        headContents[file.filename] = headText;
+        sourceChanges.push({ filename: file.filename, newSources: findNewSources(baseText, headText) });
     }
 
     const alerts = (await github.paginate('GET /repos/{owner}/{repo}/dependabot/alerts', { owner, repo, state: 'open', per_page: 100 }))
@@ -483,7 +681,7 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
         }
     }
 
-    return { pr, expectedHeadSha: request.headSha, files, alerts, checkRuns, statuses, hostChanges, packageInfo, reviews, now, botLogin };
+    return { pr, expectedHeadSha: request.headSha, files, alerts, checkRuns, statuses, sourceChanges, headContents, packageInfo, reviews, now, botLogin };
 }
 
 /**
@@ -507,9 +705,15 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
     const botLogin = env.AUTO_SEC_BOT_LOGIN || DEFAULT_BOT_LOGIN;
     const { owner, repo } = context.repo;
     const results = [];
+    let approvals = 0;
 
     for (const request of requests) {
         let result;
+        if (approvals >= MAX_APPROVALS) {
+            results.push({ pr: request.prNumber, decision: 'skip', reasons: ['approval-limit-reached'], fixedAlerts: [] });
+            core.info(`#${request.prNumber}: skip approval-limit-reached`);
+            continue;
+        }
         try {
             const input = await collectGateInput(github, owner, repo, request, { fetchImpl, now, botLogin });
             result = { pr: request.prNumber, ...evaluateApprovalGates(input) };
@@ -518,6 +722,9 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
             core.warning(`Gate evaluation failed for #${request.prNumber}: ${error.message}`);
         }
 
+        if (result.decision === 'approve') {
+            approvals++;
+        }
         if (result.decision === 'approve' && !staged) {
             await approver.rest.pulls.createReview({
                 owner,
@@ -550,7 +757,11 @@ async function main(argv) {
         process.exitCode = 2;
         return;
     }
-    console.log(JSON.stringify(await lookupPackageVersion(ecosystem, name, version)));
+    // The agent runs this CLI from its checkout, so the repository NuGet.config sits three
+    // directories above this file and decides which feeds a NuGet package restores from.
+    const nugetConfigPath = require('node:path').resolve(__dirname, '..', '..', '..', 'NuGet.config');
+    const nugetConfigText = ecosystem === 'nuget' ? require('node:fs').readFileSync(nugetConfigPath, 'utf8') : null;
+    console.log(JSON.stringify(await lookupPackageVersion(ecosystem, name, version, { nugetConfigText })));
 }
 
 if (require.main === module) {
@@ -561,20 +772,24 @@ if (require.main === module) {
 }
 
 module.exports = {
-    APPROVED_HOSTS,
+    APPROVED_SOURCE_PREFIXES,
     COOLDOWN_DAYS,
+    MAX_APPROVALS,
     alertFixedByUpdate,
     compareVersions,
     ecosystemFromBranch,
     evaluateApprovalGates,
-    extractHosts,
-    findNewHosts,
+    extractSources,
+    findNewSources,
     isAllowedManifest,
     isBreakingChange,
     isCooldownSatisfied,
     lookupPackageVersion,
+    manifestMentionsVersion,
     normalizePackageName,
     parseDependabotUpdates,
+    parseNuGetConfig,
     readApprovalRequests,
     runApprovalJob,
+    selectNuGetSources,
 };

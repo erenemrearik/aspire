@@ -51,18 +51,22 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("actions-allow-list-required")]
     [InlineData("non-manifest-file-changed")]
     [InlineData("package-source-changed")]
+    [InlineData("package-source-changed-other-org")]
     [InlineData("breaking-change")]
     [InlineData("cooldown-not-satisfied")]
+    [InlineData("malware-requires-review")]
     [InlineData("fixes-no-open-alert")]
+    [InlineData("fixes-no-open-alert-other-directory")]
     [InlineData("no-checks")]
     [InlineData("checks-not-green")]
     [InlineData("statuses-not-green")]
     [InlineData("already-approved")]
-    public async Task SkipsDependabotPrThatFailsGate(string expectedReason)
+    public async Task SkipsDependabotPrThatFailsGate(string scenarioName)
     {
+        var expectedReason = scenarioName;
         var scenario = CreateApprovalScenario();
         var pr = scenario["pr"]!.AsObject();
-        switch (expectedReason)
+        switch (scenarioName)
         {
             case "not-dependabot":
                 pr["user_login"] = "someone";
@@ -80,6 +84,11 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             case "package-source-changed":
                 scenario["contents"]!["extension/yarn.lock@head"] = "resolved \"https://registry.example.com/lodash\"";
                 break;
+            case "package-source-changed-other-org":
+                // Same host as the approved dnceng feeds, but another Azure DevOps organization.
+                expectedReason = "package-source-changed";
+                scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21", "https://pkgs.dev.azure.com/contoso/_packaging/feed/");
+                break;
             case "breaking-change":
                 pr["title"] = "Bump lodash from 4.17.20 to 5.0.0 in /extension";
                 pr["body"] = "Bumps [lodash](https://github.com/lodash/lodash) from 4.17.20 to 5.0.0.";
@@ -90,6 +99,22 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 break;
             case "fixes-no-open-alert":
                 scenario["alerts"]![0]!["first_patched_version"] = "4.17.22";
+                break;
+            case "malware-requires-review":
+                scenario["malwareNumbers"] = new JsonArray(7);
+                break;
+            case "fixes-no-open-alert-other-directory":
+                // A grouped PR bumps lodash in extension/ and only touches another package in
+                // playground/app/, so the playground lodash alert is not fixed.
+                expectedReason = "fixes-no-open-alert";
+                pr["head_ref"] = "dependabot/npm_and_yarn/npm_and_yarn-1a2b3c4d5e";
+                pr["title"] = "Bump the npm_and_yarn group across 2 directories with 2 updates";
+                pr["body"] = "Updates `lodash` from 4.17.20 to 4.17.21\nUpdates `minimist` from 1.2.5 to 1.2.8";
+                scenario["files"]!.AsArray().Add("playground/app/yarn.lock");
+                scenario["contents"]!["playground/app/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("minimist", "1.2.5");
+                scenario["contents"]!["playground/app/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("minimist", "1.2.8");
+                scenario["alerts"]![0]!["manifest_path"] = "playground/app/yarn.lock";
+                scenario["responses"]!["https://registry.npmjs.org/minimist"] = Response(new JsonObject { ["time"] = new JsonObject { ["1.2.8"] = "2026-09-01T00:00:00Z" } });
                 break;
             case "no-checks":
                 scenario["checkRuns"] = new JsonArray();
@@ -146,7 +171,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("4.17.20", "5.0.0", true)]
     [InlineData("0.3.1", "0.3.2", false)]
     [InlineData("0.3.1", "0.4.0", true)]
-    [InlineData("0.0.3", "0.0.4", true)]
+    [InlineData("0.0.3", "0.0.4", false)]
     [InlineData("2.0.0", "1.9.9", true)]
     [InlineData("1.0.0", "not-a-version", true)]
     [InlineData("v1.2.3", "v1.2.4", false)]
@@ -160,6 +185,104 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         });
 
         Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("1.0.0-alpha", "1.0.0-alpha.1", -1)]
+    [InlineData("1.0.0-alpha.1", "1.0.0-alpha.beta", -1)]
+    [InlineData("1.0.0-alpha.beta", "1.0.0-beta", -1)]
+    [InlineData("1.0.0-beta.2", "1.0.0-beta.11", -1)]
+    [InlineData("1.0.0-beta.11", "1.0.0-rc.1", -1)]
+    [InlineData("1.0.0-rc.1", "1.0.0", -1)]
+    [InlineData("1.0.0-rc.10", "1.0.0-rc.9", 1)]
+    [InlineData("1.0.0-rc.1", "1.0.0-rc.1", 0)]
+    public async Task ComparesPrereleaseVersionsBySemVerPrecedence(string left, string right, int expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "compareVersions",
+            ["args"] = new JsonArray(left, right),
+        });
+
+        Assert.Equal(expected, result["value"]!.GetValue<int>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/a/-/a-1.0.0.tgz", "")]
+    [InlineData("https://dnceng.pkgs.visualstudio.com/public/_packaging/dotnet9-transport/nuget/v3/index.json", "")]
+    [InlineData("https://registry.npmjs.org/a/-/a-1.0.0.tgz", "")]
+    [InlineData("https://pkgs.dev.azure.com/contoso/_packaging/feed/npm/registry/a/-/a-1.0.0.tgz", "https://pkgs.dev.azure.com/contoso/_packaging/feed/")]
+    [InlineData("https://pkgs.dev.azure.com/dnceng/internal/_packaging/feed/npm/registry/a", "https://pkgs.dev.azure.com/dnceng/internal/_packaging/feed/")]
+    [InlineData("https://registry.example.com/a/-/a-1.0.0.tgz", "https://registry.example.com/")]
+    public async Task FindsPackageSourcesAddedOnHead(string headUrl, string expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "findNewSources",
+            ["args"] = new JsonArray("resolved \"https://registry.npmjs.org/b/-/b-1.0.0.tgz\"", $"resolved \"{headUrl}\""),
+        });
+
+        Assert.Equal(expected, string.Join(",", result["value"]!.AsArray().Select(source => source!.GetValue<string>())));
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task ApprovesGroupedPrWhenAlertDirectoryCarriesFixedVersion()
+    {
+        var scenario = CreateApprovalScenario();
+        var pr = scenario["pr"]!.AsObject();
+        pr["head_ref"] = "dependabot/npm_and_yarn/npm_and_yarn-1a2b3c4d5e";
+        pr["title"] = "Bump the npm_and_yarn group across 2 directories with 1 update";
+        pr["body"] = "Updates `lodash` from 4.17.20 to 4.17.21";
+        scenario["files"]!.AsArray().Add("playground/app/yarn.lock");
+        scenario["contents"]!["playground/app/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20");
+        scenario["contents"]!["playground/app/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21");
+        scenario["alerts"]!.AsArray().Add(new JsonObject
+        {
+            ["number"] = 8,
+            ["ecosystem"] = "npm",
+            ["package"] = "lodash",
+            ["manifest_path"] = "playground/app/yarn.lock",
+            ["first_patched_version"] = "4.17.21",
+        });
+
+        var result = await RunHarnessAsync(scenario);
+
+        var decision = Assert.Single(result["value"]!.AsArray());
+        Assert.Equal("approve", decision!["decision"]!.GetValue<string>());
+        Assert.Equal([7, 8], decision["fixedAlerts"]!.AsArray().Select(n => n!.GetValue<int>()));
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task CapsApprovalsAfterSkippingIneligiblePullRequests()
+    {
+        var scenario = CreateApprovalScenario();
+        var items = new JsonArray();
+        var overrides = new JsonObject();
+        for (var number = 1; number <= 14; number++)
+        {
+            items.Add(new JsonObject { ["type"] = "approve_dependabot_pr", ["pr_number"] = number, ["head_sha"] = HeadSha });
+            if (number <= 3)
+            {
+                overrides[number.ToString(System.Globalization.CultureInfo.InvariantCulture)] = new JsonObject { ["user_login"] = "someone" };
+            }
+        }
+        scenario["agentItems"] = items;
+        scenario["prOverrides"] = overrides;
+
+        var result = await RunHarnessAsync(scenario);
+
+        Assert.Equal(
+            ["not-dependabot", "not-dependabot", "not-dependabot", "approve", "approve", "approve", "approve", "approve", "approve", "approve", "approve", "approve", "approve", "approval-limit-reached"],
+            result["value"]!.AsArray().Select(decision => decision!["decision"]!.GetValue<string>() == "approve"
+                ? "approve"
+                : decision["reasons"]![0]!.GetValue<string>()));
+        Assert.Equal(Enumerable.Range(4, 10), result["reviews"]!.AsArray().Select(review => review!["pull_number"]!.GetValue<int>()));
     }
 
     [Fact]
@@ -191,9 +314,11 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["name"] = "System.Text.Json",
             ["version"] = "9.0.5",
             ["now"] = Now,
+            ["nugetConfigText"] = File.ReadAllText(Path.Combine(RepoRoot.Path, "NuGet.config")),
             ["responses"] = new JsonObject
             {
                 ["https://api.nuget.org/v3/registration5-semver1/system.text.json/9.0.5.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
+                ["https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-eng/nuget/v3/index.json"] = ServiceIndex("https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-eng/nuget/v3/flat2/"),
                 ["https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-eng/nuget/v3/flat2/system.text.json/index.json"] = Response(new JsonObject { ["versions"] = new JsonArray("9.0.4", "9.0.5") }),
             },
         });
@@ -201,6 +326,65 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Equal(
             """{"ecosystem":"nuget","name":"System.Text.Json","version":"9.0.5","published_at":"2026-08-01T00:00:00Z","cooldown_satisfied":true,"available_on_approved_feed":true}""",
             result["value"]!.ToJsonString());
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task LookupProbesOnlyNuGetSourcesMappedToThePackage()
+    {
+        const string config = """
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="public" value="https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json" />
+                <add key="transport" value="https://dnceng.pkgs.visualstudio.com/public/_packaging/dotnet9-transport/nuget/v3/index.json" />
+                <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+              </packageSources>
+              <packageSourceMapping>
+                <packageSource key="public"><package pattern="*" /></packageSource>
+                <packageSource key="transport"><package pattern="Contoso.Build*" /></packageSource>
+                <packageSource key="nuget.org"><package pattern="Contoso.Build.Tasks" /></packageSource>
+              </packageSourceMapping>
+            </configuration>
+            """;
+        const string transportFlat = "https://dnceng.pkgs.visualstudio.com/public/_packaging/dotnet9-transport/nuget/v3/flat2/";
+        const string publicIndex = "https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json";
+        var responses = new JsonObject
+        {
+            ["https://api.nuget.org/v3/registration5-semver1/contoso.build.engine/1.0.0.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
+            ["https://dnceng.pkgs.visualstudio.com/public/_packaging/dotnet9-transport/nuget/v3/index.json"] = ServiceIndex(transportFlat),
+            [$"{transportFlat}contoso.build.engine/index.json"] = Response(new JsonObject { ["versions"] = new JsonArray("1.0.0") }),
+            [publicIndex] = ServiceIndex("https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/flat2/"),
+        };
+
+        // The longest prefix pattern wins, so only the transport feed is consulted.
+        var prefixMapped = await RunHarnessAsync(NuGetLookup("Contoso.Build.Engine", config, responses));
+        // An exact ID beats every prefix and maps only to a non-dnceng source, so nothing is probed.
+        var exactMapped = await RunHarnessAsync(NuGetLookup("Contoso.Build.Tasks", config, responses.DeepClone().AsObject()));
+
+        Assert.True(prefixMapped["value"]!["available_on_approved_feed"]!.GetValue<bool>());
+        Assert.Equal(
+            [
+                "https://api.nuget.org/v3/registration5-semver1/contoso.build.engine/1.0.0.json",
+                "https://dnceng.pkgs.visualstudio.com/public/_packaging/dotnet9-transport/nuget/v3/index.json",
+                $"{transportFlat}contoso.build.engine/index.json",
+            ],
+            prefixMapped["urls"]!.AsArray().Select(url => url!.GetValue<string>()));
+        Assert.False(exactMapped["value"]!["available_on_approved_feed"]!.GetValue<bool>());
+        Assert.Equal(
+            ["https://api.nuget.org/v3/registration5-semver1/contoso.build.tasks/1.0.0.json"],
+            exactMapped["urls"]!.AsArray().Select(url => url!.GetValue<string>()));
+
+        static JsonObject NuGetLookup(string name, string config, JsonObject responses) => new()
+        {
+            ["mode"] = "lookup",
+            ["ecosystem"] = "nuget",
+            ["name"] = name,
+            ["version"] = "1.0.0",
+            ["now"] = Now,
+            ["nugetConfigText"] = config,
+            ["responses"] = responses,
+        };
     }
 
     [Fact]
@@ -214,6 +398,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["name"] = "Contoso.Lib",
             ["version"] = "1.2.3",
             ["now"] = Now,
+            ["nugetConfigText"] = File.ReadAllText(Path.Combine(RepoRoot.Path, "NuGet.config")),
             ["responses"] = new JsonObject
             {
                 ["https://api.nuget.org/v3/registration5-semver1/contoso.lib/1.2.3.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
@@ -263,6 +448,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     private static JsonObject Response(JsonNode body) => new() { ["status"] = 200, ["body"] = body };
 
+    private static string YarnLockEntry(string name, string version, string feedPrefix = "https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/")
+        => $"{name}@^{version}:\n  version \"{version}\"\n  resolved \"{feedPrefix}npm/registry/{name}/-/{name}-{version}.tgz\"\n";
+
+    private static JsonObject ServiceIndex(string flatContainer) => Response(new JsonObject
+    {
+        ["resources"] = new JsonArray(new JsonObject { ["@id"] = flatContainer, ["@type"] = "PackageBaseAddress/3.0.0" }),
+    });
+
     private static JsonObject CreateApprovalScenario() => new()
     {
         ["mode"] = "approve",
@@ -281,8 +474,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         ["files"] = new JsonArray("extension/package.json", "extension/yarn.lock"),
         ["contents"] = new JsonObject
         {
-            ["extension/yarn.lock@base"] = "resolved \"https://pkgs.dev.azure.com/dnceng/lodash-4.17.20.tgz\"",
-            ["extension/yarn.lock@head"] = "resolved \"https://pkgs.dev.azure.com/dnceng/lodash-4.17.21.tgz\"",
+            ["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20"),
+            ["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21"),
         },
         ["alerts"] = new JsonArray(new JsonObject
         {

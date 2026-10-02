@@ -3,10 +3,11 @@
 // argv[2]: request JSON path. argv[3]: result JSON path.
 // Request modes:
 //   { mode: "call", fn, args }                    -> { value }
-//   { mode: "lookup", ecosystem, name, version, now, responses } -> { value, urls }
-//   { mode: "approve", now, staged, agentItems, pr, files, contents, alerts,
+//   { mode: "lookup", ecosystem, name, version, now, responses, nugetConfigText } -> { value, urls }
+//   { mode: "approve", now, staged, agentItems, pr, prOverrides, files, contents, alerts,
 //     malwareNumbers, checkRuns, statuses, reviews, responses } -> { value, reviews, summary, info, warnings }
 // `responses` maps a URL to `{ status, body }`; unknown URLs return 404.
+// `prOverrides` maps a PR number to fields that replace `pr` for that number.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -42,18 +43,21 @@ function createGitHub(request, created) {
     };
     const rest = {
         pulls: {
-            get: async () => ({
-                data: {
-                    number: request.pr.number,
-                    state: request.pr.state ?? 'open',
-                    draft: request.pr.draft ?? false,
-                    user: { login: request.pr.user_login ?? 'dependabot[bot]' },
-                    head: { sha: request.pr.head_sha, ref: request.pr.head_ref },
-                    base: { sha: 'base0000000000000000000000000000000000000' },
-                    title: request.pr.title,
-                    body: request.pr.body,
-                },
-            }),
+            get: async ({ pull_number: pullNumber }) => {
+                const pr = { ...request.pr, number: pullNumber, ...(request.prOverrides?.[pullNumber] ?? {}) };
+                return {
+                    data: {
+                        number: pr.number,
+                        state: pr.state ?? 'open',
+                        draft: pr.draft ?? false,
+                        user: { login: pr.user_login ?? 'dependabot[bot]' },
+                        head: { sha: pr.head_sha, ref: pr.head_ref },
+                        base: { sha: 'base0000000000000000000000000000000000000' },
+                        title: pr.title,
+                        body: pr.body,
+                    },
+                };
+            },
             listFiles: pages.files,
             listReviews: pages.reviews,
             createReview: async args => {
@@ -109,6 +113,7 @@ async function main() {
             const value = await gate.lookupPackageVersion(request.ecosystem, request.name, request.version, {
                 fetchImpl: createFetch(request.responses, urls),
                 now: new Date(request.now),
+                nugetConfigText: request.nugetConfigText ?? null,
             });
             result = { value, urls };
             break;

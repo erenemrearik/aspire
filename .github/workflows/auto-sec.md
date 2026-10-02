@@ -275,9 +275,10 @@ these states:
 
 1. **Never** change a package source or feed: do not edit `NuGet.config`,
    `.npmrc`, `.yarnrc*`, `global.json`, `uv.toml`, pip index settings, or any
-   `registry`/`resolved`/`source` host in a lockfile to a new host. Only
-   `pkgs.dev.azure.com`, `dnceng.pkgs.visualstudio.com`, and hosts the file already
-   uses are acceptable.
+   `registry`/`resolved`/`source` URL in a lockfile to a new source. Only the
+   dnceng public feeds (`https://pkgs.dev.azure.com/dnceng/public/_packaging/...` and
+   `https://dnceng.pkgs.visualstudio.com/public/_packaging/...`) and sources the file
+   already uses are acceptable.
 2. **7-day cooldown.** Never propose a version published less than 7 days ago.
    Check every candidate version with:
    `node .github/workflows/auto-sec/auto-sec.js lookup <npm|pip|nuget> <name> <version>`
@@ -322,7 +323,9 @@ short `rationale` (package and versions only). The approval job verifies green C
 the cooldown, the manifest-only diff, the package source, and the version change
 itself, and skips PRs that fail any check, so request approval even when CI is
 still running. Still treat alerts as covered by the PR; do not duplicate the fix in
-the auto-sec PR.
+the auto-sec PR. The approval job never approves a PR that updates a package with a
+`malware: true` alert; such PRs stay with a human reviewer, so do not request
+approval for them, but still treat the alert as covered by the PR.
 
 ## Step 2: Fix the remaining alerts in the auto-sec PR
 
