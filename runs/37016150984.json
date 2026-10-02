@@ -1,0 +1,87 @@
+{
+  "run_id": 37016150984,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/37016150984",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-02T14:56:13Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20597,
+    "title": "Keep dashboard SQLite telemetry reads consistent during eviction",
+    "author": "JamesNK",
+    "state": "closed",
+    "head_branch": "fix/sqlite-telemetry-read-snapshots",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20597",
+    "merged_at": "2026-10-02T13:54:20Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "cc594975209750babbe8cafcfe41d669d9a71923",
+    "failed_sha": "361f154d637dbbcb31e7e4f75082dd5fe64ca3be",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "54b80e736f9c80b6577438f5c4413a883a4b48b7",
+        "message": "Add dedicated Dashboard Terminals page (#20650)",
+        "html_url": "https://github.com/microsoft/aspire/commit/54b80e736f9c80b6577438f5c4413a883a4b48b7",
+        "pull_request": {
+          "number": 20650,
+          "title": "Add dedicated Dashboard Terminals page",
+          "url": "https://github.com/microsoft/aspire/pull/20650",
+          "merged_at": "2026-10-02T06:58:38Z"
+        }
+      },
+      {
+        "sha": "cf6a86765ef1b31f569ad4cedbf2280ee0cd7240",
+        "message": "Size dashboard header notification badge to 18px (#20647) ## Description Keep the dashboard header notification badge compact, with enough room for the overflow indicator. Previously, single-digit badges were 20x20px and the `9+` indicator expanded to approximately 26x20px. Badges now measure 18x18px for counts through 9 and 22x18px when the count exceeds 9. Remove the default horizontal padding and use a conditional overflow class to override the base width and minimum width to 22px. A shared `",
+        "html_url": "https://github.com/microsoft/aspire/commit/cf6a86765ef1b31f569ad4cedbf2280ee0cd7240",
+        "pull_request": {
+          "number": 20647,
+          "title": "Size dashboard header notification badge to 18px",
+          "url": "https://github.com/microsoft/aspire/pull/20647",
+          "merged_at": "2026-10-02T12:43:41Z"
+        }
+      },
+      {
+        "sha": "361f154d637dbbcb31e7e4f75082dd5fe64ca3be",
+        "message": "Keep dashboard SQLite telemetry reads consistent during eviction (#20597) ## Description Dashboard trace queries can intermittently return HTTP 500 when telemetry eviction removes a trace between selecting it and materializing its spans. Related multi-query reads can also produce incomplete log attributes or metric details when rows are trimmed between statements. ### User-facing behavior The Traces, Spans, Structured Logs, and Metrics views now read dependent SQLite rows from a consistent snaps",
+        "html_url": "https://github.com/microsoft/aspire/commit/361f154d637dbbcb31e7e4f75082dd5fe64ca3be",
+        "pull_request": {
+          "number": 20597,
+          "title": "Keep dashboard SQLite telemetry reads consistent during eviction",
+          "url": "https://github.com/microsoft/aspire/pull/20597",
+          "merged_at": "2026-10-02T13:54:20Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Hosting.Azure.Tests, Hosting.Azure, Hosting.Azure, tests/Aspire... / Hosting.Azure (ubuntu-latest)",
+      "id": 110868771440,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37016150984/job/110868771440",
+      "classification": "flaky-test",
+      "reason": "Test AddAzureFunctionsProject_WorksWithMultipleProjects failed with TaskCanceledException during DistributedApplication.StopAsync, matching a known recurring flaky host-shutdown timeout unrelated to the merged PR changes (dashboard SQLite/UI code).",
+      "failed_steps": [
+        "Run tests (Linux/macOS)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Hosting.Azure.Tests.AzureFunctionsTests.AddAzureFunctionsProject_WorksWithMultipleProjects",
+      "job": "Tests / No-package tests (regular, Aspire.Hosting.Azure.Tests, Hosting.Azure, Hosting.Azure, tests/Aspire... / Hosting.Azure (ubuntu-latest)",
+      "error": "System.Threading.Tasks.TaskCanceledException : A task was canceled.",
+      "stack_trace": "at Microsoft.Extensions.Hosting.Internal.Host.ForeachService[T](IEnumerable`1 services, CancellationToken token, Boolean concurrent, Boolean abortOnFirstException, List`1 exceptions, Func`3 operation)\n   at Microsoft.Extensions.Hosting.Internal.Host.StopAsync(CancellationToken cancellationToken)\n   at Aspire.Hosting.DistributedApplication.StopAsync(CancellationToken cancellationToken) in /_/src/Aspire.Hosting/DistributedApplication.cs:line 497\n   at Aspire.Hosting.Azure.Tests.AzureFunctionsTests.AddAzureFunctionsProject_WorksWithMultipleProjects() in /home/runner/work/aspire/aspire/tests/Aspire.Hosting.Azure.Tests/AzureFunctionsTests.cs:line 200\n--- End of stack trace from previous location ---",
+      "standard_output": "| [2026-10-02T14:03:40] Aspire.Hosting.DistributedApplication Information: Aspire AppHost version: 17.0.0-ci\n| [2026-10-02T14:03:40] Aspire.Hosting.DistributedApplication Information: Distributed application starting.\n| [2026-10-02T14:03:40] Aspire.Hosting.DistributedApplication Information: Application host directory is: /home/runner/work/aspire/aspire/tests/Aspire.Hosting.TestUtilities\n| [2026-10-02T14:03:40] Aspire.Hosting.Devcontainers.Codespaces.CodespacesResourceUrlRewriterService Trace: Not running in Codespaces, skipping URL rewriting.\n| [2026-10-02T14:03:40] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Starting auxiliary backchannel service on socket path: /home/runner/.aspire/cli/bch/KfshLkY6TmIH_EpS5i4.6086\n| [2026-10-02T14:03:40] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Auxiliary backchannel listening on /home/runner/.aspire/cli/bch/KfshLkY6TmIH_EpS5i4.6086\n| [2026-10-02T14:03:40] Aspire.Hosting.Cli.BackchannelService Debug: Backchannel socket path was not specified.\n| [2026-10-02T14:03:40] Aspire.Hosting.Cli.CliOrphanDetector Debug: No CLI process ID configured. Orphan detection disabled.\n| [2026-10-02T14:03:40] Aspire.Hosting.Dcp.DcpHost Debug: Prepared DCP TLS certificate files for thumbprint 9EA9E1B5CECCE4BC05FEB6620056CF3583BF5FDA.\n| [2026-10-02T14:03:40] Aspire.Hosting.FileSystemService Debug: Allocated temporary directory: /tmp/aspire-dcpDnGJ6M\n| [2026-10-02T14:03:40] Aspire.Hosting.Dcp.DcpHost Information: Starting DCP with arguments: start-apiserver --monitor 6086 --detach --kubeconfig \"/tmp/aspire-dcpDnGJ6M/kubeconfig\" --tls-cert-thumbprint \"9EA9E1B5CECCE4BC05FEB6620056CF3583BF5FDA\" --tls-cert-file \"/home/runner/.aspire/dev-certs/https/F379C7F49CF30C989874C62406D03B4A069C21D40F8AA0DDDB89D9417608355D.crt\" --tls-key-file \"/home/runner/.aspire/dev-certs/https/F379C7F49CF30C989874C62406D03B4A069C21D40F8AA0DDDB89D9417608355D.key\"\n| [2026-10-02T14:03:40] Aspire.Hosting.Dcp.DcpExecutor Debug: Preparing services. Ports randomized: True\n| [2026-10-02T14:03:40] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource azure-environment/azure-environment update published: ResourceType = AzureEnvironmentResource, CreationTimeStamp = 2026-10-02T14:03:40, State = { Text = NotStarted, Style = (null) }, IsHidden = True, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = {  }, HealthReports = {  }, Commands = { reset-provisioning-state (Reset provisioning state) = Enabled change-azure-context (Change Azure context) = Enabled reprovision-all (Reprovision all) = Enabled delete-azure-resources (Delete Azure resources) = Enabled }\n| [2026-10-02T14:03:40] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 2 Resource azure-environment/azure-environment update published: ResourceType = AzureEnvironmentResource, CreationTimeStamp = 2026-10-02T14:03:40, State = { Text = NotStarted, Style = (null) }, IsHidden = True, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = { azure.operation.name = Provision Azure resources azure.operation.phase = Provision Azure resources azure.operation.status = Running azure.operation.started.at = 2026-10-02T14:03:40.6229084+00:00 }, HealthReports = {  }, Commands = { reset-provisioning-state (Reset provisioning state) = Disabled change-azure-context (Change Azure context) = Disabled reprovision-all (Reprovision all) = Disabled delete-azure-resources (Delete Azure resources) = Disabled }\n| [2026-10-02T14:03:40] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 3 Resource azure-environment/azure-environment update published: ResourceType = AzureEnvironmentResource, CreationTimeStamp = 2026-10-02T14:03:40, State = { Text = NotStarted, Style = (null) }, IsHidden = True, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, Environmen",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Matches prior recurring cause aspire-hosting-azure-servicebus-stopasync-taskcanceled (12 prior occurrences); the merged PR changes are unrelated dashboard SQLite/UI code, indicating a timing-related host shutdown race, not a code regression."
+    }
+  ],
+  "causes": [
+    "aspire-hosting-azure-servicebus-stopasync-taskcanceled"
+  ]
+}
