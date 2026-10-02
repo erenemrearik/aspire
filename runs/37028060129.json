@@ -1,0 +1,120 @@
+{
+  "run_id": 37028060129,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/37028060129",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-02T17:15:02Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20586,
+    "title": "Bump the uv group across 2 directories with 2 updates",
+    "author": "dependabot[bot]",
+    "state": "closed",
+    "head_branch": "dependabot/uv/playground/FoundryAgentBasic/app/uv-93306a4c41",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20586",
+    "merged_at": "2026-10-02T15:35:27Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "cc594975209750babbe8cafcfe41d669d9a71923",
+    "failed_sha": "e9579221c0f57492b6a385fde7b80af972988c6d",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "54b80e736f9c80b6577438f5c4413a883a4b48b7",
+        "message": "Add dedicated Dashboard Terminals page (#20650)",
+        "html_url": "https://github.com/microsoft/aspire/commit/54b80e736f9c80b6577438f5c4413a883a4b48b7",
+        "pull_request": {
+          "number": 20650,
+          "title": "Add dedicated Dashboard Terminals page",
+          "url": "https://github.com/microsoft/aspire/pull/20650",
+          "merged_at": "2026-10-02T06:58:38Z"
+        }
+      },
+      {
+        "sha": "cf6a86765ef1b31f569ad4cedbf2280ee0cd7240",
+        "message": "Size dashboard header notification badge to 18px (#20647) ## Description Keep the dashboard header notification badge compact, with enough room for the overflow indicator. Previously, single-digit badges were 20x20px and the `9+` indicator expanded to approximately 26x20px. Badges now measure 18x18px for counts through 9 and 22x18px when the count exceeds 9. Remove the default horizontal padding and use a conditional overflow class to override the base width and minimum width to 22px. A shared `",
+        "html_url": "https://github.com/microsoft/aspire/commit/cf6a86765ef1b31f569ad4cedbf2280ee0cd7240",
+        "pull_request": {
+          "number": 20647,
+          "title": "Size dashboard header notification badge to 18px",
+          "url": "https://github.com/microsoft/aspire/pull/20647",
+          "merged_at": "2026-10-02T12:43:41Z"
+        }
+      },
+      {
+        "sha": "361f154d637dbbcb31e7e4f75082dd5fe64ca3be",
+        "message": "Keep dashboard SQLite telemetry reads consistent during eviction (#20597) ## Description Dashboard trace queries can intermittently return HTTP 500 when telemetry eviction removes a trace between selecting it and materializing its spans. Related multi-query reads can also produce incomplete log attributes or metric details when rows are trimmed between statements. ### User-facing behavior The Traces, Spans, Structured Logs, and Metrics views now read dependent SQLite rows from a consistent snaps",
+        "html_url": "https://github.com/microsoft/aspire/commit/361f154d637dbbcb31e7e4f75082dd5fe64ca3be",
+        "pull_request": {
+          "number": 20597,
+          "title": "Keep dashboard SQLite telemetry reads consistent during eviction",
+          "url": "https://github.com/microsoft/aspire/pull/20597",
+          "merged_at": "2026-10-02T13:54:20Z"
+        }
+      },
+      {
+        "sha": "a291a59bc7f00a517c66320f5e6dce54560ccb7d",
+        "message": "fix(ci): scope automatic workflow token permissions (#20661) ## Description **Two workflows grant write-capable automatic `GITHUB_TOKEN` permissions at workflow scope, so jobs inherit permissions they do not use.** Default both workflows to `permissions: {}`. Grant `actions: write` only to the two labeler cache-promotion jobs, and `contents: read` to release authorization. Release mutations, merge-back PRs, and baseline PRs continue to use separately minted GitHub App tokens. **Draft-release det",
+        "html_url": "https://github.com/microsoft/aspire/commit/a291a59bc7f00a517c66320f5e6dce54560ccb7d",
+        "pull_request": {
+          "number": 20661,
+          "title": "fix(ci): scope automatic workflow token permissions",
+          "url": "https://github.com/microsoft/aspire/pull/20661",
+          "merged_at": "2026-10-02T15:25:04Z"
+        }
+      },
+      {
+        "sha": "49661ee762f8571922b96e6ca5ec40283c6f1577",
+        "message": "fix(ci): restrict GitHub App tokens to required permissions (#20659) ## Description **Sixteen GitHub App tokens in hand-authored workflows are created without permission restrictions, so each token inherits every permission granted to the Aspire App installation.** This change adds explicit `permission-*` inputs to those token-creation steps across 13 workflows. Each short-lived token now requests only the operations its job performs: - Repository and pull-request automation receives `contents` ",
+        "html_url": "https://github.com/microsoft/aspire/commit/49661ee762f8571922b96e6ca5ec40283c6f1577",
+        "pull_request": {
+          "number": 20659,
+          "title": "fix(ci): restrict GitHub App tokens to required permissions",
+          "url": "https://github.com/microsoft/aspire/pull/20659",
+          "merged_at": "2026-10-02T15:28:22Z"
+        }
+      },
+      {
+        "sha": "e9579221c0f57492b6a385fde7b80af972988c6d",
+        "message": "Bump the uv group across 2 directories with 2 updates (#20586) Bumps the uv group with 2 updates in the /playground/FoundryAgentBasic/app directory: [oauthlib](https://github.com/oauthlib/oauthlib) and [pyjwt](https://github.com/jpadilla/pyjwt). Bumps the uv group with 1 update in the /playground/PostgresEndToEnd/PostgresEndToEnd.PythonService directory: [pyjwt](https://github.com/jpadilla/pyjwt). Updates `oauthlib` from 3.3.1 to 4.0.0 <details> <summary>Release notes</summary> <p><em>Sourced fr",
+        "html_url": "https://github.com/microsoft/aspire/commit/e9579221c0f57492b6a385fde7b80af972988c6d",
+        "pull_request": {
+          "number": 20586,
+          "title": "Bump the uv group across 2 directories with 2 updates",
+          "url": "https://github.com/microsoft/aspire/pull/20586",
+          "merged_at": "2026-10-02T15:35:27Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "id": 110924776159,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37028060129/job/110924776159",
+      "classification": "flaky-test",
+      "reason": "Single test assertion failure (Expected: 2, Actual: 3) in ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput; matches a known build-count race condition previously identified as flaky on this exact test/line.",
+      "failed_steps": [
+        "Run tests (Windows)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput",
+      "job": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "error": "Assert.Equal() Failure: Values differ\nExpected: 2\nActual:   3",
+      "stack_trace": "at Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput() in D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.Tests\\ResourceCommandServiceTests.cs:line 1770\n--- End of stack trace from previous location ---",
+      "standard_output": "Temporary workspace created at: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\Aspire.Hosting.TestUtilities\\Workspace\\tcixoew4.2b5\n| [2026-10-02T16:27:22] Aspire.Hosting.DistributedApplication Information: Aspire AppHost version: 17.0.0-ci\n| [2026-10-02T16:27:22] Aspire.Hosting.DistributedApplication Information: Distributed application starting.\n| [2026-10-02T16:27:22] Aspire.Hosting.DistributedApplication Information: Application host directory is: D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.TestUtilities\n| [2026-10-02T16:27:22] Aspire.Hosting.Cli.CliOrphanDetector Debug: No CLI process ID configured. Orphan detection disabled.\n| [2026-10-02T16:27:22] Aspire.Hosting.Cli.BackchannelService Debug: Backchannel socket path was not specified.\n| [2026-10-02T16:27:22] Aspire.Hosting.Devcontainers.Codespaces.CodespacesResourceUrlRewriterService Trace: Not running in Codespaces, skipping URL rewriting.\n| [2026-10-02T16:27:22] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Starting auxiliary backchannel service on socket path: C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFAJA8DQO3o.3676\n| [2026-10-02T16:27:22] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Auxiliary backchannel listening on C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFAJA8DQO3o.3676\n| [2026-10-02T16:27:22] Aspire.Hosting.Dcp.DcpHost Warning: No trusted Aspire development certificate was found. See https://aka.ms/aspire/devcerts for more information.\n| [2026-10-02T16:27:22] Aspire.Hosting.FileSystemService Debug: Allocated temporary directory: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcpovuncblq.mit\n| [2026-10-02T16:27:22] Aspire.Hosting.Dcp.DcpHost Information: Starting DCP with arguments: start-apiserver --monitor 3676 --detach --kubeconfig \"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcpovuncblq.mit\\kubeconfig\"\n| [2026-10-02T16:27:22] Aspire.Hosting.Dcp.DcpHost Debug: A complete bundled ConPTY provider was not found; DCP will use the inbox Windows provider.\n| [2026-10-02T16:27:22] Aspire.Hosting.Dcp.DcpExecutor Debug: Preparing services. Ports randomized: True\n| [2026-10-02T16:27:22] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject/myProject-ycnnmxke update published: ResourceType = Project, CreationTimeStamp = (null), State = { Text = (null), Style = (null) }, IsHidden = False, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = {  }, HealthReports = {  }, Commands = { start (Start) = Disabled stop (Stop) = Hidden restart (Restart) = Disabled rebuild (Rebuild) = Disabled }\n| [2026-10-02T16:27:22] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject-rebuilder/myProject-rebuilder-tqevnwrt update published: ResourceType = Executable, CreationTimeStamp = (null), State = { Text = NotStarted, Style = (null) }, IsHidden = True, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = { resource.parentName = myProject-ycnnmxke }, HealthReports = {  }, Commands = {  }\n| [2026-10-02T16:27:22] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Endpoint resources.\n| [2026-10-02T16:27:22] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Service resources.\n| [2026-10-02T16:27:22] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Executable resources.\n| [2026-10-02T16:27:22] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP ContainerExec resources.\n| [2026-10-02T16:27:22] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Container resources.\n| [2026-10-02T16:27:22] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Converting relative endpoint URLs to absolute URLs for resource 'myProject-rebuilder'.\n| [2026-10-02T16:27:22] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Added total of 0 URLs to resource 'myProject-rebuilder'\n| [2026-10-02T16:27:22] Aspire.Hosting.ApplicationModel.Res",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "This test only ran once, on main, with no related code change in this candidate merge range touching ResourceCommandServiceTests or rebuild-command build-count logic. Matches prior cause 'aspire-hosting-resourcecommandservice-rebuild-buildcount-race' exactly (same test, same file/line 1770, same Expected 2/Actual 3 assertion), indicating a pre-existing build-count race condition, not a new regression."
+    }
+  ],
+  "causes": [
+    "aspire-hosting-resourcecommandservice-rebuild-buildcount-race"
+  ]
+}
