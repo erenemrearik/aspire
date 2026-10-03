@@ -341,8 +341,9 @@ these states:
    and safe-output text may name packages and versions only. Never mention GHSA or
    CVE ids, severities, vulnerability descriptions, or the words "vulnerability",
    "exploit", or "malware".
-5. Never run dependency install scripts. Always pass `--ignore-scripts` to `npm`
-   and `yarn`, and `--lockfile-only` to `pnpm` (which then never runs scripts).
+5. Never run dependency install scripts or build backends. Always pass
+   `--ignore-scripts` to `npm` and `yarn`, `--lockfile-only` to `pnpm` (which then
+   never runs scripts), and `--no-build` to `uv`.
    Never edit files outside dependency manifests and lockfiles.
 
 ## Inputs
@@ -413,7 +414,10 @@ Skip alerts the existing auto-sec PR already fixes.
   the patched version, then run `corepack pnpm install --lockfile-only`. Never run
   `npm` or `yarn` in a pnpm directory; they would write a second lockfile.
 - **pip** (`uv.lock`): in the project directory run
-  `uv lock --upgrade-package <name>==<version>`.
+  `uv lock --no-build --upgrade-package <name>==<version>`. `--no-build` stops uv
+  from running a source distribution's build backend to read its metadata. If uv
+  cannot resolve without building from source, mark the alert
+  `blocked: source-build-required`.
 - **nuget** (`Directory.Packages.props`): update a `PackageVersion` entry only
   when its `Version` is a literal and the lookup reports
   `available_on_approved_feed: true`. If the `Version` is an MSBuild property
@@ -424,6 +428,10 @@ Skip alerts the existing auto-sec PR already fixes.
 - **actions** and version-mapped code scanning alerts: do not edit workflow
   files. Mark them `blocked: actions-pin-requires-maintainer`; action pins must be
   updated together with the repository Actions allow-list.
+- **Any other ecosystem or manifest** (for example Maven `pom.xml`, Gradle, Go
+  modules, Cargo, or pip `requirements.txt`): this workflow cannot approve or fix
+  it. Mark the alert `blocked: unsupported-ecosystem`; Dependabot PRs for these
+  ecosystems stay with a human reviewer.
 
 If no compliant version exists yet, use `blocked: no-version-past-cooldown`. If a
 command fails or the result does not resolve, revert that directory with

@@ -54,6 +54,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("non-manifest-file-changed")]
     [InlineData("non-dependabot-commit")]
     [InlineData("non-dependabot-commit-unverified")]
+    [InlineData("non-version-manifest-edit")]
     [InlineData("package-source-changed")]
     [InlineData("package-source-changed-other-org")]
     [InlineData("breaking-change")]
@@ -109,6 +110,12 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             case "non-dependabot-commit-unverified":
                 expectedReason = "non-dependabot-commit";
                 scenario["commits"] = new JsonArray(new JsonObject { ["author_login"] = "dependabot[bot]", ["verified"] = false });
+                break;
+            case "non-version-manifest-edit":
+                // A verified commit with Dependabot author metadata still cannot change a script.
+                scenario["files"]!.AsArray().Add("extension/package.json");
+                scenario["contents"]!["extension/package.json@base"] = "{\n  \"scripts\": { \"build\": \"tsc\" },\n  \"dependencies\": { \"lodash\": \"^4.17.20\" }\n}\n";
+                scenario["contents"]!["extension/package.json@head"] = "{\n  \"scripts\": { \"build\": \"tsc && node x.js\" },\n  \"dependencies\": { \"lodash\": \"^4.17.21\" }\n}\n";
                 break;
             case "package-source-changed":
                 scenario["contents"]!["extension/yarn.lock@head"] = "resolved \"https://registry.example.com/lodash\"";
@@ -331,6 +338,28 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["mode"] = "call",
             ["fn"] = "inVulnerableRanges",
             ["args"] = new JsonArray(version, new JsonArray(range)),
+        });
+
+        Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("\"lodash\": \"^4.17.20\",", "\"lodash\": \"^4.17.21\",", true)]
+    [InlineData("\"lodash\": \"1.2.9\",", "\"lodash\": \"1.2.10\",", true)]
+    [InlineData("<PackageVersion Include=\"X\" Version=\"9.0.4\" />", "<PackageVersion Include=\"X\" Version=\"9.0.5-rc.1\" />", true)]
+    [InlineData("  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", true)]
+    [InlineData("\"build\": \"tsc\",", "\"build\": \"tsc && node x.js\",", false)]
+    [InlineData("\"build\": \"node script-1.js\",", "\"build\": \"node script-2.js\",", false)]
+    [InlineData("\"lodash\": \"^4.17.20\",", "\"lodash\": \"^4.17.20\",\n\"postinstall\": \"node x.js\",", false)]
+    [InlineData("\"foo\": \">=1.0 <2.0\",", "\"foo\": \">=1.1 <3.0\",", false)]
+    public async Task DetectsVersionOnlyManifestEdits(string baseText, string headText, bool expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "isVersionOnlyEdit",
+            ["args"] = new JsonArray(baseText, headText),
         });
 
         Assert.Equal(expected, result["value"]!.GetValue<bool>());

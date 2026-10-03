@@ -66,13 +66,17 @@ behavior, rather than merely changing an action pin.
 
 `auto-sec.md` runs every 12 hours (and on demand). It reconciles open Dependabot
 alerts, including malware alerts, and version-mapped code scanning alerts against
-open Dependabot PRs. Pure code findings are out of scope.
+open Dependabot PRs. Pure code findings are out of scope. Only npm (npm, yarn,
+pnpm), pip (`uv.lock`, `pyproject.toml`), NuGet (`Directory.Packages.props`), and
+GitHub Actions alerts are handled; alerts in other ecosystems, such as Maven,
+Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
 
 - **Dependabot PRs** that fix an open alert are approved by the Aspire bot App only
   when `.github/workflows/auto-sec/auto-sec.js` re-verifies every gate in the
   `approve_dependabot_pr` safe-output job. The gates are:
-  - only manifest or lock files change, and every commit is a GitHub-verified
-    commit authored by Dependabot
+  - only manifest or lock files change, every commit is a GitHub-verified
+    commit authored by Dependabot, and `package.json`, `pyproject.toml`, and
+    `Directory.Packages.props` change only version tokens
   - no package source or feed is added (only the dnceng public feeds and sources the
     file already uses are accepted)
   - the alert's own manifest is changed and carries the fixed version, and no copy

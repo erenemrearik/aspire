@@ -54,6 +54,20 @@ const ALLOWED_MANIFEST_BASENAMES = new Set([
     'directory.packages.props',
 ]);
 
+// Manifests that can carry executable content (package.json scripts, pyproject.toml
+// build hooks, MSBuild targets and properties). Lockfiles are data only and are
+// covered by the package-source gate instead.
+const VERSION_ONLY_MANIFEST_BASENAMES = new Set([
+    'package.json',
+    'pyproject.toml',
+    'directory.packages.props',
+]);
+
+// Characters that can appear inside a version token, such as `4.17.21`,
+// `1.0.0-rc.1+build.5`, or `v2.0.0`.
+const VERSION_TOKEN_CHAR = /[0-9A-Za-z.+-]/;
+const VERSION_TOKEN = /^v?\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.+-]*)?$/;
+
 const DEFAULT_PORTS = {
     'http': 80,
     'https': 443,
@@ -679,6 +693,51 @@ function alertManifestCarries(alert, ecosystem, update, headContents, acceptable
     return versions.some(version => sameVersion(version, update.to)) && versions.every(acceptable);
 }
 
+/**
+ * True when `headText` differs from `baseText` only by swapping one version token per
+ * changed line, for example:
+ *   "lodash": "^4.17.20",                                ->  "lodash": "^4.17.21",
+ *   <PackageVersion Include="X" Version="9.0.4" />       ->  ... Version="9.0.5" />
+ *   "requests>=2.31.0",                                  ->  "requests>=2.32.3",
+ * Added, removed, or otherwise edited lines fail, so a commit that only claims to be
+ * from Dependabot cannot slip a script or build hook change into an executable
+ * manifest. Missing text on either side also fails closed.
+ */
+function isVersionOnlyEdit(baseText, headText) {
+    if (typeof baseText !== 'string' || typeof headText !== 'string') {
+        return false;
+    }
+    const baseLines = baseText.split(/\r?\n/);
+    const headLines = headText.split(/\r?\n/);
+    if (baseLines.length !== headLines.length) {
+        return false;
+    }
+    return baseLines.every((line, index) => line === headLines[index] || isVersionTokenSwap(line, headLines[index]));
+}
+
+function isVersionTokenSwap(baseLine, headLine) {
+    let start = 0;
+    while (start < baseLine.length && start < headLine.length && baseLine[start] === headLine[start]) {
+        start++;
+    }
+    let baseEnd = baseLine.length;
+    let headEnd = headLine.length;
+    while (baseEnd > start && headEnd > start && baseLine[baseEnd - 1] === headLine[headEnd - 1]) {
+        baseEnd--;
+        headEnd--;
+    }
+    // Widen the differing span to whole tokens so `1.2.3` -> `1.2.10` compares the full
+    // versions. The shared suffix is identical on both sides, so widen both ends together.
+    while (start > 0 && VERSION_TOKEN_CHAR.test(baseLine[start - 1])) {
+        start--;
+    }
+    while (baseEnd < baseLine.length && VERSION_TOKEN_CHAR.test(baseLine[baseEnd])) {
+        baseEnd++;
+        headEnd++;
+    }
+    return VERSION_TOKEN.test(baseLine.slice(start, baseEnd)) && VERSION_TOKEN.test(headLine.slice(start, headEnd));
+}
+
 function updateMatchesAlert(alert, ecosystem, update) {
     return alert.ecosystem === ecosystem
         && normalizePackageName(ecosystem, alert.package) === normalizePackageName(ecosystem, update.name);
@@ -834,6 +893,13 @@ function evaluateApprovalGates(input) {
     const commits = input.commits ?? [];
     if (!commits.length || commits.some(commit => commit.author_login !== DEPENDABOT_LOGIN || !commit.verified)) {
         reasons.push('non-dependabot-commit');
+    }
+    // Commit author metadata is caller-controlled and the verified bit only proves some
+    // trusted key signed it, so also prove from the content that executable manifests
+    // changed nothing but version tokens.
+    if (files.some(file => VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(file.filename).toLowerCase())
+        && !isVersionOnlyEdit(baseContents[file.filename], headContents[file.filename]))) {
+        reasons.push('non-version-manifest-edit');
     }
     if (sourceChanges.some(change => change.newSources.length > 0)) {
         reasons.push('package-source-changed');
@@ -1396,6 +1462,7 @@ module.exports = {
     findNewSources,
     inVulnerableRanges,
     isAllowedManifest,
+    isVersionOnlyEdit,
     isBreakingChange,
     isCooldownSatisfied,
     lookupPackageVersion,
