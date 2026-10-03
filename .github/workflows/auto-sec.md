@@ -24,9 +24,11 @@ on:
     - cron: "17 */12 * * *"   # Every 12 hours (00:17 and 12:17 UTC)
   workflow_dispatch:
 
-# Only run in the canonical repository. Forks have neither the alerts nor the
-# Aspire bot App secrets.
-if: github.repository == 'microsoft/aspire'
+# Only run in the canonical repository, on main. Forks have neither the alerts
+# nor the Aspire bot App secrets. A dispatch from another branch would load that
+# branch's gate module and base the auto-sec branch on its manifests while
+# reconciling main's alerts.
+if: github.repository == 'microsoft/aspire' && github.ref == 'refs/heads/main'
 
 # Never run two reconciliations at once: both would target the same auto-sec
 # branch and could race on approvals.
@@ -90,10 +92,11 @@ pre-agent-steps:
       # report a misleading "nothing to do". Every advisory range for the alert's
       # package is kept, not just the one the installed version fell in, so the
       # coverage check below rejects a target inside a later disjoint range, as the
-      # approval job does.
-      gh api --paginate "/repos/${REPO}/dependabot/alerts?state=open&per_page=100" \
-        --jq '.[] | .dependency.package as $pkg | ($pkg.name | ascii_downcase | gsub("[-_.]+"; "-")) as $key | {number, ecosystem: $pkg.ecosystem, package: $pkg.name, manifest_path: .dependency.manifest_path, scope: .dependency.scope, relationship: .dependency.relationship, vulnerable_version_range: .security_vulnerability.vulnerable_version_range, vulnerable_ranges: ([.security_vulnerability.vulnerable_version_range] + [(.security_advisory.vulnerabilities // [])[] | select(.package.ecosystem == $pkg.ecosystem and (.package.name | ascii_downcase | gsub("[-_.]+"; "-")) == $key) | .vulnerable_version_range] | map(select(type == "string" and . != "")) | unique), first_patched_version: .security_vulnerability.first_patched_version.identifier}' \
-        | jq -s '.' > .auto-sec/dependabot-alerts.json
+      # approval job does. The projection runs in `jq`, not `gh --jq`, so the
+      # linter treats the `$pkg` and `$key` bindings as jq variables.
+      gh api --paginate "/repos/${REPO}/dependabot/alerts?state=open&per_page=100" --jq '.[]' \
+        | jq -s 'map(.dependency.package as $pkg | ($pkg.name | ascii_downcase | gsub("[-_.]+"; "-")) as $key | {number, ecosystem: $pkg.ecosystem, package: $pkg.name, manifest_path: .dependency.manifest_path, scope: .dependency.scope, relationship: .dependency.relationship, vulnerable_version_range: .security_vulnerability.vulnerable_version_range, vulnerable_ranges: ([.security_vulnerability.vulnerable_version_range] + [(.security_advisory.vulnerabilities // [])[] | select(.package.ecosystem == $pkg.ecosystem and (.package.name | ascii_downcase | gsub("[-_.]+"; "-")) == $key) | .vulnerable_version_range] | map(select(type == "string" and . != "")) | unique), first_patched_version: .security_vulnerability.first_patched_version.identifier})' \
+        > .auto-sec/dependabot-alerts.json
       gh api --paginate "/repos/${REPO}/dependabot/alerts?state=open&classification=malware&per_page=100" \
         --jq '.[] | .number' | jq -s '.' > .auto-sec/malware-alert-numbers.json
       jq --slurpfile malware .auto-sec/malware-alert-numbers.json \
