@@ -25,6 +25,8 @@ The dashboard is configured when it starts up. Configuration includes frontend a
 
 How you configure the dashboard depends on whether it's started by the Aspire AppHost project or run in [standalone mode](https://aspire.dev/dashboard/standalone/).
 
+To export the dashboard's own traces, set `OTEL_EXPORTER_OTLP_ENDPOINT`. Exported traces use `aspire-dashboard` as the default `service.name`. Override it with `OTEL_SERVICE_NAME` or `service.name` in `OTEL_RESOURCE_ATTRIBUTES`, using environment variables, command line arguments, or JSON configuration. `OTEL_SERVICE_NAME` takes precedence when both settings specify a service name. The dashboard does not generate a `service.instance.id`, but preserves one supplied in `OTEL_RESOURCE_ATTRIBUTES`.
+
 ### Aspire AppHost
 
 The AppHost automatically configures the dashboard, but you can override values if needed. The recommended way to configure the dashboard from the Aspire AppHost is by adding environment variables to the _launchSettings.json_ file. The `:` delimiter must be replaced with double underscore (`__`) in environment variable names. For example, `Dashboard:TelemetryLimits:MaxLogCount` is `DASHBOARD__TELEMETRYLIMITS__MAXLOGCOUNT` as an environment variable.

@@ -346,16 +346,12 @@ public sealed class DashboardWebApplication : IAsyncDisposable
         builder.Services.AddSingleton<ITelemetryErrorRecorder, TelemetryErrorRecorder>();
         if (!string.IsNullOrWhiteSpace(builder.Configuration[OtlpExporterEndpointConfigurationKey]))
         {
-            var environmentResource = ResourceBuilder.CreateEmpty()
-                .AddEnvironmentVariableDetector()
-                .Build();
-
             builder.Services.AddOpenTelemetry()
                 .ConfigureResource(resource => resource
                     .AddService(DefaultOtlpServiceName, autoGenerateServiceInstanceId: false)
-                    // AddService runs after the default environment detector. Append its parsed attributes
-                    // again so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES remain authoritative.
-                    .AddAttributes(environmentResource.Attributes))
+                    // Reapply the detector after the fallback so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES
+                    // from the application's IConfiguration retain their precedence.
+                    .AddEnvironmentVariableDetector())
                 .WithTracing(tracing => tracing
                     .AddAspNetCoreInstrumentation()
                     .AddSource(DashboardActivitySource.ActivitySourceName)
