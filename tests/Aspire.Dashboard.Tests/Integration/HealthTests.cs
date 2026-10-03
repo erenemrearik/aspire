@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Aspire.Dashboard.Tests.Integration;
 
+[Collection(nameof(HealthTestsCollection))]
 public class HealthTests(HealthTests.Fixture fixture) : IClassFixture<HealthTests.Fixture>
 {
     private const string TestActivitySourceName = "Aspire.Dashboard.Tests.Integration.HealthTests";
@@ -81,23 +82,46 @@ public class HealthTests(HealthTests.Fixture fixture) : IClassFixture<HealthTest
     }
 
     [Theory]
-    [InlineData(null, "aspire-dashboard")]
-    [InlineData("custom-dashboard", "custom-dashboard")]
-    public async Task OtlpExporterConfigured_ConfiguresServiceName(string? configuredServiceName, string expectedServiceName)
+    [InlineData(null, null, "aspire-dashboard", null)]
+    [InlineData("custom-dashboard", null, "custom-dashboard", null)]
+    [InlineData(null, "service.name=resource-dashboard", "resource-dashboard", null)]
+    [InlineData(null, "service.name=resource-dashboard,service.instance.id=stable-instance", "resource-dashboard", "stable-instance")]
+    public async Task OtlpExporterConfigured_ConfiguresResourceIdentity(
+        string? configuredServiceName,
+        string? configuredResourceAttributes,
+        string expectedServiceName,
+        string? expectedServiceInstanceId)
     {
-        await using var app = IntegrationTestHelpers.CreateDashboardWebApplication(
-            NullLoggerFactory.Instance,
-            config =>
+        var originalServiceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME");
+        var originalResourceAttributes = Environment.GetEnvironmentVariable("OTEL_RESOURCE_ATTRIBUTES");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("OTEL_SERVICE_NAME", configuredServiceName);
+            Environment.SetEnvironmentVariable("OTEL_RESOURCE_ATTRIBUTES", configuredResourceAttributes);
+
+            await using var app = IntegrationTestHelpers.CreateDashboardWebApplication(
+                NullLoggerFactory.Instance,
+                config => config["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:1");
+
+            await app.StartAsync().DefaultTimeout();
+
+            var resourceAttributes = app.Services.GetRequiredService<TracerProvider>().GetResource().Attributes.ToDictionary();
+            Assert.Equal(expectedServiceName, resourceAttributes["service.name"]);
+            if (expectedServiceInstanceId is null)
             {
-                config["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:1";
-                config["OTEL_SERVICE_NAME"] = configuredServiceName;
-            });
-
-        await app.StartAsync().DefaultTimeout();
-
-        var resource = app.Services.GetRequiredService<TracerProvider>().GetResource();
-        Assert.Equal(expectedServiceName, resource.Attributes.Single(attribute => attribute.Key == "service.name").Value);
-        Assert.NotEmpty(Assert.IsType<string>(resource.Attributes.Single(attribute => attribute.Key == "service.instance.id").Value));
+                Assert.False(resourceAttributes.ContainsKey("service.instance.id"));
+            }
+            else
+            {
+                Assert.Equal(expectedServiceInstanceId, resourceAttributes["service.instance.id"]);
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("OTEL_SERVICE_NAME", originalServiceName);
+            Environment.SetEnvironmentVariable("OTEL_RESOURCE_ATTRIBUTES", originalResourceAttributes);
+        }
     }
 
     public sealed class Fixture : IAsyncLifetime
@@ -124,6 +148,9 @@ public class HealthTests(HealthTests.Fixture fixture) : IClassFixture<HealthTest
             TestActivitySource.Dispose();
         }
     }
+
+    [CollectionDefinition(nameof(HealthTestsCollection), DisableParallelization = true)]
+    public sealed class HealthTestsCollection;
 
     internal sealed class TestActivityExporter : BaseExporter<Activity>
     {

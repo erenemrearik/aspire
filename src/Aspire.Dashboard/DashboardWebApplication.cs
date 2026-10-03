@@ -67,7 +67,6 @@ public sealed class DashboardWebApplication : IAsyncDisposable
 
     private const string DashboardAntiForgeryCookieNamePrefix = ".Aspire.Dashboard.Antiforgery";
     private const string OtlpExporterEndpointConfigurationKey = "OTEL_EXPORTER_OTLP_ENDPOINT";
-    private const string OtlpServiceNameConfigurationKey = "OTEL_SERVICE_NAME";
     private const string DefaultOtlpServiceName = "aspire-dashboard";
     // Blazor discovers routed pages and layouts as Type values, then activates them and assigns
     // component parameters and [Inject] properties through reflection.
@@ -347,10 +346,16 @@ public sealed class DashboardWebApplication : IAsyncDisposable
         builder.Services.AddSingleton<ITelemetryErrorRecorder, TelemetryErrorRecorder>();
         if (!string.IsNullOrWhiteSpace(builder.Configuration[OtlpExporterEndpointConfigurationKey]))
         {
-            var serviceName = builder.Configuration[OtlpServiceNameConfigurationKey];
+            var environmentResource = ResourceBuilder.CreateEmpty()
+                .AddEnvironmentVariableDetector()
+                .Build();
+
             builder.Services.AddOpenTelemetry()
-                .ConfigureResource(resource => resource.AddService(
-                    string.IsNullOrWhiteSpace(serviceName) ? DefaultOtlpServiceName : serviceName))
+                .ConfigureResource(resource => resource
+                    .AddService(DefaultOtlpServiceName, autoGenerateServiceInstanceId: false)
+                    // AddService runs after the default environment detector. Append its parsed attributes
+                    // again so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES remain authoritative.
+                    .AddAttributes(environmentResource.Attributes))
                 .WithTracing(tracing => tracing
                     .AddAspNetCoreInstrumentation()
                     .AddSource(DashboardActivitySource.ActivitySourceName)
