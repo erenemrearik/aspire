@@ -9,6 +9,8 @@ jobs:
   - job: CodeQL_${{ parameters.language }}
     displayName: ${{ parameters.language }} starter CodeQL
     timeoutInMinutes: 60
+    workspace:
+      clean: all
     pool:
       name: NetCore1ESPool-Internal
       image: 1es-windows-2022
