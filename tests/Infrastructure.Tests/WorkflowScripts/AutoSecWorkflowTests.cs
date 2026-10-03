@@ -677,9 +677,113 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     [Theory]
     [RequiresTools(["node"])]
+    [InlineData("alerts=12 dependabot-pr=3 auto-sec-pr=6 blocked=3 (nuget-not-mirrored=1, breaking-upgrade-required=2) code-findings-out-of-scope=344", true)]
+    [InlineData("alerts=0 dependabot-pr=0 auto-sec-pr=0 blocked=0 code-findings-out-of-scope=0", true)]
+    [InlineData("alerts=1 dependabot-pr=0 auto-sec-pr=0 blocked=1 (no-safe-version=1) code-findings-out-of-scope=0", true)]
+    [InlineData("alerts=1 dependabot-pr=0 auto-sec-pr=0 blocked=1 (lodash=1) code-findings-out-of-scope=0", false)]
+    [InlineData("alerts=2 dependabot-pr=0 auto-sec-pr=0 blocked=2 (update-failed=1, update-failed=1) code-findings-out-of-scope=0", false)]
+    [InlineData("alerts=1 dependabot-pr=0 auto-sec-pr=1 blocked=0 code-findings-out-of-scope=0 lodash 4.17.21", false)]
+    [InlineData("Reviewed alert 42 for lodash", false)]
+    public async Task NoopReportAcceptsOnlyCounts(string message, bool expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "checkPublicNoopMessage",
+            ["args"] = new JsonArray(message),
+        });
+
+        Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task AgentOutputScrubRemovesTranscriptAndKeepsTemplateOutputs()
+    {
+        const string headSha = "0123456789abcdef0123456789abcdef01234567";
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["outputLines"] = new JsonArray(
+                new JsonObject { ["type"] = "create_pull_request", ["branch"] = "auto-sec/security-updates", ["title"] = "Automated dependency updates", ["body"] = PublicTextBody.Replace("\r\n", "\n") }.ToJsonString(),
+                new JsonObject { ["type"] = "approve_dependabot_pr", ["pr_number"] = 101, ["head_sha"] = headSha, ["note"] = "fixes alert 42" }.ToJsonString(),
+                new JsonObject { ["type"] = "missing_tool", ["tool"] = "alerts", ["reason"] = "alert 42 needs a tool" }.ToJsonString(),
+                new JsonObject { ["type"] = "noop", ["message"] = "alerts=2 dependabot-pr=1 auto-sec-pr=1 blocked=0 code-findings-out-of-scope=5" }.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+            ["workFiles"] = new JsonObject
+            {
+                ["sandbox/agent/logs/session.jsonl"] = "alert 42",
+                ["mcp-logs/safeoutputs.log"] = "alert 42",
+                ["proxy-logs/proxy.log"] = "alert 42",
+                ["agent-stdio.log"] = "alert 42",
+                ["agent-step-summary.md"] = "alert 42",
+                ["redacted-urls.log"] = "alert 42",
+                ["otel.jsonl"] = "alert 42",
+                ["agent_execution.json"] = "{}",
+            },
+        });
+
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Equal(["agent_execution.json", "aw-auto-sec-security-updates.patch"], result["remaining"]!.AsArray().Select(name => name!.GetValue<string>()));
+        var outputs = result["outputs"]!.AsArray().Select(line => JsonNode.Parse(line!.GetValue<string>())!).ToArray();
+        Assert.Collection(
+            outputs,
+            item => Assert.Equal("create_pull_request", item["type"]!.GetValue<string>()),
+            item => Assert.Equal(new JsonObject { ["type"] = "approve_dependabot_pr", ["pr_number"] = 101, ["head_sha"] = headSha }.ToJsonString(), item.ToJsonString()),
+            item => Assert.Equal("noop", item["type"]!.GetValue<string>()));
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("noop-free-text", "noop.message non-template-text")]
+    [InlineData("malformed-line", "line 2 malformed-output")]
+    [InlineData("approval-invalid-sha", "approve_dependabot_pr invalid-inputs")]
+    [InlineData("body-free-text", "create_pull_request.body non-template-text")]
+    public async Task AgentOutputScrubEmptiesOutputsWhenAnyTextIsOffTemplate(string scenario, string expected)
+    {
+        var body = PublicTextBody.Replace("\r\n", "\n");
+        var second = new JsonObject { ["type"] = "noop", ["message"] = "alerts=1 dependabot-pr=0 auto-sec-pr=1 blocked=0 code-findings-out-of-scope=0" }.ToJsonString();
+        switch (scenario)
+        {
+            case "noop-free-text":
+                second = new JsonObject { ["type"] = "noop", ["message"] = "Fixed alert 42 in lodash" }.ToJsonString();
+                break;
+            case "malformed-line":
+                second = "{ alert 42";
+                break;
+            case "approval-invalid-sha":
+                second = new JsonObject { ["type"] = "approve_dependabot_pr", ["pr_number"] = 101, ["head_sha"] = "alert 42" }.ToJsonString();
+                break;
+            case "body-free-text":
+                body += "\n\nThis resolves alert 42.";
+                break;
+        }
+
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["outputLines"] = new JsonArray(
+                new JsonObject { ["type"] = "create_pull_request", ["branch"] = "auto-sec/security-updates", ["title"] = "Automated dependency updates", ["body"] = body }.ToJsonString(),
+                second),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+        });
+
+        Assert.Equal([expected], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        // The failure names the field and reason only, never the rejected text.
+        var failure = Assert.Single(result["failures"]!.AsArray())!.GetValue<string>();
+        Assert.DoesNotContain("alert 42", failure, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
     [InlineData("extension/package-lock.json", "{\n  \"funding\": \"https://github.com/sponsors/y\"\n}", "{\n  \"resolved\": \"https://github.com/o/x/archive/v1.tgz\"\n}", "https://github.com/")]
     [InlineData("extension/package-lock.json", "{\n  \"resolved\": \"https://github.com/o/y/archive/v1.tgz\"\n}", "{\n  \"resolved\": \"https://github.com/o/x/archive/v1.tgz\"\n}", "")]
     [InlineData("extension/package-lock.json", "{}", "{\n  \"repository\": {\n    \"url\": \"git+https://gitlab.example/o/r.git\"\n  }\n}", "")]
+    [InlineData("extension/package-lock.json", "{\n  \"lockfileVersion\": 1,\n  \"dependencies\": {}\n}", "{\n  \"lockfileVersion\": 1,\n  \"dependencies\": {\n    \"bugs\": {\n      \"version\": \"1.0.0\",\n      \"resolved\": \"https://evil.example/bugs-1.0.0.tgz\"\n    }\n  }\n}", "https://evil.example/")]
+    [InlineData("extension/package-lock.json", "{\n  \"lockfileVersion\": 1,\n  \"dependencies\": {}\n}", "{\n  \"lockfileVersion\": 1,\n  \"dependencies\": {\n    \"funding\": { \"version\": \"1.0.0\", \"resolved\": \"https://evil.example/funding-1.0.0.tgz\" }\n  }\n}", "https://evil.example/")]
+    [InlineData("extension/package-lock.json", "{}", "{\n  \"repository\": {\n    \"url\": \"git+https://gitlab.example/o/r.git\"", "git+https://gitlab.example/")]
     [InlineData("extension/package.json", "{}", "{\n  \"dependencies\": {\n    \"bugs\": \"https://evil.example/bugs.tgz\"\n  }\n}", "https://evil.example/")]
     [InlineData("extension/package.json", "{\n  \"bugs\": {\n    \"url\": \"https://github.com/o/r/issues\"\n  },\n  \"repository\": \"https://github.com/o/r\",\n  \"dependencies\": {\n    \"x\": \"^1.0.0\"\n  }\n}", "{\n  \"bugs\": {\n    \"url\": \"https://github.com/o/r/issues\"\n  },\n  \"repository\": \"https://github.com/o/r\",\n  \"dependencies\": {\n    \"x\": \"^1.0.1\"\n  }\n}", "")]
     [InlineData("extension/package.json", "{\n  \"repository\": \"https://github.com/o/r\"\n}", "{\n  \"repository\": \"https://github.com/o/r\",\n  \"dependencies\": {\n    \"x\": \"https://github.com/o/x/archive/v1.tgz\"\n  }\n}", "https://github.com/")]
@@ -1294,6 +1398,22 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Contains("contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch')", textGateSection, StringComparison.Ordinal);
         Assert.Contains("GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}", textGateSection, StringComparison.Ordinal);
         Assert.Contains("await gate.runPublicTextGate({ core })", textGateSection, StringComparison.Ordinal);
+        // The agent artifact and run summaries are public, so the transcript must be deleted and
+        // the outputs reduced to template text before anything reads or uploads them. The gate
+        // module is copied outside the writable checkout before the agent runs.
+        Assert.Contains("name: Copy gate module for the agent output scrub", compiled, StringComparison.Ordinal);
+        var redactStep = compiled.IndexOf("name: Redact secrets in logs", StringComparison.Ordinal);
+        var scrubStep = compiled.IndexOf("name: Scrub auto-sec agent transcript and outputs", StringComparison.Ordinal);
+        Assert.True(redactStep >= 0 && scrubStep > redactStep, "Agent output scrub must run after Redact secrets in logs.");
+        foreach (var later in new[] { "name: Append agent step summary", "name: Copy Safe Outputs", "name: Ingest agent output", "name: Parse agent logs for step summary", "name: Upload agent artifacts" })
+        {
+            var laterStep = compiled.IndexOf(later, StringComparison.Ordinal);
+            Assert.True(laterStep > scrubStep, $"Agent output scrub must run before {later}.");
+        }
+        Assert.Contains("runAgentOutputScrub({ core })", compiled, StringComparison.Ordinal);
+        Assert.Contains("GH_AW_MISSING_TOOL_CREATE_ISSUE: \"false\"", compiled, StringComparison.Ordinal);
+        Assert.Contains("GH_AW_REPORT_INCOMPLETE_CREATE_ISSUE: \"false\"", compiled, StringComparison.Ordinal);
+        Assert.Contains("GH_AW_FAILURE_REPORT_AS_ISSUE: \"false\"", compiled, StringComparison.Ordinal);
         Assert.Equal(2, Regex.Matches(source, "^    patch-format: am\r?$", RegexOptions.Multiline).Count);
         var compiledPatchFormats = Regex.Matches(compiled, "patch_format\\\\\":\\\\\"([a-z]+)\\\\\"").Select(match => match.Groups[1].Value).ToArray();
         Assert.True(compiledPatchFormats.Length >= 2, "Both code-writing outputs must configure patch_format.");

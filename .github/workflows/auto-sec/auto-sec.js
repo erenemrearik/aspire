@@ -363,15 +363,33 @@ const METADATA_JSON_INLINE = new RegExp(`"${METADATA_JSON_KEYS}"\\s*:\\s*(?:"(?:
 const METADATA_JSON_OPEN = new RegExp(`"${METADATA_JSON_KEYS}"\\s*:\\s*[\\[{]\\s*$`);
 const METADATA_LOCKFILE_BASENAMES = new Set(['package-lock.json', 'npm-shrinkwrap.json']);
 const PACKAGE_JSON_METADATA_KEYS = new Set(['funding', 'repository', 'homepage', 'bugs', 'author', 'contributors', 'maintainers']);
+// A v1 package-lock.json nests packages by name under `dependencies`, so a package can be
+// named like a metadata key. Its entry carries package fields that metadata never has:
+//   "dependencies": {
+//     "bugs": { "version": "1.0.0", "resolved": "https://registry.npmjs.org/bugs/-/bugs-1.0.0.tgz" }
+//   }
+// A metadata-keyed value containing any of these keys is a package and is never dropped.
+const PACKAGE_ENTRY_KEY = /"(?:version|resolved|integrity|requires|dependencies|dev|optional|bundled|link)"\s*:/;
 
 // Removes metadata URLs from `text`. A line equal to `segmentBreak` resets the scanner, so
 // separately added runs of patch lines are never read as one contiguous JSON fragment.
-function withoutMetadataUrls(text, segmentBreak = null) {
+// A multi-line metadata value is buffered until it closes; one cut off by a segment break or
+// the end of the text is kept when `keepUnclosed` is set (the head side, where keeping is
+// strict) and dropped otherwise (the base side, where dropping is strict).
+function withoutMetadataUrls(text, segmentBreak = null, keepUnclosed = false) {
     const out = [];
     let depth = 0;
     let tomlMetadata = false;
+    let pending = null;
+    const settle = keep => {
+        if (pending) {
+            out.push(...(keep ? pending.lines : [pending.prefix]));
+            pending = null;
+        }
+    };
     for (const line of String(text ?? '').split('\n')) {
         if (line === segmentBreak) {
+            settle(keepUnclosed);
             depth = 0;
             tomlMetadata = false;
             continue;
@@ -382,6 +400,10 @@ function withoutMetadataUrls(text, segmentBreak = null) {
             const structural = line.replace(/"(?:[^"\\]|\\.)*"/g, '');
             depth += (structural.match(/[[{]/g) ?? []).length - (structural.match(/[\]}]/g) ?? []).length;
             depth = Math.max(depth, 0);
+            pending.lines.push(line);
+            if (depth === 0) {
+                settle(pending.lines.some(text => PACKAGE_ENTRY_KEY.test(text)));
+            }
             continue;
         }
         const tomlHeader = /^\s*\[\[?\s*([A-Za-z0-9_.-]+)\s*\]\]?\s*$/.exec(line);
@@ -393,14 +415,16 @@ function withoutMetadataUrls(text, segmentBreak = null) {
         if (tomlMetadata) {
             continue;
         }
-        let stripped = line.replace(METADATA_JSON_INLINE, '');
+        const stripped = line.replace(METADATA_JSON_INLINE, value => PACKAGE_ENTRY_KEY.test(value) ? value : '');
         const open = METADATA_JSON_OPEN.exec(stripped);
         if (open) {
-            stripped = stripped.slice(0, open.index);
+            pending = { prefix: stripped.slice(0, open.index), lines: [line] };
             depth = 1;
+            continue;
         }
         out.push(stripped);
     }
+    settle(keepUnclosed);
     return out.join('\n');
 }
 
@@ -418,7 +442,7 @@ function findNewSources(baseText, headText, path = '', segmentBreak = null) {
     const packageJson = text => name === 'package.json' ? packageJsonWithoutMetadata(text) : null;
     const baseSources = extractSources(packageJson(baseText) ?? withoutMetadataUrls(baseText, segmentBreak));
     const headSources = extractSources(packageJson(headText)
-        ?? (METADATA_LOCKFILE_BASENAMES.has(name) ? withoutMetadataUrls(headText, segmentBreak) : headText));
+        ?? (METADATA_LOCKFILE_BASENAMES.has(name) ? withoutMetadataUrls(headText, segmentBreak, true) : headText));
     return [...headSources]
         .filter(source => !baseSources.has(source) && !isApprovedSource(source))
         .sort();
@@ -2110,6 +2134,128 @@ async function runPublicTextGate({ core, fs = require('node:fs'), env = process.
     return { outputs: items.length, patches: names.length, violations };
 }
 
+// The blocked reason codes the prompt defines. The run summary is public, so the noop
+// report may carry only these codes and counts.
+const PUBLIC_BLOCKED_REASONS = new Set([
+    'actions-pin-requires-maintainer',
+    'auto-sec-pr-conflict',
+    'breaking-upgrade-required',
+    'no-safe-version',
+    'no-version-past-cooldown',
+    'nuget-not-mirrored',
+    'nuget-version-managed',
+    'source-build-required',
+    'unsupported-ecosystem',
+    'update-failed',
+]);
+
+// A noop report is counts only, for example:
+//   alerts=12 dependabot-pr=3 auto-sec-pr=6 blocked=3 (nuget-not-mirrored=1, breaking-upgrade-required=2) code-findings-out-of-scope=344
+// The parenthesized breakdown is omitted when nothing is blocked.
+function checkPublicNoopMessage(text) {
+    const match = /^alerts=\d{1,6} dependabot-pr=\d{1,6} auto-sec-pr=\d{1,6} blocked=\d{1,6}(?: \(([a-z-]+=\d{1,6}(?:, [a-z-]+=\d{1,6})*)\))? code-findings-out-of-scope=\d{1,6}$/.exec(String(text ?? '').trim());
+    if (!match) {
+        return false;
+    }
+    const codes = match[1] ? match[1].split(', ').map(pair => pair.split('=')[0]) : [];
+    return codes.every(code => PUBLIC_BLOCKED_REASONS.has(code)) && new Set(codes).size === codes.length;
+}
+
+// Safe-output types whose agent-authored text the conclusion job would publish in issues
+// (`missing_tool`, `missing_data`, `report_incomplete`) have no fixed template, so only
+// these types survive the scrub.
+const PUBLIC_OUTPUT_TYPES = new Set(['create_pull_request', 'push_to_pull_request_branch', 'approve_dependabot_pr', 'noop']);
+
+// Files under /tmp/gh-aw that hold the agent transcript (prompt responses, tool calls, and
+// tool output such as the private alert inputs) or agent-written summaries. The agent job
+// uploads /tmp/gh-aw as the public `agent` artifact and renders these logs into the public
+// run summary, so they are removed before either happens.
+const AGENT_TRANSCRIPT_PATHS = [
+    'sandbox/agent/logs',
+    'mcp-logs',
+    'proxy-logs',
+    'agent-stdio.log',
+    'agent-step-summary.md',
+    'redacted-urls.log',
+    'otel.jsonl',
+    'otlp-export-errors.jsonl',
+];
+
+/**
+ * Checks the raw safe-output items before they leave the agent job: every item must be a
+ * template-checked type, a `noop` must be counts only, an approval request is reduced to
+ * a valid PR number and head SHA, and PR text and patches must pass `checkPublicText`. Returns
+ * the items to keep and `{ source, reason }` violations.
+ */
+function checkAgentOutputs(lines, patches) {
+    const violations = [];
+    const kept = [];
+    for (const [index, line] of lines.entries()) {
+        let item;
+        try {
+            item = JSON.parse(line);
+        } catch {
+            violations.push({ source: `line ${index + 1}`, reason: 'malformed-output' });
+            continue;
+        }
+        if (!PUBLIC_OUTPUT_TYPES.has(item?.type)) {
+            continue;
+        }
+        if (item.type === 'noop' && !checkPublicNoopMessage(item.message)) {
+            violations.push({ source: 'noop.message', reason: 'non-template-text' });
+        } else if (item.type === 'approve_dependabot_pr') {
+            // The approval job reads only these two inputs, so anything else the item
+            // carries is dropped rather than uploaded.
+            if (!/^[1-9]\d{0,9}$/.test(String(item.pr_number ?? '')) || !/^[0-9a-f]{40}$/.test(String(item.head_sha ?? ''))) {
+                violations.push({ source: 'approve_dependabot_pr', reason: 'invalid-inputs' });
+            }
+            kept.push({ type: item.type, pr_number: item.pr_number, head_sha: item.head_sha });
+            continue;
+        }
+        kept.push(item);
+    }
+    violations.push(...checkPublicText(kept, patches));
+    return { kept, violations };
+}
+
+/**
+ * Runs in the agent job right after the built-in secret redaction, before the step
+ * summaries, the safe-output ingestion, and the `agent` artifact upload. It deletes the
+ * agent transcript, drops free-text output types, and validates the rest. When anything
+ * is off-template, it empties the safe outputs and deletes the patches so no downstream
+ * job, artifact, or summary carries the text, then fails the job naming only the field
+ * and reason.
+ */
+async function runAgentOutputScrub({ core, fs = require('node:fs'), env = process.env, workDir = '/tmp/gh-aw' }) {
+    const path = require('node:path');
+    for (const relative of AGENT_TRANSCRIPT_PATHS) {
+        fs.rmSync(path.join(workDir, relative), { recursive: true, force: true });
+    }
+    const outputPath = env.GH_AW_SAFE_OUTPUTS;
+    const lines = outputPath && fs.existsSync(outputPath)
+        ? fs.readFileSync(outputPath, 'utf8').split('\n').filter(line => line.trim() !== '')
+        : [];
+    const artifactNames = fs.existsSync(workDir) ? fs.readdirSync(workDir).filter(name => /^aw-.*\.(?:patch|bundle)$/.test(name)).sort() : [];
+    const patchNames = artifactNames.filter(name => name.endsWith('.patch'));
+    const patches = new Map(patchNames.map(name => [name, fs.readFileSync(path.join(workDir, name), 'utf8')]));
+    const { kept, violations } = checkAgentOutputs(lines, patches);
+    if (violations.length > 0) {
+        if (outputPath && fs.existsSync(outputPath)) {
+            fs.writeFileSync(outputPath, '');
+        }
+        for (const name of artifactNames) {
+            fs.rmSync(path.join(workDir, name), { force: true });
+        }
+        core.setFailed(`auto-sec agent output scrub failed: ${violations.map(v => `${v.source} ${v.reason}`).join('; ')}`);
+        return { kept: 0, dropped: lines.length, violations };
+    }
+    if (outputPath && fs.existsSync(outputPath)) {
+        fs.writeFileSync(outputPath, kept.map(item => JSON.stringify(item)).join('\n') + (kept.length > 0 ? '\n' : ''));
+    }
+    core.info(`Agent output scrub kept ${kept.length} of ${lines.length} output(s).`);
+    return { kept: kept.length, dropped: lines.length - kept.length, violations };
+}
+
 async function main(argv) {
     const [command, ecosystem, name, version] = argv;
     if (command !== 'lookup' || !ecosystem || !name || !version) {
@@ -2156,11 +2302,14 @@ module.exports = {
     parseDependabotUpdates,
     parseNuGetConfig,
     readApprovalRequests,
+    runAgentOutputScrub,
     runApprovalJob,
     runPatchContentGate,
     runPublicTextGate,
     runPushTargetGate,
+    checkAgentOutputs,
     checkPatchContents,
+    checkPublicNoopMessage,
     checkPublicText,
     selectNuGetSources,
 };

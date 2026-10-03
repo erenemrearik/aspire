@@ -79,6 +79,13 @@ pre-agent-steps:
   # Pin the exact uv release so each run executes reviewed tooling; bump deliberately.
   - name: Install uv
     run: pipx install uv==0.12.22
+  # The agent can write to the checkout, so the post-agent scrub step runs this
+  # copy of the gate module, taken before the agent starts and stored outside the
+  # agent sandbox mounts.
+  - name: Copy gate module for the agent output scrub
+    run: |
+      mkdir -p "${RUNNER_TEMP}/auto-sec-gate"
+      cp .github/workflows/auto-sec/auto-sec.js "${RUNNER_TEMP}/auto-sec-gate/auto-sec.js"
   - name: Collect alerts and Dependabot pull requests
     env:
       GH_TOKEN: ${{ github.token }}
@@ -183,12 +190,35 @@ pre-agent-steps:
       echo "Open Dependabot PRs: $(jq length .auto-sec/dependabot-prs.json)"
       echo "Open auto-sec PRs: $(jq length .auto-sec/auto-sec-prs.json)"
 
+# Runs in the agent job right after the built-in secret redaction, before the step
+# summaries, the safe-output ingestion, and the public `agent` artifact upload. The
+# agent reads private alert details, so this deletes its transcript and logs, drops
+# free-text outputs, and empties the outputs and patches if anything is off-template.
+secret-masking:
+  steps:
+    - name: Scrub auto-sec agent transcript and outputs
+      if: always()
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        GH_AW_SAFE_OUTPUTS: ${{ steps.set-runtime-paths.outputs.GH_AW_SAFE_OUTPUTS }}
+      with:
+        script: await require(`${process.env.RUNNER_TEMP}/auto-sec-gate/auto-sec.js`).runAgentOutputScrub({ core });
+
 safe-outputs:
   github-app:
     client-id: ${{ secrets.ASPIRE_BOT_APP_ID }}
     private-key: ${{ secrets.ASPIRE_BOT_PRIVATE_KEY }}
     owner: "microsoft"
     repositories: ["aspire"]
+  # These outputs carry free agent text into public issues, and the agent sees private
+  # alert details, so they are never published. The agent-job scrub also drops them.
+  missing-tool:
+    create-issue: false
+  missing-data:
+    create-issue: false
+  report-incomplete:
+    create-issue: false
+  report-failure-as-issue: false
   create-pull-request:
     max: 1
     title-prefix: "[auto-sec] "
@@ -379,8 +409,9 @@ these states:
 The pre-agent step wrote these files (read them with `cat`/`jq`):
 
 - `.auto-sec/alerts.json`: open Dependabot alerts. `malware: true` marks malware
-  alerts; they have no `first_patched_version`, and the fix is moving off the
-  flagged version (or removing the dependency if nothing else is possible).
+  alerts; they have no `first_patched_version`, and the only fix is moving to a
+  version outside every `vulnerable_ranges` entry. Never remove a dependency; if no
+  such non-breaking version exists, mark the alert `blocked: no-safe-version`.
 - `.auto-sec/code-scanning.json`: `version_alerts` are code scanning alerts tied to
   an action or package version; `other_rule_counts` are code findings that are out
   of scope for this workflow.
@@ -502,6 +533,9 @@ safe-output job rejects any other commit message, author, title, or body.
 
 ## Step 3: Report
 
-Finish with a single `noop` message containing counts only, for example:
+Finish with a single `noop` message containing counts only, in exactly this form:
 `alerts=12 dependabot-pr=3 auto-sec-pr=6 blocked=3 (nuget-not-mirrored=1, breaking-upgrade-required=2) code-findings-out-of-scope=344`.
-Do not list package names, alert numbers, or advisory ids in this message.
+Omit the parenthesized breakdown when `blocked=0`, and use only the reason codes
+defined above. Do not list package names, alert numbers, or advisory ids in this
+message; any other text fails the run. Do not emit `missing_tool`, `missing_data`,
+or `report_incomplete`; they are dropped.

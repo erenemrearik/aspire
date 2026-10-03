@@ -9,6 +9,8 @@
 //     liveCheckRuns, liveStatuses } -> { value, reviews, summary, info, warnings }
 //   { mode: "push-gate", agentItems, pr, prOverrides } -> { value, info, failures }
 //   { mode: "patch-gate", patchFiles, workspaceFiles, branchFiles } -> { value, info, failures }
+//   { mode: "public-text-gate", agentItems, patchFiles } -> { value, info, failures }
+//   { mode: "agent-scrub", outputLines, patchFiles, workFiles } -> { value, info, failures, remaining, outputs }
 // PRs may carry `head_repo` (defaults to microsoft/aspire) and `base_ref` (defaults to main).
 // Alerts may carry `vulnerable_version_range` and `advisory_ranges` (every range the
 // advisory lists for the package).
@@ -281,6 +283,33 @@ async function main() {
                 result = { value, info, failures };
             } finally {
                 fs.rmSync(root, { recursive: true, force: true });
+            }
+            break;
+        }
+        case 'agent-scrub': {
+            const info = [];
+            const failures = [];
+            const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-'));
+            const outputPath = path.join(workDir, 'outputs.jsonl');
+            fs.writeFileSync(outputPath, (request.outputLines ?? []).join('\n'));
+            for (const [name, text] of Object.entries({ ...(request.patchFiles ?? {}), ...(request.workFiles ?? {}) })) {
+                fs.mkdirSync(path.dirname(path.join(workDir, name)), { recursive: true });
+                fs.writeFileSync(path.join(workDir, name), text);
+            }
+            try {
+                const value = await gate.runAgentOutputScrub({
+                    core: { info: message => info.push(message), setFailed: message => failures.push(message) },
+                    env: { GH_AW_SAFE_OUTPUTS: outputPath },
+                    workDir,
+                });
+                const remaining = fs.readdirSync(workDir, { recursive: true })
+                    .map(name => String(name).replace(/\\/g, '/'))
+                    .filter(name => name !== 'outputs.jsonl' && fs.statSync(path.join(workDir, name)).isFile())
+                    .sort();
+                const outputs = fs.readFileSync(outputPath, 'utf8').split('\n').filter(line => line !== '');
+                result = { value, info, failures, remaining, outputs };
+            } finally {
+                fs.rmSync(workDir, { recursive: true, force: true });
             }
             break;
         }
