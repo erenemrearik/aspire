@@ -1880,7 +1880,7 @@ function gitBlobId(text) {
  * package.json, also requires the parsed documents to differ only inside dependency maps,
  * so `"preinstall": "1.0.0"` -> `"1.0.1"` fails). No file may add a package source that is
  * neither approved nor already referenced, outside package metadata, by the lines it
- * replaces or by a base candidate (see `findNewSources`). No added line may contain advisory
+ * replaces or by the exact base the diff names (see `findNewSources`). No added line may contain advisory
  * text, and comment-capable lockfiles may not gain comments. Returns `{ path, reason }` violations.
  */
 function checkPatchContents(patchText, readBaseTexts = () => []) {
@@ -1898,22 +1898,24 @@ function checkPatchContents(patchText, readBaseTexts = () => []) {
             continue;
         }
         const candidates = [...(rebuilt.get(path) ?? []), ...(readBaseTexts(path) ?? [])].filter(text => typeof text === 'string');
-        if (VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(path).toLowerCase())) {
-            const base = diff.oldBlob ? candidates.find(text => gitBlobId(text).startsWith(diff.oldBlob)) : undefined;
-            const normalizedBase = base?.replace(/\r\n/g, '\n');
-            const head = normalizedBase === undefined ? null : applyHunks(normalizedBase, diff.hunks);
-            if (head === null || !isVersionOnlyEdit(path, normalizedBase, head)) {
-                violations.push({ path, reason: 'non-version-manifest-edit' });
-            } else {
-                rebuilt.set(path, [head, ...(rebuilt.get(path) ?? [])]);
-            }
+        // Only the exact file the diff was generated from (its `index` blob ID) may authorize
+        // anything: a stale auto-sec branch copy must not vouch for a patch based on main.
+        const base = diff.oldBlob ? candidates.find(text => gitBlobId(text).startsWith(diff.oldBlob)) : undefined;
+        const normalizedBase = base?.replace(/\r\n/g, '\n');
+        const head = normalizedBase === undefined ? null : applyHunks(normalizedBase, diff.hunks);
+        if (VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(path).toLowerCase())
+            && (head === null || !isVersionOnlyEdit(path, normalizedBase, head))) {
+            violations.push({ path, reason: 'non-version-manifest-edit' });
+        } else if (head !== null) {
+            rebuilt.set(path, [head, ...(rebuilt.get(path) ?? [])]);
         }
         // Each block's added lines are contiguous in the new file; the break line keeps the
         // metadata scanner from reading separate blocks (or files) as one JSON fragment.
+        // Without a matching base, only the lines the diff replaces can vouch for a source.
         const segmentBreak = '\0';
         const removed = diff.blocks.map(block => block.removed.join('\n')).join(`\n${segmentBreak}\n`);
         const added = diff.blocks.map(block => block.added.join('\n')).join(`\n${segmentBreak}\n`);
-        if (findNewSources([...candidates, removed].join(`\n${segmentBreak}\n`), added, path, segmentBreak).length > 0) {
+        if (findNewSources([...(normalizedBase === undefined ? [] : [normalizedBase]), removed].join(`\n${segmentBreak}\n`), added, path, segmentBreak).length > 0) {
             violations.push({ path, reason: 'new-package-source' });
         }
         // The patch becomes public, so no added line may carry advisory text, and lockfiles,

@@ -445,6 +445,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("extension/package.json", PackageJsonBase, "  \"scripts\": {", "  \"scripts\": {\n    \"postinstall\": \"node x.js\",", "workspace", "non-version-manifest-edit")]
     [InlineData("pyproject.toml", PyprojectBase, "command = \"tool --level=1\"", "command = \"tool --level=2\"", "workspace", "non-version-manifest-edit")]
     [InlineData("extension/package-lock.json", PackageLockBase, "      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\"", "      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"", "workspace", "new-package-source")]
+    [InlineData("extension/package-lock.json", PackageLockBase, "      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\"", "      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"", "workspace-with-stale-branch", "new-package-source")]
     public async Task PatchContentGateChecksEveryChangedLine(string path, string baseText, string oldLine, string newLine, string baseLocation, string expectedReason)
     {
         // One-line replacement hunk with a context line on each side, applied at the real
@@ -468,6 +469,12 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 break;
             case "branch":
                 request["branchFiles"] = new JsonObject { [path] = baseText };
+                break;
+            case "workspace-with-stale-branch":
+                // The auto-sec branch copy already references the new source, but the patch
+                // is based on the workspace copy, so the branch copy must not authorize it.
+                request["workspaceFiles"] = new JsonObject { [path] = baseText };
+                request["branchFiles"] = new JsonObject { [path] = baseText + "{\"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"}\n" };
                 break;
             case "stale":
                 // The checked-out file no longer matches the blob the patch was made from.
@@ -526,7 +533,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         var lines = addedLines.Split('\n');
         var body = string.Join('\n', lines.Select(line => line.Trim().Length == 0 ? line : $"+{line}"));
         var contextCount = lines.Count(line => line.Trim().Length == 0);
-        var patch = $"diff --git a/extension/package-lock.json b/extension/package-lock.json\nindex 1111111..2222222 100644\n--- a/extension/package-lock.json\n+++ b/extension/package-lock.json\n@@ -1,{contextCount + 1} +1,{lines.Length + 1} @@\n   \"packages\": {{\n{body}\n";
+        var patch = $"diff --git a/extension/package-lock.json b/extension/package-lock.json\nindex {(baseText is null ? "1111111" : GitBlobId(baseText)[..7])}..2222222 100644\n--- a/extension/package-lock.json\n+++ b/extension/package-lock.json\n@@ -1,{contextCount + 1} +1,{lines.Length + 1} @@\n   \"packages\": {{\n{body}\n";
         var request = new JsonObject
         {
             ["mode"] = "patch-gate",
