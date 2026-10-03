@@ -1,0 +1,76 @@
+{
+  "run_id": 37094416834,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/37094416834",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-03T04:36:18Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20694,
+    "title": "Render terminal footer F6 shortcut as a keyboard key",
+    "author": "JamesNK",
+    "state": "closed",
+    "head_branch": "jamesnk/terminal-footer-keycap",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20694",
+    "merged_at": "2026-10-03T03:48:15Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "472be2166d6cf40f7b981561e3d4902a5ff50487",
+    "failed_sha": "013ad14a2b4f4f1a2114c42f9854bc13bdc4951c",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "9c2163ab31847d196039757af12063a6dddf6d16",
+        "message": "Reduce AppHost log noise for CLI connections and readiness checks (#20542) ## Description Reduce routine AppHost diagnostic noise produced by CLI connections and repeated dashboard readiness checks: - Move expected auxiliary backchannel connections, disconnects, and shutdown cancellations from Debug to Trace. Expected connection resets no longer attach exception stack traces; unexpected failures still log as errors. - Avoid emitting wait/finished Debug messages when a resource is already healthy",
+        "html_url": "https://github.com/microsoft/aspire/commit/9c2163ab31847d196039757af12063a6dddf6d16",
+        "pull_request": {
+          "number": 20542,
+          "title": "Reduce AppHost log noise for CLI connections and readiness checks",
+          "url": "https://github.com/microsoft/aspire/pull/20542",
+          "merged_at": "2026-10-03T01:24:27Z"
+        }
+      },
+      {
+        "sha": "013ad14a2b4f4f1a2114c42f9854bc13bdc4951c",
+        "message": "Render terminal footer F6 shortcut as a keyboard key (#20694)",
+        "html_url": "https://github.com/microsoft/aspire/commit/013ad14a2b4f4f1a2114c42f9854bc13bdc4951c",
+        "pull_request": {
+          "number": 20694,
+          "title": "Render terminal footer F6 shortcut as a keyboard key",
+          "url": "https://github.com/microsoft/aspire/pull/20694",
+          "merged_at": "2026-10-03T03:48:15Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Hosting.DevTunnels.Tests, Hosting.DevTunnels, Hosting.DevTunnel... / Hosting.DevTunnels (windows-latest)",
+      "id": 111121689813,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37094416834/job/111121689813",
+      "classification": "flaky-test",
+      "reason": "Single test DcpStartupPublishesDevTunnelUrls failed with TaskCanceledException during DistributedApplication.StopAsync shutdown; 70/71 tests in the project passed, matching a known recurring host-shutdown-timeout flakiness pattern unrelated to the merged PR (a terminal footer UI change).",
+      "failed_steps": [
+        "Run tests (Windows)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Hosting.DevTunnels.Tests.DevTunnelResourceBuilderExtensionsTests.DcpStartupPublishesDevTunnelUrls",
+      "job": "Tests / No-package tests (regular, Aspire.Hosting.DevTunnels.Tests, Hosting.DevTunnels, Hosting.DevTunnel... / Hosting.DevTunnels (windows-latest)",
+      "error": "System.Threading.Tasks.TaskCanceledException : A task was canceled.",
+      "stack_trace": "at Microsoft.Extensions.Hosting.Internal.Host.ForeachService[T](IEnumerable`1 services, CancellationToken token, Boolean concurrent, Boolean abortOnFirstException, List`1 exceptions, Func`3 operation)\n   at Microsoft.Extensions.Hosting.Internal.Host.StopAsync(CancellationToken cancellationToken)\n   at Aspire.Hosting.DistributedApplication.StopAsync(CancellationToken cancellationToken) in /_/src/Aspire.Hosting/DistributedApplication.cs:line 497\n   at Aspire.Hosting.DevTunnels.Tests.DevTunnelResourceBuilderExtensionsTests.DcpStartupPublishesDevTunnelUrls() in D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.DevTunnels.Tests\\DevTunnelResourceBuilderExtensionsTests.cs:line 737\n--- End of stack trace from previous location ---",
+      "standard_output": "",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "TaskCanceledException occurs during host shutdown (StopAsync), not in test assertion logic; matches a known recurring shutdown-timeout flakiness pattern seen across multiple unrelated test suites, and the merged PR only touched terminal footer UI rendering."
+    }
+  ],
+  "causes": [
+    "aspire-hosting-devtunnels-dcpstartup-stopasync-taskcanceled"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "aspire-hosting-devtunnels-dcpstartup-stopasync-taskcanceled",
+  "type": "flaky-test",
+  "title": "Flaky: DevTunnelResourceBuilderExtensionsTests.DcpStartupPublishesDevTunnelUrls times out with TaskCanceledException in DistributedApplication.StopAsync",
+  "test_name": "Aspire.Hosting.DevTunnels.Tests.DevTunnelResourceBuilderExtensionsTests.DcpStartupPublishesDevTunnelUrls",
+  "error_pattern": "System.Threading.Tasks.TaskCanceledException : A task was canceled.\n   at Microsoft.Extensions.Hosting.Internal.Host.ForeachService[T]\n   at Microsoft.Extensions.Hosting.Internal.Host.StopAsync\n   at Aspire.Hosting.DistributedApplication.StopAsync",
+  "occurrences": [
+    {
+      "run_id": 37094416834,
+      "run_url": "https://github.com/microsoft/aspire/actions/runs/37094416834",
+      "job": "Tests / No-package tests (regular, Aspire.Hosting.DevTunnels.Tests, Hosting.DevTunnels, Hosting.DevTunnel... / Hosting.DevTunnels (windows-latest)",
+      "pr_number": 0,
+      "observed_at": "2026-10-03T04:36:18Z"
+    }
+  ]
+}
