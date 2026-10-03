@@ -5,7 +5,8 @@
 //   { mode: "call", fn, args }                    -> { value }
 //   { mode: "lookup", ecosystem, name, version, now, responses, nugetConfigText } -> { value, urls }
 //   { mode: "approve", now, staged, agentItems, pr, prOverrides, files, contents, alerts,
-//     malwareNumbers, checkRuns, statuses, reviews, responses, liveHeadSha, liveBaseRef, liveDraft } -> { value, reviews, summary, info, warnings }
+//     malwareNumbers, checkRuns, statuses, reviews, responses, liveHeadSha, liveBaseRef, liveDraft,
+//     liveCheckRuns, liveStatuses } -> { value, reviews, summary, info, warnings }
 //   { mode: "push-gate", agentItems, pr, prOverrides } -> { value, info, failures }
 //   { mode: "patch-gate", patchFiles, workspaceFiles } -> { value, info, failures }
 // PRs may carry `head_repo` (defaults to microsoft/aspire) and `base_ref` (defaults to main).
@@ -42,11 +43,14 @@ function createFetch(responses, urls) {
 function createGitHub(request, created) {
     const notFound = () => Object.assign(new Error('Not Found'), { status: 404 });
     const getCalls = new Map();
+    let checkCalls = 0;
+    let statusCalls = 0;
     const pages = {
         files: () => request.files.map(filename => ({ filename, status: 'modified' })),
         commits: () => (request.commits ?? [{ author_login: 'dependabot[bot]', verified: true }])
             .map(commit => ({ author: { login: commit.author_login }, commit: { verification: { verified: commit.verified } } })),
-        checks: () => request.checkRuns ?? [],
+        // `liveCheckRuns` / `liveStatuses` simulate CI changing after the gates read it.
+        checks: () => (++checkCalls > 1 && request.liveCheckRuns) ? request.liveCheckRuns : (request.checkRuns ?? []),
         reviews: () => (request.reviews ?? []).map(review => ({ user: { login: review.user_login }, state: review.state, commit_id: review.commit_id })),
     };
     const rest = {
@@ -95,7 +99,9 @@ function createGitHub(request, created) {
                 }
                 return { data: request.contents[key] };
             },
-            getCombinedStatusForRef: async () => ({ data: { statuses: request.statuses ?? [] } }),
+            getCombinedStatusForRef: async () => ({
+                data: { statuses: (++statusCalls > 1 && request.liveStatuses) ? request.liveStatuses : (request.statuses ?? []) },
+            }),
         },
     };
     const paginate = async (route, params) => {

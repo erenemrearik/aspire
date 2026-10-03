@@ -311,7 +311,8 @@ function sourceKey(scheme, host, port, path) {
 // `HTTPS://Registry.Example.com/` is matched and keyed like its lowercase form.
 function extractSources(text) {
     const sources = new Set();
-    for (const match of String(text ?? '').matchAll(/\b(https?|git\+https?|git\+ssh|git|ssh):\/\/(?:[^@/\s"']+@)?([A-Za-z0-9.-]+)(?::(\d+))?(\/[^\s"'<>]*)?/gi)) {
+    // Hosts are DNS names, IPv4 literals, or bracketed IPv6 literals (`https://[2001:db8::1]/`).
+    for (const match of String(text ?? '').matchAll(/\b(https?|git\+https?|git\+ssh|git|ssh):\/\/(?:[^@/\s"']+@)?(\[[0-9A-Fa-f:.]+(?:%[0-9A-Za-z._~-]+)?\]|[A-Za-z0-9.-]+)(?::(\d+))?(\/[^\s"'<>]*)?/gi)) {
         sources.add(sourceKey(match[1], match[2], match[3], match[4] ?? '/'));
     }
     return sources;
@@ -902,7 +903,9 @@ function coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents,
  * alerted package from it, as when a parent upgrade drops a vulnerable transitive
  * dependency. `manifestVersionChanges` only reports versions present on head, so removals
  * are proven here instead. The base must carry the package; otherwise an empty head
- * result could just mean the manifest format is not parsed.
+ * result could just mean the manifest format is not parsed. The head manifest must also
+ * still exist and parse to at least one package: a deleted, emptied, or malformed file
+ * reads as zero occurrences too, and that is not a removal.
  */
 function alertPackageRemoved(alert, ecosystem, baseContents, headContents) {
     if (alert.ecosystem !== ecosystem) {
@@ -912,8 +915,39 @@ function alertPackageRemoved(alert, ecosystem, baseContents, headContents) {
     if (!alertPath || !Object.hasOwn(headContents ?? {}, alertPath) || !Object.hasOwn(baseContents ?? {}, alertPath)) {
         return false;
     }
+    const headText = headContents[alertPath];
+    const reader = manifestReader(alertPath);
+    if (!reader || typeof headText !== 'string' || !headText.trim()
+        || (alertPath.toLowerCase().endsWith('.json') && readJson(headText) === null)
+        || reader(headText).length === 0) {
+        return false;
+    }
     return manifestPackageVersions(alertPath, baseContents[alertPath], ecosystem, alert.package).length > 0
-        && manifestPackageVersions(alertPath, headContents[alertPath], ecosystem, alert.package).length === 0;
+        && manifestPackageVersions(alertPath, headText, ecosystem, alert.package).length === 0;
+}
+
+// Reasons the head commit's CI is not green: no check runs, any unfinished or
+// unsuccessful check run, or any commit status other than success.
+function ciReasons(checkRuns, statuses) {
+    const reasons = [];
+    if (!checkRuns.length) {
+        reasons.push('no-checks');
+    }
+    if (checkRuns.some(run => run.status !== 'completed' || !SUCCESSFUL_CHECK_CONCLUSIONS.has(run.conclusion))) {
+        reasons.push('checks-not-green');
+    }
+    if (statuses.some(status => status.state !== 'success')) {
+        reasons.push('statuses-not-green');
+    }
+    return reasons;
+}
+
+async function fetchCiState(github, owner, repo, sha) {
+    const checkRuns = (await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: sha, per_page: 100 }))
+        .map(run => ({ name: run.name, status: run.status, conclusion: run.conclusion }));
+    const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ owner, repo, ref: sha });
+    const statuses = (combined.statuses ?? []).map(status => ({ context: status.context, state: status.state }));
+    return { checkRuns, statuses };
 }
 
 /**
@@ -1020,15 +1054,7 @@ function evaluateApprovalGates(input) {
         reasons.push('fixes-no-open-alert');
     }
 
-    if (!checkRuns.length) {
-        reasons.push('no-checks');
-    }
-    if (checkRuns.some(run => run.status !== 'completed' || !SUCCESSFUL_CHECK_CONCLUSIONS.has(run.conclusion))) {
-        reasons.push('checks-not-green');
-    }
-    if (statuses.some(status => status.state !== 'success')) {
-        reasons.push('statuses-not-green');
-    }
+    reasons.push(...ciReasons(checkRuns, statuses));
 
     if (reviews.some(review => review.user_login === botLogin && review.state === 'APPROVED' && review.commit_id === pr.head_sha)) {
         reasons.push('already-approved');
@@ -1331,10 +1357,7 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
         alert.malware = malwareNumbers.has(alert.number);
     }
 
-    const checkRuns = (await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head_sha, per_page: 100 }))
-        .map(run => ({ name: run.name, status: run.status, conclusion: run.conclusion }));
-    const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ owner, repo, ref: pr.head_sha });
-    const statuses = (combined.statuses ?? []).map(status => ({ context: status.context, state: status.state }));
+    const { checkRuns, statuses } = await fetchCiState(github, owner, repo, pr.head_sha);
 
     const reviews = (await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: pr.number, per_page: 100 }))
         .map(review => ({ user_login: review.user?.login ?? '', state: review.state, commit_id: review.commit_id }));
@@ -1418,6 +1441,15 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
                 result = { ...result, decision: 'skip', reasons: ['not-open'] };
             } else if (live.base?.ref !== BASE_BRANCH) {
                 result = { ...result, decision: 'skip', reasons: ['wrong-base-branch'] };
+            } else {
+                // CI was read before the registry lookups; a re-run or late status can turn
+                // the same SHA pending or red in the meantime, so read it again right before
+                // the review is submitted.
+                const liveCi = await fetchCiState(github, owner, repo, request.headSha);
+                const ci = ciReasons(liveCi.checkRuns, liveCi.statuses);
+                if (ci.length > 0) {
+                    result = { ...result, decision: 'skip', reasons: ci };
+                }
             }
         }
         if (result.decision === 'approve') {

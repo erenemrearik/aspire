@@ -75,6 +75,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("head-sha-mismatch-after-gates")]
     [InlineData("wrong-base-branch-after-gates")]
     [InlineData("not-open-after-gates")]
+    [InlineData("checks-not-green-after-gates")]
+    [InlineData("statuses-not-green-after-gates")]
     [InlineData("no-checks")]
     [InlineData("checks-not-green")]
     [InlineData("statuses-not-green")]
@@ -228,6 +230,16 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 // The PR is converted to draft after the gates pass.
                 expectedReason = "not-open";
                 scenario["liveDraft"] = true;
+                break;
+            case "checks-not-green-after-gates":
+                // A check is re-run after the gates pass but before the review is submitted.
+                expectedReason = "checks-not-green";
+                scenario["liveCheckRuns"] = new JsonArray(new JsonObject { ["name"] = "tests", ["status"] = "in_progress", ["conclusion"] = null });
+                break;
+            case "statuses-not-green-after-gates":
+                // A commit status turns red after the gates pass.
+                expectedReason = "statuses-not-green";
+                scenario["liveStatuses"] = new JsonArray(new JsonObject { ["context"] = "license/cla", ["state"] = "failure" });
                 break;
             case "malware-requires-review":
                 scenario["malwareNumbers"] = new JsonArray(7);
@@ -493,6 +505,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("git://github.com:9418/a/b.git", "git://github.com/")]
     [InlineData("HTTPS://Registry.Example.com/a.tgz", "https://registry.example.com/")]
     [InlineData("HTTPS://REGISTRY.NPMJS.ORG/a/-/a-1.0.0.tgz", "")]
+    [InlineData("https://[2001:db8::1]/a/-/a-1.0.0.tgz", "https://[2001:db8::1]/")]
+    [InlineData("https://user@[2001:DB8::1]:8443/a.tgz", "https://[2001:db8::1]:8443/")]
     public async Task FindsPackageSourcesAddedOnHead(string headUrl, string expected)
     {
         var result = await RunHarnessAsync(new JsonObject
@@ -780,6 +794,31 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         });
 
         Assert.Equal([1, 4, 9, 10], result["value"]!.AsArray().Select(n => n!.GetValue<int>()));
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("""{"lockfileVersion":3,"packages":{"":{"name":"app"},"node_modules/lodash":{"version":"4.17.21"}}}""", true)]
+    [InlineData("""{"lockfileVersion":3,"packages":{"node_modules/lodash":""", false)]
+    [InlineData("", false)]
+    [InlineData("{}", false)]
+    public async Task CoversRemovalOnlyWhenHeadManifestParses(string headText, bool expected)
+    {
+        var alerts = new JsonArray(
+            new JsonObject { ["number"] = 1, ["ecosystem"] = "npm", ["package"] = "left-pad", ["manifest_path"] = "app/package-lock.json", ["first_patched_version"] = "1.3.1", ["malware"] = false });
+        var baseContents = new JsonObject
+        {
+            ["app/package-lock.json"] = """{"lockfileVersion":3,"packages":{"":{"name":"app"},"node_modules/lodash":{"version":"4.17.20"},"node_modules/left-pad":{"version":"1.3.0"}}}""",
+        };
+
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "coveredAlerts",
+            ["args"] = new JsonArray(alerts, "npm", new JsonArray(), new JsonArray(), new JsonObject { ["app/package-lock.json"] = headText }, baseContents),
+        });
+
+        Assert.Equal(expected ? new[] { 1 } : Array.Empty<int>(), result["value"]!.AsArray().Select(n => n!.GetValue<int>()));
     }
 
     [Fact]
