@@ -120,7 +120,7 @@ await sqlServer.withRepl({
 Set `Command` to an executable script inside the container to run work before and after the interactive
 SQL session. For example, place these two files in a `sql` directory under the AppHost directory.
 
-**`sql\Dockerfile`**
+**`sql/Dockerfile`**
 
 ```dockerfile
 FROM mcr.microsoft.com/mssql/server:2022-latest
