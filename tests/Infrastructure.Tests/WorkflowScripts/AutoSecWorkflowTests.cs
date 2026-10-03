@@ -73,6 +73,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("fixes-no-open-alert-later-vulnerable-range")]
     [InlineData("head-sha-mismatch-after-gates")]
     [InlineData("wrong-base-branch-after-gates")]
+    [InlineData("not-open-after-gates")]
     [InlineData("no-checks")]
     [InlineData("checks-not-green")]
     [InlineData("statuses-not-green")]
@@ -216,6 +217,11 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 expectedReason = "wrong-base-branch";
                 scenario["liveBaseRef"] = "release/13.3";
                 break;
+            case "not-open-after-gates":
+                // The PR is converted to draft after the gates pass.
+                expectedReason = "not-open";
+                scenario["liveDraft"] = true;
+                break;
             case "malware-requires-review":
                 scenario["malwareNumbers"] = new JsonArray(7);
                 break;
@@ -340,6 +346,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("1.0.0-rc.1", "1.0.0", -1)]
     [InlineData("1.0.0-rc.10", "1.0.0-rc.9", 1)]
     [InlineData("1.0.0-rc.1", "1.0.0-rc.1", 0)]
+    [InlineData("1.0.0-9007199254740992", "1.0.0-9007199254740993", -1)]
+    [InlineData("9007199254740993.0.0", "9007199254740992.0.0", 1)]
     public async Task ComparesPrereleaseVersionsBySemVerPrecedence(string left, string right, int expected)
     {
         var result = await RunHarnessAsync(new JsonObject
@@ -392,6 +400,30 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
         var decision = Assert.Single(result["value"]!.AsArray());
         Assert.Equal("approve", decision!["decision"]!.GetValue<string>());
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task ApprovesPrThatRemovesAlertedTransitivePackage()
+    {
+        var scenario = CreateApprovalScenario();
+        scenario["contents"]!["extension/yarn.lock@base"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("minimist", "1.2.5");
+        scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21");
+        scenario["alerts"]!.AsArray().Add(new JsonObject
+        {
+            ["number"] = 8,
+            ["ecosystem"] = "npm",
+            ["package"] = "minimist",
+            ["manifest_path"] = "extension/yarn.lock",
+            ["vulnerable_version_range"] = "< 1.2.6",
+            ["first_patched_version"] = "1.2.6",
+        });
+
+        var result = await RunHarnessAsync(scenario);
+
+        var decision = Assert.Single(result["value"]!.AsArray());
+        Assert.Equal("approve", decision!["decision"]!.GetValue<string>());
+        Assert.Equal([7, 8], decision["fixedAlerts"]!.AsArray().Select(n => n!.GetValue<int>()));
     }
 
     [Fact]
@@ -600,25 +632,35 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             new JsonObject { ["number"] = 6, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "nested/yarn.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
             new JsonObject { ["number"] = 8, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "nested/yarn.lock", ["first_patched_version"] = null, ["malware"] = true },
             // Only the lockfile diff moves minimist, so it is covered through versionChanges.
-            new JsonObject { ["number"] = 9, ["ecosystem"] = "npm", ["package"] = "minimist", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = "1.2.6", ["malware"] = false });
+            new JsonObject { ["number"] = 9, ["ecosystem"] = "npm", ["package"] = "minimist", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = "1.2.6", ["malware"] = false },
+            // The PR drops left-pad from app/, which fixes the alert by removal.
+            new JsonObject { ["number"] = 10, ["ecosystem"] = "npm", ["package"] = "left-pad", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = "1.3.1", ["malware"] = false },
+            // other/ still carries left-pad, so that alert stays open.
+            new JsonObject { ["number"] = 11, ["ecosystem"] = "npm", ["package"] = "left-pad", ["manifest_path"] = "other/yarn.lock", ["first_patched_version"] = "1.3.1", ["malware"] = false });
         var updates = new JsonArray(new JsonObject { ["name"] = "lodash", ["from"] = "4.17.20", ["to"] = "4.17.21" });
         var versionChanges = new JsonArray(new JsonObject { ["name"] = "minimist", ["from"] = new JsonArray("1.2.5"), ["to"] = "1.2.8" });
         var headContents = new JsonObject
         {
             ["app/yarn.lock"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("minimist", "1.2.8"),
-            ["other/yarn.lock"] = YarnLockEntry("lodash", "4.17.20"),
+            ["other/yarn.lock"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("left-pad", "1.3.0"),
             // A nested copy keeps the vulnerable version, so neither alert in nested/ is covered.
             ["nested/yarn.lock"] = YarnLockEntry("lodash", "4.17.21") + YarnLockEntry("lodash", "4.17.20"),
+        };
+        var baseContents = new JsonObject
+        {
+            ["app/yarn.lock"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("minimist", "1.2.5") + YarnLockEntry("left-pad", "1.3.0"),
+            ["other/yarn.lock"] = YarnLockEntry("lodash", "4.17.20") + YarnLockEntry("left-pad", "1.3.0"),
+            ["nested/yarn.lock"] = YarnLockEntry("lodash", "4.17.20"),
         };
 
         var result = await RunHarnessAsync(new JsonObject
         {
             ["mode"] = "call",
             ["fn"] = "coveredAlerts",
-            ["args"] = new JsonArray(alerts, "npm", updates, versionChanges, headContents),
+            ["args"] = new JsonArray(alerts, "npm", updates, versionChanges, headContents, baseContents),
         });
 
-        Assert.Equal([1, 4, 9], result["value"]!.AsArray().Select(n => n!.GetValue<int>()));
+        Assert.Equal([1, 4, 9, 10], result["value"]!.AsArray().Select(n => n!.GetValue<int>()));
     }
 
     [Fact]
@@ -824,7 +866,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Equal(
             ["head_sha", "pr_number"],
             Regex.Matches(approvalInputs, "^        ([a-z_]+):\r?$", RegexOptions.Multiline).Select(match => match.Groups[1].Value).Order(StringComparer.Ordinal));
-        Assert.Contains("covered_alerts: m.coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents)", source, StringComparison.Ordinal);
+        Assert.Contains("covered_alerts: m.coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents, baseContents)", source, StringComparison.Ordinal);
         Assert.Contains("gh pr list --repo \"${REPO}\" --author \"app/dependabot\" --state open --base main", source, StringComparison.Ordinal);
 
         // push-to-pull-request-branch has no branch filter, so a deterministic gate step must

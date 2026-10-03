@@ -145,13 +145,15 @@ pre-agent-steps:
           const updates = m.parseDependabotUpdates(pr.title, pr.body);
           const files = (pr.files ?? []).map(f => f.path);
           const headContents = {};
+          const baseContents = {};
           const versionChanges = [];
           for (const path of files.filter(m.isAllowedManifest)) {
             const text = headText(path, pr.headRefOid);
             if (text !== null) {
               headContents[path] = text;
+              baseContents[path] = headText(path, pr.baseRefOid) ?? "";
               if (ecosystem && ecosystem !== "actions") {
-                versionChanges.push(...m.manifestVersionChanges(path, headText(path, pr.baseRefOid) ?? "", text, ecosystem));
+                versionChanges.push(...m.manifestVersionChanges(path, baseContents[path], text, ecosystem));
               }
             }
           }
@@ -164,7 +166,7 @@ pre-agent-steps:
             ecosystem,
             updates,
             files,
-            covered_alerts: m.coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents),
+            covered_alerts: m.coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents, baseContents),
             checks: { total: rollup.length, green: rollup.filter(c => ok.has(String(state(c)).toUpperCase())).length },
           };
         });
@@ -412,9 +414,13 @@ Skip alerts the existing auto-sec PR already fixes.
   `npm` or `yarn` in a pnpm directory; they would write a second lockfile.
 - **pip** (`uv.lock`): in the project directory run
   `uv lock --upgrade-package <name>==<version>`.
-- **nuget** (`Directory.Packages.props`): update the `PackageVersion` entry only
-  when the lookup reports `available_on_approved_feed: true`. Otherwise mark the
-  alert `blocked: nuget-not-mirrored`. Never add a feed.
+- **nuget** (`Directory.Packages.props`): update a `PackageVersion` entry only
+  when its `Version` is a literal and the lookup reports
+  `available_on_approved_feed: true`. If the `Version` is an MSBuild property
+  (for example `$(MicrosoftExtensionsAIVersion)`), the version is shared or flows
+  from Arcade dependency flow through `eng/Versions.props`; do not replace it with
+  a literal. Mark the alert `blocked: nuget-version-managed`. Otherwise, if the
+  version is not mirrored, mark it `blocked: nuget-not-mirrored`. Never add a feed.
 - **actions** and version-mapped code scanning alerts: do not edit workflow
   files. Mark them `blocked: actions-pin-requires-maintainer`; action pins must be
   updated together with the repository Actions allow-list.

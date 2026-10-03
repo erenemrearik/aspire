@@ -88,7 +88,8 @@ function parseVersion(value) {
     }
 
     return {
-        parts: [match[1], match[2], match[3], match[4]].map(part => (part === undefined ? 0 : Number(part))),
+        // BigInt keeps components above Number.MAX_SAFE_INTEGER distinct.
+        parts: [match[1], match[2], match[3], match[4]].map(part => (part === undefined ? 0n : BigInt(part))),
         prerelease: match[5] ?? '',
     };
 }
@@ -131,9 +132,10 @@ function comparePrerelease(left, right) {
         const aNumeric = /^\d+$/.test(a[i]);
         const bNumeric = /^\d+$/.test(b[i]);
         if (aNumeric && bNumeric) {
-            const difference = Number(a[i]) - Number(b[i]);
-            if (difference !== 0) {
-                return difference < 0 ? -1 : 1;
+            const aValue = BigInt(a[i]);
+            const bValue = BigInt(b[i]);
+            if (aValue !== bValue) {
+                return aValue < bValue ? -1 : 1;
             }
         } else if (aNumeric !== bNumeric) {
             return aNumeric ? -1 : 1;
@@ -160,7 +162,7 @@ function isBreakingChange(from, to) {
     if (aMajor !== bMajor) {
         return true;
     }
-    if (aMajor === 0 && aMinor !== bMinor) {
+    if (aMajor === 0n && aMinor !== bMinor) {
         return true;
     }
     return compareVersions(from, to) !== -1;
@@ -748,20 +750,41 @@ function inVulnerableRanges(version, ranges) {
  * when every occurrence of the flagged package in the alert's own manifest is the PR's new
  * version, and the approval gate still leaves those PRs to a human reviewer. Candidates
  * include `versionChanges` from the manifest diff, so a transitive upgrade that only
- * appears in a regenerated lockfile still counts.
+ * appears in a regenerated lockfile still counts, and so does a PR that drops the
+ * alerted package from the alert's manifest entirely.
  */
-function coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents) {
+function coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents, baseContents) {
     if (!ecosystem) {
         return [];
     }
     const candidates = [...updates, ...versionChanges];
     return (alerts ?? [])
-        .filter(alert => candidates.some(update => alert.malware
-            ? updateMatchesAlert(alert, ecosystem, update)
-                && alertManifestCarries(alert, ecosystem, update, headContents, version => sameVersion(version, update.to))
-            : alertFixedByUpdate(alert, ecosystem, update, headContents)))
+        .filter(alert => alertPackageRemoved(alert, ecosystem, baseContents, headContents)
+            || candidates.some(update => alert.malware
+                ? updateMatchesAlert(alert, ecosystem, update)
+                    && alertManifestCarries(alert, ecosystem, update, headContents, version => sameVersion(version, update.to))
+                : alertFixedByUpdate(alert, ecosystem, update, headContents)))
         .map(alert => alert.number)
         .sort((a, b) => a - b);
+}
+
+/**
+ * True when the PR changes the alert's own manifest and removes every occurrence of the
+ * alerted package from it, as when a parent upgrade drops a vulnerable transitive
+ * dependency. `manifestVersionChanges` only reports versions present on head, so removals
+ * are proven here instead. The base must carry the package; otherwise an empty head
+ * result could just mean the manifest format is not parsed.
+ */
+function alertPackageRemoved(alert, ecosystem, baseContents, headContents) {
+    if (alert.ecosystem !== ecosystem) {
+        return false;
+    }
+    const alertPath = String(alert.manifest_path ?? '').replace(/^\.?\/+/, '');
+    if (!alertPath || !Object.hasOwn(headContents ?? {}, alertPath) || !Object.hasOwn(baseContents ?? {}, alertPath)) {
+        return false;
+    }
+    return manifestPackageVersions(alertPath, baseContents[alertPath], ecosystem, alert.package).length > 0
+        && manifestPackageVersions(alertPath, headContents[alertPath], ecosystem, alert.package).length === 0;
 }
 
 /**
@@ -773,6 +796,7 @@ function coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents)
 function evaluateApprovalGates(input) {
     const reasons = [];
     const { pr, expectedHeadSha, files, alerts, checkRuns, statuses, sourceChanges, headContents, packageInfo, reviews, now } = input;
+    const baseContents = input.baseContents ?? {};
     const botLogin = input.botLogin ?? DEFAULT_BOT_LOGIN;
 
     if (pr.user_login !== DEPENDABOT_LOGIN) {
@@ -838,17 +862,21 @@ function evaluateApprovalGates(input) {
 
     // Malware alerts have no patched version, so no version check can prove the update
     // removes the flagged release. Fail closed and leave any PR touching one to a human,
-    // including packages changed only by lockfile regeneration.
+    // including packages changed only by lockfile regeneration or removed outright.
     const touched = [...updates, ...versionChanges];
-    if (ecosystem && alerts.some(alert => alert.malware && touched.some(update => updateMatchesAlert(alert, ecosystem, update)))) {
+    if (ecosystem && alerts.some(alert => alert.malware
+        && (touched.some(update => updateMatchesAlert(alert, ecosystem, update))
+            || alertPackageRemoved(alert, ecosystem, baseContents, headContents)))) {
         reasons.push('malware-requires-review');
     }
 
     // Lockfile-only changes count too: a regenerated lockfile can upgrade the alerted
-    // package transitively without the PR body listing it.
+    // package transitively without the PR body listing it, or drop it entirely.
     const fixedAlerts = ecosystem
         ? alerts
-            .filter(alert => touched.some(update => alertFixedByUpdate(alert, ecosystem, update, headContents)))
+            .filter(alert => !alert.malware && (
+                touched.some(update => alertFixedByUpdate(alert, ecosystem, update, headContents))
+                || alertPackageRemoved(alert, ecosystem, baseContents, headContents)))
             .map(alert => alert.number)
             .sort((a, b) => a - b)
         : [];
@@ -1136,12 +1164,14 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
     // The head text also proves which manifests an update actually touched.
     const sourceChanges = [];
     const headContents = {};
+    const baseContents = {};
     const versionChangesByKey = new Map();
     const ecosystem = ecosystemFromBranch(pr.head_ref);
     for (const file of files.filter(entry => isAllowedManifest(entry.filename))) {
         const baseText = await getFileText(github, owner, repo, file.filename, pr.base_sha);
         const headText = await getFileText(github, owner, repo, file.filename, pr.head_sha);
         headContents[file.filename] = headText;
+        baseContents[file.filename] = baseText;
         sourceChanges.push({ filename: file.filename, newSources: findNewSources(baseText, headText) });
         if (ecosystem && ecosystem !== 'actions') {
             for (const change of manifestVersionChanges(file.filename, baseText, headText, ecosystem)) {
@@ -1197,7 +1227,7 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
         }
     }
 
-    return { pr, expectedHeadSha: request.headSha, files, commits, alerts, checkRuns, statuses, sourceChanges, headContents, versionChanges, packageInfo, reviews, now, botLogin };
+    return { pr, expectedHeadSha: request.headSha, files, commits, alerts, checkRuns, statuses, sourceChanges, headContents, baseContents, versionChanges, packageInfo, reviews, now, botLogin };
 }
 
 /**
@@ -1244,8 +1274,12 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
             // approval on the older commit could still count for the new head, or the PR can
             // be retargeted away from the branch its alerts describe.
             const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: request.prNumber });
+            // It can also be closed or converted to draft; an approval submitted then would
+            // still count once the PR is reopened or marked ready.
             if (live.head?.sha !== request.headSha) {
                 result = { ...result, decision: 'skip', reasons: ['head-sha-mismatch'] };
+            } else if (live.state !== 'open' || live.draft) {
+                result = { ...result, decision: 'skip', reasons: ['not-open'] };
             } else if (live.base?.ref !== BASE_BRANCH) {
                 result = { ...result, decision: 'skip', reasons: ['wrong-base-branch'] };
             }
