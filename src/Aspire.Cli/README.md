@@ -52,12 +52,6 @@ aspire <command> [options]
 | `logs [<resource>]` | Display logs from resources in a running apphost. |
 | `otel` | View OpenTelemetry data (logs, spans, traces) from a running apphost. |
 
-`aspire otel logs --follow` and `aspire otel spans --follow` end successfully when
-their established dashboard stream closes, including during AppHost shutdown.
-An interrupted connection is reported on stderr so JSON output on stdout remains
-parseable. This also applies to standalone dashboards selected with
-`--dashboard-url`. Request failures and invalid telemetry still report errors.
-
 ### Deployment
 
 | Command | Description |

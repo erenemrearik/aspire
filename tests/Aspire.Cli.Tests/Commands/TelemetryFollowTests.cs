@@ -105,7 +105,7 @@ public class TelemetryFollowTests(ITestOutputHelper outputHelper)
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ReadLines_Cancellation_Propagates(bool disconnect)
+    public async Task ReadLinesWithDisconnectHandling_Cancellation_Propagates(bool disconnect)
     {
         using var cts = new CancellationTokenSource();
         Exception exception = disconnect
@@ -114,7 +114,7 @@ public class TelemetryFollowTests(ITestOutputHelper outputHelper)
         using var stream = new FaultingReadStream([], exception);
         using var reader = new StreamReader(stream);
         var interactionService = new TestInteractionService();
-        await using var enumerator = reader.ReadLinesAsync(interactionService, cts.Token).GetAsyncEnumerator();
+        await using var enumerator = reader.ReadLinesWithDisconnectHandlingAsync(interactionService, cts.Token).GetAsyncEnumerator();
 
         if (disconnect)
         {
@@ -130,20 +130,101 @@ public class TelemetryFollowTests(ITestOutputHelper outputHelper)
     }
 
     [Fact]
-    public async Task ReadLines_CompleteResponse_YieldsLinesWithoutDisconnectStatus()
+    public async Task ReadLinesWithDisconnectHandling_CompleteResponse_YieldsLinesWithoutDisconnectStatus()
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes("first\n\nsecond\n"));
         using var reader = new StreamReader(stream);
         var interactionService = new TestInteractionService();
         var lines = new List<string>();
 
-        await foreach (var line in reader.ReadLinesAsync(interactionService, CancellationToken.None))
+        await foreach (var line in reader.ReadLinesWithDisconnectHandlingAsync(interactionService, CancellationToken.None))
         {
             lines.Add(line);
         }
 
         Assert.Equal(["first", "second"], lines);
         Assert.Empty(interactionService.DisplayedRawText);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReadLines_WithoutErrorHandler_PropagatesReadFailure(bool explicitNull)
+    {
+        var exception = new HttpIOException(HttpRequestError.ResponseEnded, "The response ended prematurely.");
+        using var stream = new FaultingReadStream([], exception);
+        using var reader = new StreamReader(stream);
+        var lines = explicitNull
+            ? reader.ReadLinesAsync(onError: null, CancellationToken.None)
+            : reader.ReadLinesAsync(CancellationToken.None);
+        await using var enumerator = lines.GetAsyncEnumerator();
+
+        var thrown = await Assert.ThrowsAsync<HttpIOException>(async () => await enumerator.MoveNextAsync());
+
+        Assert.Same(exception, thrown);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReadLines_ErrorHandler_ControlsReadFailureHandling(bool handled)
+    {
+        var exception = new IOException("Read failure.");
+        using var stream = new FaultingReadStream(Encoding.UTF8.GetBytes("first\n\nsecond\n"), exception);
+        using var reader = new StreamReader(stream);
+        var errors = new List<Exception>();
+        await using var enumerator = reader.ReadLinesAsync(ex =>
+        {
+            errors.Add(ex);
+            return handled;
+        }, CancellationToken.None).GetAsyncEnumerator();
+
+        Assert.True(await enumerator.MoveNextAsync());
+        Assert.Equal("first", enumerator.Current);
+        Assert.True(await enumerator.MoveNextAsync());
+        Assert.Equal("second", enumerator.Current);
+        Assert.Empty(errors);
+
+        if (handled)
+        {
+            Assert.False(await enumerator.MoveNextAsync());
+            Assert.False(await enumerator.MoveNextAsync());
+        }
+        else
+        {
+            var thrown = await Assert.ThrowsAsync<IOException>(async () => await enumerator.MoveNextAsync());
+            Assert.Same(exception, thrown);
+        }
+
+        Assert.Collection(errors, error => Assert.Same(exception, error));
+    }
+
+    [Fact]
+    public async Task ReadLines_ErrorHandlerFailure_Propagates()
+    {
+        using var stream = new FaultingReadStream([], new IOException("Read failure."));
+        using var reader = new StreamReader(stream);
+        var exception = new InvalidOperationException("Error handler failure.");
+        await using var enumerator = reader.ReadLinesAsync(_ => throw exception, CancellationToken.None).GetAsyncEnumerator();
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(async () => await enumerator.MoveNextAsync());
+
+        Assert.Same(exception, thrown);
+    }
+
+    [Fact]
+    public async Task ReadLines_CompleteResponse_YieldsLines()
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes("first\n\nsecond\n"));
+        using var reader = new StreamReader(stream);
+        var lines = new List<string>();
+
+        await foreach (var line in reader.ReadLinesAsync(CancellationToken.None))
+        {
+            lines.Add(line);
+        }
+
+        Assert.Equal(["first", "second"], lines);
     }
 
     private async Task<(int ExitCode, TestInteractionService InteractionService)> InvokeAsync(
