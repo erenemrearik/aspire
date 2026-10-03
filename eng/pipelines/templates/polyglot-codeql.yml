@@ -11,7 +11,7 @@ jobs:
     timeoutInMinutes: 60
     pool:
       name: NetCore1ESPool-Internal
-      image: windows.vs2026preview.scout.amd64
+      image: 1es-windows-2022
       os: windows
     templateContext:
       sdl:
