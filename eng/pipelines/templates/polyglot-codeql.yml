@@ -59,7 +59,7 @@ jobs:
         - task: GoTool@0
           displayName: Install Go 1.26
           inputs:
-            version: '1.26.x'
+            version: '1.26.8'
 
       - ${{ if eq(parameters.language, 'java') }}:
         # The starter and generated AppHost use Java 25 language features.
