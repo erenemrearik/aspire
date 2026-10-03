@@ -379,8 +379,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("package.json", "devDependencies", "\"lodash\": \"1.2.9\"", "\"lodash\": \"1.2.10\"", true)]
     [InlineData("package.json", "overrides", "\"alias\": \"npm:lodash@4.17.20\"", "\"alias\": \"npm:lodash@4.17.21\"", true)]
     [InlineData("Directory.Packages.props", null, "<PackageVersion Include=\"X\" Version=\"9.0.4\" />", "<PackageVersion Include=\"X\" Version=\"9.0.5-rc.1\" />", true)]
-    [InlineData("pyproject.toml", null, "  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", true)]
-    [InlineData("pyproject.toml", null, "  \"requests[socks]>=2.31.0; python_version >= '3.9'\",", "  \"requests[socks]>=2.32.3; python_version >= '3.9'\",", true)]
+    [InlineData("pyproject.toml", "project:dependencies", "  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", true)]
+    [InlineData("pyproject.toml", "project.optional-dependencies:socks", "  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", true)]
+    [InlineData("pyproject.toml", "dependency-groups:dev", "  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", true)]
+    [InlineData("pyproject.toml", "tool.uv:dev-dependencies", "  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", true)]
+    [InlineData("pyproject.toml", "tool.example:arguments", "  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", false)]
+    [InlineData("pyproject.toml", "build-system:requires", "  \"setuptools>=64\",", "  \"setuptools>=65\",", false)]
+    [InlineData("pyproject.toml", null, "  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", false)]
+    [InlineData("pyproject.toml", "project:dependencies", "  \"requests[socks]>=2.31.0; python_version >= '3.9'\",", "  \"requests[socks]>=2.32.3; python_version >= '3.9'\",", true)]
     [InlineData("package.json", "scripts", "\"build\": \"tsc\"", "\"build\": \"tsc && node x.js\"", false)]
     [InlineData("package.json", "scripts", "\"build\": \"node script-1.js\"", "\"build\": \"node script-2.js\"", false)]
     [InlineData("package.json", "scripts", "\"build\": \"vite --mode=1\"", "\"build\": \"vite --mode=2\"", false)]
@@ -398,8 +404,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     public async Task DetectsVersionOnlyManifestEdits(string path, string? section, string baseLine, string headLine, bool expected)
     {
         // package.json lines are wrapped in a document so the JSON-path check sees them
-        // inside the named top-level section.
-        string Wrap(string line) => section is null ? line : $"{{\n  \"{section}\": {{\n    {line}\n  }}\n}}";
+        // inside the named top-level section. pyproject.toml sections are `table:key`, and the
+        // line is wrapped in that multi-line array.
+        string Wrap(string line) => section switch
+        {
+            null => line,
+            _ when path == "pyproject.toml" => $"[{section.Split(':')[0]}]\n{section.Split(':')[1]} = [\n{line}\n]\n",
+            _ => $"{{\n  \"{section}\": {{\n    {line}\n  }}\n}}",
+        };
 
         var result = await RunHarnessAsync(new JsonObject
         {
@@ -1103,7 +1115,11 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             new JsonObject { ["number"] = 1, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
             new JsonObject { ["number"] = 2, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "other/yarn.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
             new JsonObject { ["number"] = 3, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = "4.17.22", ["malware"] = false },
-            new JsonObject { ["number"] = 4, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = null, ["malware"] = true },
+            new JsonObject { ["number"] = 4, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = null, ["malware"] = true, ["vulnerable_ranges"] = new JsonArray(">= 4.17.20, < 4.17.21") },
+            // The new version is still inside the malware range, or the alert has no range, so
+            // the PR does not fix either alert.
+            new JsonObject { ["number"] = 12, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = null, ["malware"] = true, ["vulnerable_ranges"] = new JsonArray(">= 0") },
+            new JsonObject { ["number"] = 13, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "app/yarn.lock", ["first_patched_version"] = null, ["malware"] = true },
             new JsonObject { ["number"] = 5, ["ecosystem"] = "pip", ["package"] = "lodash", ["manifest_path"] = "app/uv.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
             new JsonObject { ["number"] = 6, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "nested/yarn.lock", ["first_patched_version"] = "4.17.21", ["malware"] = false },
             new JsonObject { ["number"] = 8, ["ecosystem"] = "npm", ["package"] = "lodash", ["manifest_path"] = "nested/yarn.lock", ["first_patched_version"] = null, ["malware"] = true },
@@ -1283,6 +1299,32 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.True(nuget["value"]!["cooldown_satisfied"]!.GetValue<bool>());
         Assert.True(npm["value"]!["available_on_approved_feed"]!.GetValue<bool>());
         Assert.False(npm["value"]!["cooldown_satisfied"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task LookupStartsPyPiCooldownFromNewestUpload()
+    {
+        var pip = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "lookup",
+            ["ecosystem"] = "pip",
+            ["name"] = "requests",
+            ["version"] = "2.32.3",
+            ["now"] = Now,
+            ["responses"] = new JsonObject
+            {
+                ["https://pypi.org/pypi/requests/2.32.3/json"] = Response(new JsonObject
+                {
+                    ["urls"] = new JsonArray(
+                        new JsonObject { ["upload_time_iso_8601"] = "2026-09-29T00:00:00Z" },
+                        new JsonObject { ["upload_time_iso_8601"] = "2026-08-01T00:00:00Z" }),
+                }),
+            },
+        });
+
+        Assert.Equal("2026-09-29T00:00:00Z", pip["value"]!["published_at"]!.GetValue<string>());
+        Assert.False(pip["value"]!["cooldown_satisfied"]!.GetValue<bool>());
     }
 
     [Fact]

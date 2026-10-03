@@ -873,6 +873,12 @@ function isVersionOnlyEdit(path, baseText, headText) {
         || !baseLines.every((line, index) => line === headLines[index] || isDependencyVersionLineSwap(path, line, headLines[index]))) {
         return false;
     }
+    if (basenameOf(path).toLowerCase() === 'pyproject.toml') {
+        const arrays = pyprojectArrayKeys(baseLines);
+        if (!baseLines.every((line, index) => line === headLines[index] || isPyprojectDependencyArray(arrays[index]))) {
+            return false;
+        }
+    }
     if (basenameOf(path).toLowerCase() === 'package.json' && baseText !== headText) {
         const base = readJson(baseText);
         const head = readJson(headText);
@@ -898,6 +904,57 @@ function isDependencyVersionLineSwap(path, baseLine, headLine) {
     }
     const span = versionTokenSwapSpan(baseLine, headLine);
     return span !== null && span.start >= base.start && span.baseEnd <= base.end && span.headEnd <= head.end;
+}
+
+/**
+ * For each line of a pyproject.toml, the full dotted key of the multi-line array the line
+ * sits in, or null. A PEP 508-looking string is a dependency only inside a dependency
+ * collection; the same string in `[tool.example] arguments = [...]` is tool configuration.
+ * Recognized shape (https://toml.io/en/v1.0.0#array):
+ *   [project]
+ *   dependencies = [
+ *       "flask>=3.0.0",
+ *   ]
+ * Arrays opened and closed on one line, array-of-tables (`[[x]]`), and anything else the
+ * scan does not recognize yield null, so those lines fail closed.
+ */
+function pyprojectArrayKeys(lines) {
+    const unquote = key => key.split('.').map(part => part.trim().replace(/^(["'])(.*)\1$/, '$2')).join('.');
+    let table = '';
+    let array = null;
+    return lines.map(line => {
+        const trimmed = line.trim();
+        if (array !== null) {
+            const current = array;
+            if (trimmed.startsWith(']')) {
+                array = null;
+            }
+            return current;
+        }
+        const header = /^\[\s*([^[\]]+?)\s*\]\s*(?:#.*)?$/.exec(trimmed);
+        if (header) {
+            table = unquote(header[1]);
+            return null;
+        }
+        if (/^\[\[/.test(trimmed)) {
+            table = null;
+            return null;
+        }
+        const opener = /^((?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*')(?:\s*\.\s*(?:[A-Za-z0-9_-]+|"[^"]*"|'[^']*'))*)\s*=\s*\[\s*(?:#.*)?$/.exec(trimmed);
+        if (opener && table !== null) {
+            array = (table ? `${table}.` : '') + unquote(opener[1]);
+        }
+        return null;
+    });
+}
+
+// PEP 621 dependencies and optional dependencies, PEP 735 dependency groups, and the uv
+// dependency settings (https://docs.astral.sh/uv/reference/settings/).
+function isPyprojectDependencyArray(key) {
+    return key === 'project.dependencies'
+        || /^project\.optional-dependencies\.[^.]+$/.test(key ?? '')
+        || /^dependency-groups\.[^.]+$/.test(key ?? '')
+        || ['tool.uv.dev-dependencies', 'tool.uv.constraint-dependencies', 'tool.uv.override-dependencies'].includes(key);
 }
 
 // Each rule returns the `[start, end)` index range of the line's version value, or null
@@ -1026,7 +1083,8 @@ function inVulnerableRanges(version, ranges) {
  * auto-sec PR. Non-malware alerts use the same proof as the approval gate
  * (`alertFixedByUpdate`). Malware alerts have no patched version; they are covered only
  * when every occurrence of the flagged package in the alert's own manifest is the PR's new
- * version, and the approval gate still leaves those PRs to a human reviewer. Candidates
+ * version and that version is outside every vulnerable range (an alert without ranges is
+ * never covered this way), and the approval gate still leaves those PRs to a human reviewer. Candidates
  * include `versionChanges` from the manifest diff, so a transitive upgrade that only
  * appears in a regenerated lockfile still counts, and so does a PR that drops the
  * alerted package from the alert's manifest entirely.
@@ -1040,7 +1098,9 @@ function coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents,
         .filter(alert => alertPackageRemoved(alert, ecosystem, baseContents, headContents)
             || candidates.some(update => alert.malware
                 ? updateMatchesAlert(alert, ecosystem, update)
-                    && alertManifestCarries(alert, ecosystem, update, headContents, version => sameVersion(version, update.to))
+                    && alertManifestCarries(alert, ecosystem, update, headContents, version => sameVersion(version, update.to)
+                        && alertVulnerableRanges(alert).length > 0
+                        && !inVulnerableRanges(version, alertVulnerableRanges(alert)))
                 : alertFixedByUpdate(alert, ecosystem, update, headContents)))
         .map(alert => alert.number)
         .sort((a, b) => a - b);
@@ -1386,8 +1446,11 @@ async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetc
         case 'pip': {
             // The repository's uv.lock files resolve from PyPI, so PyPI is the approved source.
             const release = await fetchJson(fetchImpl, `https://pypi.org/pypi/${encodeURIComponent(name)}/${encodeURIComponent(version)}/json`);
-            const uploads = (release?.urls ?? []).map(file => file.upload_time_iso_8601).filter(Boolean).sort();
-            publishedAt = uploads[0] ?? null;
+            // Files can be uploaded to a release later, and uv may pick a newer wheel, so the
+            // cooldown runs from the newest upload so every installable file has aged.
+            const uploads = (release?.urls ?? []).map(file => file.upload_time_iso_8601).filter(Boolean)
+                .sort((a, b) => Date.parse(a) - Date.parse(b));
+            publishedAt = uploads.at(-1) ?? null;
             available = checkAvailability ? release !== null : null;
             break;
         }
