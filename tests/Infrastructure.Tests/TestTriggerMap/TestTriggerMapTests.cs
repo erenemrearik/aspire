@@ -74,6 +74,18 @@ public sealed class TestTriggerMapTests
         Assert.Empty(result.Jobs);
     }
 
+    [Theory]
+    [InlineData("eng/scripts/build-codeql-starter.ps1")]
+    [InlineData("eng/pipelines/templates/polyglot-codeql.yml")]
+    public void PolyglotCodeqlInputsSelectInfrastructureCoverage(string path)
+    {
+        var result = SelectWithRealMap(path);
+
+        Assert.False(result.SelectsAll);
+        Assert.Equal(["Infrastructure.Tests"], result.TestProjects);
+        Assert.Empty(result.Jobs);
+    }
+
     [Fact]
     public void TemplateManifestBuildTargetSelectsInfrastructureCoverage()
     {
