@@ -735,14 +735,17 @@ function isPythonDistributionFor(url, name, version) {
 function lockfileArtifacts(path, text) {
     const basename = basenameOf(path).toLowerCase();
     const artifacts = [];
-    const add = (key, value, bound) => artifacts.push({ key: `${key}\0${value}`, bound });
+    // The identity includes the package and version the entry claims, so retargeting an
+    // entry while keeping a base artifact (`lodash@4.17.20` -> `4.17.21` still resolving
+    // the 4.17.20 tarball) is a new, unbound artifact rather than an existing one.
+    const add = (key, claimed, value, bound) => artifacts.push({ key: `${key}\0${claimed}\0${value}`, bound });
     if (METADATA_LOCKFILE_BASENAMES.has(basename)) {
         const json = readJson(text);
         for (const [key, entry] of Object.entries(json?.packages ?? {})) {
             const index = key.lastIndexOf('node_modules/');
             if (index >= 0 && typeof entry?.resolved === 'string' && !entry.link) {
                 const name = typeof entry.name === 'string' ? entry.name : key.slice(index + 'node_modules/'.length);
-                add(key, entry.resolved, isNpmTarballFor(entry.resolved, [name], entry.version));
+                add(key, `${name}@${entry.version}`, entry.resolved, isNpmTarballFor(entry.resolved, [name], entry.version));
             }
         }
         const visit = (dependencies, parent) => {
@@ -750,7 +753,9 @@ function lockfileArtifacts(path, text) {
                 const path = `${parent}/${key}`;
                 if (typeof entry?.resolved === 'string') {
                     const alias = String(entry.version ?? '').startsWith('npm:') ? splitNpmSpec(entry.version.slice(4)) : null;
-                    add(`v1${path}`, entry.resolved, isNpmTarballFor(entry.resolved, [alias?.name ?? key], alias?.range ?? entry.version));
+                    const name = alias?.name ?? key;
+                    const version = alias?.range ?? entry.version;
+                    add(`v1${path}`, `${name}@${version}`, entry.resolved, isNpmTarballFor(entry.resolved, [name], version));
                 }
                 visit(entry?.dependencies, path);
             }
@@ -772,10 +777,10 @@ function lockfileArtifacts(path, text) {
             } else if ((match = /^ {2}version:?\s+"?([^"\s]+)"?\s*$/.exec(line))) {
                 version = match[1];
             } else if ((match = /^ {2}resolved\s+"?([^"\s]+)"?\s*$/.exec(line))) {
-                add(header, match[1], isNpmTarballFor(match[1].split('#')[0], names, version));
+                add(header, version, match[1], isNpmTarballFor(match[1].split('#')[0], names, version));
             } else if ((match = /^ {2}resolution:\s+"?([^"\s]+)"?\s*$/.exec(line))) {
                 const resolved = splitNpmSpec(match[1]);
-                add(header, match[1], names.has(resolved.name) && resolved.range === `npm:${version}`);
+                add(header, version, match[1], names.has(resolved.name) && resolved.range === `npm:${version}`);
             }
         }
     } else if (basename === 'pnpm-lock.yaml') {
@@ -788,7 +793,7 @@ function lockfileArtifacts(path, text) {
                 const slash = key.lastIndexOf('/');
                 entry = spec.range ? spec : slash > 0 ? { name: key.slice(0, slash), range: key.slice(slash + 1) } : null;
             } else if (entry && (match = /^ {4}resolution:.*\btarball:\s*'?([^,'}\s]+)/.exec(line))) {
-                add(`${entry.name}@${entry.range}`, match[1], isNpmTarballFor(match[1], [entry.name], entry.range));
+                add(`${entry.name}@${entry.range}`, '', match[1], isNpmTarballFor(match[1], [entry.name], entry.range));
             }
         }
     } else if (basename === 'uv.lock') {
@@ -797,7 +802,7 @@ function lockfileArtifacts(path, text) {
             const name = /^name\s*=\s*"([^"]+)"/m.exec(body)?.[1] ?? '';
             const version = /^version\s*=\s*"([^"]+)"/m.exec(body)?.[1] ?? '';
             for (const [, url] of body.matchAll(/\burl\s*=\s*"([^"]+)"/g)) {
-                add(`${name}@${version}`, url, isPythonDistributionFor(url, name, version));
+                add(`${name}@${version}`, '', url, isPythonDistributionFor(url, name, version));
             }
         }
     }
@@ -2022,9 +2027,12 @@ function gitBlobId(text) {
  * so `"preinstall": "1.0.0"` -> `"1.0.1"` fails). No file may add a package source that is
  * neither approved nor already referenced, outside package metadata, by the lines it
  * replaces or by the exact base the diff names (see `findNewSources`). No added line may contain advisory
- * text, and comment-capable lockfiles may not gain comments. Returns `{ path, reason }` violations.
+ * text, and comment-capable lockfiles may not gain comments. Every other file must also
+ * rebuild in full, and every new lockfile artifact must name the package and version its
+ * entry claims (see `unboundLockfileArtifacts`). Each rebuilt file's original base and
+ * final head are recorded in `rebuiltFiles`. Returns `{ path, reason }` violations.
  */
-function checkPatchContents(patchText, readBaseTexts = () => []) {
+function checkPatchContents(patchText, readBaseTexts = () => [], rebuiltFiles = new Map()) {
     const violations = [];
     // A later commit in the same patch applies on top of the file an earlier one produced.
     const rebuilt = new Map();
@@ -2047,8 +2055,16 @@ function checkPatchContents(patchText, readBaseTexts = () => []) {
         if (VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(path).toLowerCase())
             && (head === null || !isVersionOnlyEdit(path, normalizedBase, head))) {
             violations.push({ path, reason: 'non-version-manifest-edit' });
-        } else if (head !== null) {
+        } else if (head === null) {
+            // Lockfile artifacts and introduced versions can only be proven from the full file.
+            violations.push({ path, reason: 'unreconstructable-file-diff' });
+        } else {
             rebuilt.set(path, [head, ...(rebuilt.get(path) ?? [])]);
+            if (unboundLockfileArtifacts(path, normalizedBase, head).length > 0) {
+                violations.push({ path, reason: 'unbound-lockfile-artifact' });
+            }
+            // The first diff of a path names the file the whole patch series started from.
+            rebuiltFiles.set(path, { base: rebuiltFiles.get(path)?.base ?? normalizedBase, head });
         }
         // Each block's added lines are contiguous in the new file; the break line keeps the
         // metadata scanner from reading separate blocks (or files) as one JSON fragment.
@@ -2083,6 +2099,58 @@ function hasLockfileComment(line) {
     return /(?:^|\s)#/.test(line.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""'));
 }
 
+// The ecosystem a manifest or lockfile resolves from, keyed by basename.
+const PATH_ECOSYSTEMS = new Map([
+    ['package.json', 'npm'],
+    ['package-lock.json', 'npm'],
+    ['npm-shrinkwrap.json', 'npm'],
+    ['yarn.lock', 'npm'],
+    ['pnpm-lock.yaml', 'npm'],
+    ['pyproject.toml', 'pip'],
+    ['uv.lock', 'pip'],
+    ['directory.packages.props', 'nuget'],
+]);
+
+/**
+ * Re-derives every package version an agent patch introduces (base vs rebuilt head of each
+ * file, via `manifestVersionChanges`) and enforces the policy the prompt states: no breaking
+ * change, a publish date past the 7-day cooldown, and, for NuGet, availability through the
+ * repository NuGet.config package source mapping. A failed lookup fails closed. Returns
+ * `{ path, reason }` violations.
+ */
+async function checkPatchVersionPolicy(rebuiltFiles, { fetchImpl = fetch, now = new Date(), nugetConfigText = null } = {}) {
+    const violations = [];
+    const changes = [];
+    for (const [path, { base, head }] of rebuiltFiles) {
+        const ecosystem = PATH_ECOSYSTEMS.get(basenameOf(path).toLowerCase());
+        if (ecosystem) {
+            changes.push(...manifestVersionChanges(path, base, head, ecosystem).map(change => ({ path, ecosystem, change })));
+        }
+    }
+    if (changes.length > MAX_VERSION_CHANGES) {
+        return [{ path: '(patch)', reason: 'too-many-version-changes' }];
+    }
+    const lookups = new Map();
+    for (const { path, ecosystem, change } of changes) {
+        if (isBreakingVersionChange(change)) {
+            violations.push({ path, reason: 'breaking-change' });
+        }
+        const key = `${ecosystem}:${normalizePackageName(ecosystem, change.name)}@${change.to}`;
+        if (!lookups.has(key)) {
+            lookups.set(key, await lookupPackageVersion(ecosystem, change.name, change.to, { fetchImpl, now, nugetConfigText, checkAvailability: ecosystem === 'nuget' })
+                .catch(() => null));
+        }
+        const info = lookups.get(key);
+        if (!info?.cooldown_satisfied) {
+            violations.push({ path, reason: 'cooldown-not-satisfied' });
+        }
+        if (ecosystem === 'nuget' && info?.available_on_approved_feed !== true) {
+            violations.push({ path, reason: 'nuget-not-on-approved-feed' });
+        }
+    }
+    return violations;
+}
+
 /**
  * Runs in the safe_outputs job before the create and push handlers. Both outputs use the
  * `am` patch transport, so the `aw-*.patch` files under `patchDir` are exactly what the
@@ -2090,7 +2158,7 @@ function hasLockfileComment(line) {
  * create patch is based on the checked-out workspace and a push patch on the auto-sec
  * branch, so both versions of each changed file are base candidates.
  */
-async function runPatchContentGate({ core, github = null, context = null, fs = require('node:fs'), patchDir = '/tmp/gh-aw', workspace = process.env.GITHUB_WORKSPACE }) {
+async function runPatchContentGate({ core, github = null, context = null, fs = require('node:fs'), patchDir = '/tmp/gh-aw', workspace = process.env.GITHUB_WORKSPACE, fetchImpl = fetch, now = new Date() }) {
     const path = require('node:path');
     const names = fs.existsSync(patchDir) ? fs.readdirSync(patchDir).filter(name => /^aw-.*\.(?:patch|bundle)$/.test(name)).sort() : [];
     const patches = new Map(names.filter(name => name.endsWith('.patch')).map(name => [name, fs.readFileSync(path.join(patchDir, name), 'utf8')]));
@@ -2117,12 +2185,21 @@ async function runPatchContentGate({ core, github = null, context = null, fs = r
         return [local, branchTexts.get(file)];
     };
     const violations = [];
+    const rebuiltFiles = new Map();
     for (const name of names) {
         if (name.endsWith('.bundle')) {
             violations.push({ path: name, reason: 'bundle-transport' });
             continue;
         }
-        violations.push(...checkPatchContents(patches.get(name), readBaseTexts));
+        violations.push(...checkPatchContents(patches.get(name), readBaseTexts, rebuiltFiles));
+    }
+    // The handlers push before any human review and same-repository PR CI installs the
+    // result, so the version policy the prompt states is re-checked here from the rebuilt
+    // files instead of trusting the agent's lookups.
+    if (violations.length === 0) {
+        const nugetConfig = workspace ? path.resolve(workspace, 'NuGet.config') : null;
+        const nugetConfigText = nugetConfig && fs.existsSync(nugetConfig) ? fs.readFileSync(nugetConfig, 'utf8') : null;
+        violations.push(...await checkPatchVersionPolicy(rebuiltFiles, { fetchImpl, now, nugetConfigText }));
     }
     if (violations.length > 0) {
         core.setFailed(`auto-sec patch content gate failed: ${violations.map(v => `${v.path} ${v.reason}`).join('; ')}`);
@@ -2537,6 +2614,7 @@ module.exports = {
     runPushTargetGate,
     checkAgentOutputs,
     checkPatchContents,
+    checkPatchVersionPolicy,
     checkPublicNoopMessage,
     checkPublicText,
     selectNuGetSources,

@@ -8,7 +8,7 @@
 //     malwareNumbers, checkRuns, statuses, reviews, responses, liveHeadSha, liveBaseRef, liveDraft,
 //     liveCheckRuns, liveStatuses } -> { value, reviews, summary, info, warnings }
 //   { mode: "push-gate", agentItems, pr, prOverrides } -> { value, info, failures }
-//   { mode: "patch-gate", patchFiles, workspaceFiles, branchFiles } -> { value, info, failures }
+//   { mode: "patch-gate", patchFiles, workspaceFiles, branchFiles, responses, now } -> { value, info, failures, urls }
 //   { mode: "public-text-gate", agentItems, patchFiles } -> { value, info, failures }
 //   { mode: "agent-scrub", outputLines, patchFiles, workFiles } -> { value, info, failures, remaining, outputs }
 // PRs may carry `head_repo` (defaults to microsoft/aspire) and `base_ref` (defaults to main).
@@ -249,6 +249,7 @@ async function main() {
                     },
                 },
             };
+            const urls = [];
             try {
                 const value = await gate.runPatchContentGate({
                     core: { info: message => info.push(message), setFailed: message => failures.push(message) },
@@ -256,8 +257,10 @@ async function main() {
                     context: { repo: { owner: 'microsoft', repo: 'aspire' } },
                     patchDir,
                     workspace,
+                    fetchImpl: createFetch(request.responses, urls),
+                    now: new Date(request.now ?? '2026-01-01T00:00:00Z'),
                 });
-                result = { value, info, failures };
+                result = { value, info, failures, urls };
             } finally {
                 fs.rmSync(root, { recursive: true, force: true });
             }

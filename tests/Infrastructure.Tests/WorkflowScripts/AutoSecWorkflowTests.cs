@@ -434,44 +434,81 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     private const string PyprojectBase = "[tool.x]\ncommand = \"tool --level=1\"\nx = 1\n";
     private const string PackageLockBase = "{\n  \"packages\": {\n    \"node_modules/lodash\": {\n      \"version\": \"4.17.20\",\n      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\"\n    }\n  }\n}\n";
     private const string YarnLockBase = "lodash@^4.17.20:\n  version \"4.17.20\"\n  resolved \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz#abc\"\n";
+    private const string NpmRegistry = "https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/";
+    private const string LockVersion20 = "      \"version\": \"4.17.20\",\n      \"resolved\": \"" + NpmRegistry + "lodash/-/lodash-4.17.20.tgz\"";
+    private const string LockVersion21 = "      \"version\": \"4.17.21\",\n      \"resolved\": \"" + NpmRegistry + "lodash/-/lodash-4.17.21.tgz\"";
+    private const string YarnVersion20 = "  version \"4.17.20\"\n  resolved \"" + NpmRegistry + "lodash/-/lodash-4.17.20.tgz#abc\"";
+    private const string YarnVersion21 = "  version \"4.17.21\"\n  resolved \"" + NpmRegistry + "lodash/-/lodash-4.17.21.tgz#abc\"";
 
     [Theory]
     [RequiresTools(["node"])]
     [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\"", "workspace", "")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\"", "branch", "")]
     [InlineData("Directory.Packages.props", PackagesPropsBase, "    <PackageVersion Include=\"X\" Version=\"9.0.4\" />", "    <PackageVersion Include=\"X\" Version=\"9.0.5\" />", "workspace", "")]
-    [InlineData("extension/package-lock.json", PackageLockBase, "      \"version\": \"4.17.20\",", "      \"version\": \"4.17.21\",", "workspace", "")]
-    [InlineData("app/yarn.lock", YarnLockBase, "  version \"4.17.20\"", "  version \"4.17.21\"", "workspace", "")]
-    [InlineData("app/yarn.lock", YarnLockBase, "  version \"4.17.20\"", "  version \"4.17.21\" # alert 42", "workspace", "lockfile-comment")]
-    [InlineData("app/yarn.lock", YarnLockBase, "  version \"4.17.20\"", "  # fixes 42\n  version \"4.17.21\"", "workspace", "lockfile-comment")]
-    [InlineData("extension/package-lock.json", PackageLockBase, "      \"version\": \"4.17.20\",", "      \"version\": \"4.17.21\",\n      \"note\": \"GHSA-xxxx\",", "workspace", "forbidden-public-text")]
+    [InlineData("extension/package-lock.json", PackageLockBase, LockVersion20, LockVersion21, "workspace", "")]
+    [InlineData("app/yarn.lock", YarnLockBase, YarnVersion20, YarnVersion21, "workspace", "")]
+    // The version moves but the entry keeps the vulnerable tarball.
+    [InlineData("extension/package-lock.json", PackageLockBase, "      \"version\": \"4.17.20\",", "      \"version\": \"4.17.21\",", "workspace", "unbound-lockfile-artifact")]
+    [InlineData("app/yarn.lock", YarnLockBase, "  version \"4.17.20\"", "  version \"4.17.21\"", "workspace", "unbound-lockfile-artifact")]
+    [InlineData("extension/package-lock.json", PackageLockBase, LockVersion20, "      \"version\": \"4.17.21\",\n      \"resolved\": \"" + NpmRegistry + "evil/-/evil-1.0.0.tgz\"", "workspace", "unbound-lockfile-artifact")]
+    [InlineData("app/yarn.lock", YarnLockBase, YarnVersion20, "  version \"4.17.21\"\n  resolved \"" + NpmRegistry + "lodash/-/lodash-4.17.21.tgz#abc\" # alert 42", "workspace", "lockfile-comment")]
+    [InlineData("app/yarn.lock", YarnLockBase, YarnVersion20, "  # fixes 42\n" + YarnVersion21, "workspace", "lockfile-comment")]
+    [InlineData("extension/package-lock.json", PackageLockBase, LockVersion20, "      \"version\": \"4.17.21\",\n      \"note\": \"GHSA-xxxx\",\n      \"resolved\": \"" + NpmRegistry + "lodash/-/lodash-4.17.21.tgz\"", "workspace", "forbidden-public-text")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\"", "stale", "non-version-manifest-edit")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"preinstall\": \"1.0.0\"", "    \"preinstall\": \"1.0.1\"", "workspace", "non-version-manifest-edit")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"build\": \"vite --mode=1\",", "    \"build\": \"vite --mode=2\",", "workspace", "non-version-manifest-edit")]
     [InlineData("extension/package.json", PackageJsonBase, "  \"scripts\": {", "  \"scripts\": {\n    \"postinstall\": \"node x.js\",", "workspace", "non-version-manifest-edit")]
     [InlineData("pyproject.toml", PyprojectBase, "command = \"tool --level=1\"", "command = \"tool --level=2\"", "workspace", "non-version-manifest-edit")]
-    [InlineData("extension/package-lock.json", PackageLockBase, "      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\"", "      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"", "workspace", "new-package-source")]
-    [InlineData("extension/package-lock.json", PackageLockBase, "      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\"", "      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"", "workspace-with-stale-branch", "new-package-source")]
+    [InlineData("app/yarn.lock", YarnLockBase, YarnVersion20, YarnVersion21, "stale", "unreconstructable-file-diff")]
+    [InlineData("extension/package-lock.json", PackageLockBase, LockVersion20, "      \"version\": \"4.17.21\",\n      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"", "workspace", "new-package-source")]
+    [InlineData("extension/package-lock.json", PackageLockBase, LockVersion20, "      \"version\": \"4.17.21\",\n      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"", "workspace-with-stale-branch", "new-package-source")]
+    // Version policy re-checked from the rebuilt files: lodash 4.17.22 is inside the
+    // cooldown, 5.0.0 crosses a major version, and NuGet X 9.0.6 is not on an approved feed.
+    [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.22\"", "workspace", "cooldown-not-satisfied")]
+    [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^5.0.0\"", "workspace", "breaking-change")]
+    // A version the registry cannot describe fails closed.
+    [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.23\"", "workspace", "cooldown-not-satisfied")]
+    [InlineData("Directory.Packages.props", PackagesPropsBase, "    <PackageVersion Include=\"X\" Version=\"9.0.4\" />", "    <PackageVersion Include=\"X\" Version=\"9.0.6\" />", "workspace", "nuget-not-on-approved-feed")]
     public async Task PatchContentGateChecksEveryChangedLine(string path, string baseText, string oldLine, string newLine, string baseLocation, string expectedReason)
     {
-        // One-line replacement hunk with a context line on each side, applied at the real
-        // position in baseText and labeled with baseText's git blob ID.
+        // Replacement hunk with a context line on each side, applied at the real position in
+        // baseText and labeled with baseText's git blob ID.
         var baseLines = baseText.Split('\n');
-        var at = Array.IndexOf(baseLines, oldLine);
-        Assert.True(at > 0 && at + 1 < baseLines.Length);
+        var removed = oldLine.Split('\n');
+        var at = Array.IndexOf(baseLines, removed[0]);
+        Assert.True(at > 0 && at + removed.Length < baseLines.Length);
+        Assert.Equal(removed, baseLines[at..(at + removed.Length)]);
         var added = newLine.Split('\n');
-        var hunk = string.Join('\n', [$" {baseLines[at - 1]}", $"-{oldLine}", .. added.Select(line => $"+{line}"), $" {baseLines[at + 1]}"]);
-        var patch = $"From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] update\n\n---\ndiff --git a/{path} b/{path}\nindex {GitBlobId(baseText)[..7]}..2222222 100644\n--- a/{path}\n+++ b/{path}\n@@ -{at},3 +{at},{added.Length + 2} @@\n{hunk}\n-- \n2.43.0\n";
+        var hunk = string.Join('\n', [$" {baseLines[at - 1]}", .. removed.Select(line => $"-{line}"), .. added.Select(line => $"+{line}"), $" {baseLines[at + removed.Length]}"]);
+        var patch = $"From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] update\n\n---\ndiff --git a/{path} b/{path}\nindex {GitBlobId(baseText)[..7]}..2222222 100644\n--- a/{path}\n+++ b/{path}\n@@ -{at},{removed.Length + 2} +{at},{added.Length + 2} @@\n{hunk}\n-- \n2.43.0\n";
 
+        const string flat = "https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/flat2/";
+        var workspaceFiles = new JsonObject
+        {
+            ["NuGet.config"] = "<configuration>\n  <packageSources>\n    <add key=\"public\" value=\"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json\" />\n  </packageSources>\n</configuration>\n",
+        };
         var request = new JsonObject
         {
             ["mode"] = "patch-gate",
             ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+            ["workspaceFiles"] = workspaceFiles,
+            ["now"] = "2026-09-01T00:00:00Z",
+            ["responses"] = new JsonObject
+            {
+                ["https://registry.npmjs.org/lodash"] = Response(new JsonObject
+                {
+                    ["time"] = new JsonObject { ["4.17.21"] = "2026-08-01T00:00:00Z", ["4.17.22"] = "2026-08-30T00:00:00Z", ["5.0.0"] = "2026-08-01T00:00:00Z" },
+                }),
+                ["https://api.nuget.org/v3/registration5-gz-semver2/x/9.0.5.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
+                ["https://api.nuget.org/v3/registration5-gz-semver2/x/9.0.6.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
+                ["https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json"] = ServiceIndex(flat),
+                [$"{flat}x/index.json"] = Response(new JsonObject { ["versions"] = new JsonArray("9.0.4", "9.0.5") }),
+            },
         };
         switch (baseLocation)
         {
             case "workspace":
-                request["workspaceFiles"] = new JsonObject { [path] = baseText };
+                workspaceFiles[path] = baseText;
                 break;
             case "branch":
                 request["branchFiles"] = new JsonObject { [path] = baseText };
@@ -479,12 +516,12 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             case "workspace-with-stale-branch":
                 // The auto-sec branch copy already references the new source, but the patch
                 // is based on the workspace copy, so the branch copy must not authorize it.
-                request["workspaceFiles"] = new JsonObject { [path] = baseText };
+                workspaceFiles[path] = baseText;
                 request["branchFiles"] = new JsonObject { [path] = baseText + "{\"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"}\n" };
                 break;
             case "stale":
                 // The checked-out file no longer matches the blob the patch was made from.
-                request["workspaceFiles"] = new JsonObject { [path] = baseText + "\n" };
+                workspaceFiles[path] = baseText + "\n";
                 break;
         }
 
@@ -552,15 +589,13 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
         var result = await RunHarnessAsync(request);
 
-        var violations = result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}").ToArray();
-        if (expectedReason.Length == 0)
-        {
-            Assert.Empty(violations);
-        }
-        else
-        {
-            Assert.Equal([$"extension/package-lock.json {expectedReason}"], violations);
-        }
+        // These hunks only exercise the source check, so they never rebuild a full file; the
+        // gate's separate reconstruction requirement always reports them and is not under test.
+        var violations = result["value"]!["violations"]!.AsArray()
+            .Select(v => $"{v!["path"]} {v["reason"]}")
+            .Where(v => v != "extension/package-lock.json unreconstructable-file-diff")
+            .ToArray();
+        Assert.Equal(expectedReason.Length == 0 ? [] : [$"extension/package-lock.json {expectedReason}"], violations);
     }
 
     private const string PublicTextPatch = """
@@ -912,6 +947,9 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("uv.lock", "", "[[package]]\nname = \"python-dateutil\"\nversion = \"2.8.2\"\nsdist = { url = \"https://f.example/python-dateutil-2.8.2.tar.gz\" }\n", 0)]
     [InlineData("uv.lock", "", "[[package]]\nname = \"jinja2\"\nversion = \"3.1.6\"\nwheels = [\n    { url = \"https://f.example/evil-1.0-py3-none-any.whl\" },\n]\n", 1)]
     [InlineData("uv.lock", "", "[[package]]\nname = \"jinja2\"\nversion = \"3.1.6\"\nsdist = { url = \"https://f.example/jinja2-3.1.5.tar.gz\" }\n", 1)]
+    // The entry moves to 4.17.21 but keeps the 4.17.20 tarball the base already listed.
+    [InlineData("package-lock.json", "{\"packages\":{\"node_modules/lodash\":{\"version\":\"4.17.20\",\"resolved\":\"https://r.example/lodash/-/lodash-4.17.20.tgz\"}}}", "{\"packages\":{\"node_modules/lodash\":{\"version\":\"4.17.21\",\"resolved\":\"https://r.example/lodash/-/lodash-4.17.20.tgz\"}}}", 1)]
+    [InlineData("yarn.lock", "lodash@^4.17.20:\n  version \"4.17.20\"\n  resolved \"https://r.example/lodash/-/lodash-4.17.20.tgz#abc\"\n", "lodash@^4.17.20:\n  version \"4.17.21\"\n  resolved \"https://r.example/lodash/-/lodash-4.17.20.tgz#abc\"\n", 1)]
     public async Task FindsLockfileArtifactsNotBoundToTheirEntry(string path, string baseText, string headText, int expectedCount)
     {
         var result = await RunHarnessAsync(new JsonObject
