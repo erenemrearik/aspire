@@ -261,6 +261,29 @@ async function main() {
             }
             break;
         }
+        case 'public-text-gate': {
+            const info = [];
+            const failures = [];
+            const root = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-'));
+            const patchDir = path.join(root, 'patches');
+            const outputPath = path.join(root, 'agent_output.json');
+            fs.writeFileSync(outputPath, JSON.stringify({ items: request.agentItems ?? [] }));
+            for (const [name, text] of Object.entries(request.patchFiles ?? {})) {
+                fs.mkdirSync(patchDir, { recursive: true });
+                fs.writeFileSync(path.join(patchDir, name), text);
+            }
+            try {
+                const value = await gate.runPublicTextGate({
+                    core: { info: message => info.push(message), setFailed: message => failures.push(message) },
+                    env: { GH_AW_AGENT_OUTPUT: outputPath },
+                    patchDir,
+                });
+                result = { value, info, failures };
+            } finally {
+                fs.rmSync(root, { recursive: true, force: true });
+            }
+            break;
+        }
         default:
             throw new Error(`Unknown mode ${request.mode}`);
     }

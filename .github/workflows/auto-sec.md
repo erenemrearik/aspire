@@ -271,6 +271,18 @@ safe-outputs:
         script: |
           const gate = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/auto-sec/auto-sec.js`);
           await gate.runPatchContentGate({ github, context, core });
+    # The agent sees private alert details, so every string the handlers publish (PR
+    # title and body, push message, commit authors and messages) must match the fixed
+    # templates in the prompt. Anything else fails the job before a handler runs.
+    - name: Validate auto-sec public text
+      if: (!cancelled()) && (contains(needs.agent.outputs.output_types, 'create_pull_request') || contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch'))
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}
+      with:
+        script: |
+          const gate = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/auto-sec/auto-sec.js`);
+          await gate.runPublicTextGate({ core });
   jobs:
     approve-dependabot-pr:
       name: "Approve Dependabot PR"
@@ -455,12 +467,16 @@ command fails or the result does not resolve, revert that directory with
 
 After the edits, review `git diff --stat` and `git diff` for each lockfile. Confirm
 only dependency manifests changed, no new registry host appears, and every version
-change is within the same major. Commit with the message
-`Update dependencies` followed by one line per package (`<name> <from> -> <to>`).
+change is within the same major. Commit once with exactly this message: the subject
+`Update dependencies`, a blank line, then one line per package
+(`<name> <from> -> <to>`, for example `lodash 4.17.20 -> 4.17.21`). Use the default
+git identity; never pass `--author` or change `user.name`/`user.email`. The
+safe-output job rejects any other commit message, author, title, or body.
 
 **Emit the safe output.**
 
-- Existing auto-sec PR: emit `push_to_pull_request_branch` with that PR's number.
+- Existing auto-sec PR: emit `push_to_pull_request_branch` with that PR's number and
+  the same commit message as `message`.
 - No existing PR, and you committed changes: emit `create_pull_request` with branch
   `auto-sec/security-updates`, title `Automated dependency updates`, and this body:
 
@@ -477,6 +493,10 @@ change is within the same major. Commit with the message
   No package sources or feeds were changed. Please review the lockfile diffs and
   CI results before merging.
   ```
+
+  Use exactly this text with one table row per updated package
+  (`| <name> | <manifest path> | <from> | <to> |`); each row's package and target
+  version must appear in your commit.
 
 - Nothing to change: emit no PR output.
 

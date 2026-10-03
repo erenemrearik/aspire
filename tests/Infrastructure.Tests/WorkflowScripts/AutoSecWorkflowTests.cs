@@ -533,6 +533,148 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         }
     }
 
+    private const string PublicTextPatch = """
+        From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001
+        From: "github-actions[bot]" <github-actions[bot]@users.noreply.github.com>
+        Date: Sat, 3 Oct 2026 09:00:00 +0000
+        Subject: [PATCH] Update dependencies
+
+        lodash 4.17.20 -> 4.17.21
+        @types/node 22.0.0 -> 22.1.0
+        ---
+         extension/package-lock.json | 4 ++--
+         1 file changed, 2 insertions(+), 2 deletions(-)
+
+        diff --git a/extension/package-lock.json b/extension/package-lock.json
+        index 1111111..2222222 100644
+        --- a/extension/package-lock.json
+        +++ b/extension/package-lock.json
+        @@ -1,3 +1,3 @@
+             "node_modules/lodash": {
+        -      "version": "4.17.20",
+        +      "version": "4.17.21",
+             },
+        @@ -9,3 +9,3 @@
+             "node_modules/@types/node": {
+        -      "version": "22.0.0",
+        +      "version": "22.1.0",
+             },
+        -- 
+        2.43.0
+
+        """;
+
+    private const string PublicTextBody = """
+        This is an automated pull request created by the auto-sec workflow.
+
+        It updates the following dependencies to newer, non-breaking versions that have
+        been published for at least 7 days and resolve from the existing package sources:
+
+        | Package | Manifest | From | To |
+        | --- | --- | --- | --- |
+        | lodash | extension/package-lock.json | 4.17.20 | 4.17.21 |
+        | `@types/node` | extension/package-lock.json | 22.0.0 | 22.1.0 |
+
+        No package sources or feeds were changed. Please review the lockfile diffs and
+        CI results before merging.
+        """;
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("valid-create", "")]
+    [InlineData("valid-create-prefixed-title", "")]
+    [InlineData("valid-push", "")]
+    [InlineData("title-free-text", "create_pull_request.title non-template-text")]
+    [InlineData("body-extra-paragraph", "create_pull_request.body non-template-text")]
+    [InlineData("body-free-text-row", "create_pull_request.body non-template-text")]
+    [InlineData("body-forbidden-token-row", "create_pull_request.body non-template-text")]
+    [InlineData("body-without-rows", "create_pull_request.body non-template-text")]
+    [InlineData("body-row-not-in-patch", "create_pull_request.body row-not-in-patch")]
+    [InlineData("push-message-free-text", "push_to_pull_request_branch.message non-template-text")]
+    [InlineData("commit-subject-free-text", "aw-auto-sec-security-updates.patch non-template-commit-message")]
+    [InlineData("commit-body-free-text", "aw-auto-sec-security-updates.patch non-template-commit-message")]
+    [InlineData("commit-author", "aw-auto-sec-security-updates.patch unexpected-commit-author")]
+    [InlineData("commit-extra-header", "aw-auto-sec-security-updates.patch unexpected-commit-header")]
+    [InlineData("commit-headers-missing", "aw-auto-sec-security-updates.patch missing-commit-headers")]
+    public async Task PublicTextGateAcceptsOnlyTemplateText(string scenario, string expected)
+    {
+        var patch = PublicTextPatch.Replace("\r\n", "\n");
+        var body = PublicTextBody.Replace("\r\n", "\n");
+        var title = "Automated dependency updates";
+        var pushMessage = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21";
+        var push = false;
+        switch (scenario)
+        {
+            case "valid-create-prefixed-title":
+                title = "[auto-sec] Automated dependency updates";
+                break;
+            case "valid-push":
+                push = true;
+                break;
+            case "title-free-text":
+                title = "Automated dependency updates for alert 42";
+                break;
+            case "body-extra-paragraph":
+                body += "\n\nThis resolves alert 42.";
+                break;
+            case "body-free-text-row":
+                body = body.Replace("| lodash |", "| lodash prototype pollution |");
+                break;
+            case "body-forbidden-token-row":
+                body = body.Replace("| lodash |", "| GHSA-xxxx |");
+                break;
+            case "body-without-rows":
+                body = string.Join('\n', body.Split('\n').Where(line => !line.StartsWith("| lodash", StringComparison.Ordinal) && !line.StartsWith("| `@types", StringComparison.Ordinal)));
+                break;
+            case "body-row-not-in-patch":
+                body = body.Replace("| 4.17.20 | 4.17.21 |", "| 4.17.20 | 4.17.99 |");
+                break;
+            case "push-message-free-text":
+                push = true;
+                pushMessage = "Update dependencies\n\nlodash: fixes a malware alert";
+                break;
+            case "commit-subject-free-text":
+                patch = patch.Replace("Subject: [PATCH] Update dependencies", "Subject: [PATCH] Fix alert 42");
+                break;
+            case "commit-body-free-text":
+                patch = patch.Replace("lodash 4.17.20 -> 4.17.21\n", "lodash 4.17.20 -> 4.17.21\nResolves alert 42\n");
+                break;
+            case "commit-author":
+                patch = patch.Replace("From: \"github-actions[bot]\"", "From: \"Alert 42\"");
+                break;
+            case "commit-extra-header":
+                patch = patch.Replace("Date: ", "X-Note: alert 42\nDate: ");
+                break;
+            case "commit-headers-missing":
+                patch = patch[patch.IndexOf("diff --git", StringComparison.Ordinal)..];
+                break;
+        }
+
+        JsonObject item = push
+            ? new JsonObject { ["type"] = "push_to_pull_request_branch", ["pull_request_number"] = 202, ["message"] = pushMessage }
+            : new JsonObject { ["type"] = "create_pull_request", ["branch"] = "auto-sec/security-updates", ["title"] = title, ["body"] = body };
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "public-text-gate",
+            ["agentItems"] = new JsonArray(item),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        var violations = result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}").ToArray();
+        if (expected.Length == 0)
+        {
+            Assert.Empty(violations);
+            Assert.Empty(result["failures"]!.AsArray());
+        }
+        else
+        {
+            Assert.Equal([expected], violations);
+            // The failure names the field and reason only, never the rejected text.
+            var failure = Assert.Single(result["failures"]!.AsArray())!.GetValue<string>();
+            Assert.DoesNotContain("alert 42", failure, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     [Theory]
     [RequiresTools(["node"])]
     [InlineData("extension/package-lock.json", "{\n  \"funding\": \"https://github.com/sponsors/y\"\n}", "{\n  \"resolved\": \"https://github.com/o/x/archive/v1.tgz\"\n}", "https://github.com/")]
@@ -1142,6 +1284,16 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Contains("contains(needs.agent.outputs.output_types, 'create_pull_request')", patchGateSection, StringComparison.Ordinal);
         Assert.Contains("contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch')", patchGateSection, StringComparison.Ordinal);
         Assert.Contains("await gate.runPatchContentGate({ github, context, core })", patchGateSection, StringComparison.Ordinal);
+
+        // Agent-authored titles, bodies, and commit messages are published, so the public
+        // text gate must also run before the handlers and read the agent output.
+        var textGateStep = compiled.IndexOf("name: Validate auto-sec public text", StringComparison.Ordinal);
+        Assert.True(textGateStep >= 0 && handlerStep > textGateStep, "Public text gate must run before Process Safe Outputs.");
+        var textGateSection = compiled[textGateStep..handlerStep];
+        Assert.Contains("contains(needs.agent.outputs.output_types, 'create_pull_request')", textGateSection, StringComparison.Ordinal);
+        Assert.Contains("contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch')", textGateSection, StringComparison.Ordinal);
+        Assert.Contains("GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}", textGateSection, StringComparison.Ordinal);
+        Assert.Contains("await gate.runPublicTextGate({ core })", textGateSection, StringComparison.Ordinal);
         Assert.Equal(2, Regex.Matches(source, "^    patch-format: am\r?$", RegexOptions.Multiline).Count);
         var compiledPatchFormats = Regex.Matches(compiled, "patch_format\\\\\":\\\\\"([a-z]+)\\\\\"").Select(match => match.Groups[1].Value).ToArray();
         Assert.True(compiledPatchFormats.Length >= 2, "Both code-writing outputs must configure patch_format.");

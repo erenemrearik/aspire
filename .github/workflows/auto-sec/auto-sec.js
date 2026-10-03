@@ -1881,6 +1881,235 @@ async function runPatchContentGate({ core, github = null, context = null, fs = r
     return { patches: names.length, violations };
 }
 
+// The agent sees malware flags, advisory ranges, and alert numbers, but everything it
+// publishes must name packages and versions only. The prompt asks for fixed text; these
+// templates enforce it, so free text from a confused or prompt-injected run never reaches
+// a public PR title, body, or commit.
+const PUBLIC_PR_TITLE = 'Automated dependency updates';
+const PUBLIC_PR_BODY_HEAD = [
+    'This is an automated pull request created by the auto-sec workflow.',
+    '',
+    'It updates the following dependencies to newer, non-breaking versions that have',
+    'been published for at least 7 days and resolve from the existing package sources:',
+    '',
+    '| Package | Manifest | From | To |',
+    '| --- | --- | --- | --- |',
+];
+const PUBLIC_PR_BODY_TAIL = [
+    '',
+    'No package sources or feeds were changed. Please review the lockfile diffs and',
+    'CI results before merging.',
+];
+const PUBLIC_COMMIT_SUBJECT = 'Update dependencies';
+const PUBLIC_COMMIT_IDENTITY = 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>';
+const MAX_PUBLIC_ROWS = 200;
+// npm (`@scope/name`), PyPI, and NuGet (`Microsoft.Extensions.AI`) package names.
+const PUBLIC_PACKAGE_NAME = /^(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.+-]{0,213}$/;
+// A version or simple range such as `4.17.21`, `^4.17.21`, `>=1.2.3`, or `9.0.0-rc.1`.
+const PUBLIC_VERSION = /^(?:[~^=]|[<>]=?)?v?[0-9][0-9A-Za-z.+_-]{0,63}$/;
+const PUBLIC_MANIFEST_PATH = /^[\w.@+-]+(?:\/[\w.@+-]+)*\/?$/;
+// Defense in depth for tokens the templates could still carry inside a name-shaped cell.
+const PUBLIC_FORBIDDEN_TOKEN = /\b(?:GHSA|CVE|vulnerab\w*|exploit\w*|malware|malicious|advisory)\b/i;
+
+// gh-aw sanitization wraps `@mentions` (which scoped npm names look like) in backticks, so
+// one pair of surrounding backticks is accepted on any cell.
+function publicCell(text) {
+    const trimmed = String(text).trim();
+    return /^`[^`]*`$/.test(trimmed) ? trimmed.slice(1, -1) : trimmed;
+}
+
+// Parses one `<name> <from> -> <to>` commit body line or one
+// `| <name> | <manifest> | <from> | <to> |` PR body table row. Returns null when it does
+// not match exactly.
+function parsePublicUpdate(text, kind) {
+    if (kind === 'commit') {
+        const match = /^(\S+) (\S+) -> (\S+)$/.exec(text);
+        if (!match) {
+            return null;
+        }
+        const [, name, from, to] = match;
+        return PUBLIC_PACKAGE_NAME.test(name) && PUBLIC_VERSION.test(from) && PUBLIC_VERSION.test(to) && !PUBLIC_FORBIDDEN_TOKEN.test(text) ? { name, to } : null;
+    }
+    const match = /^\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|$/.exec(text);
+    if (!match) {
+        return null;
+    }
+    const [name, manifest, from, to] = match.slice(1).map(publicCell);
+    return PUBLIC_PACKAGE_NAME.test(name) && PUBLIC_MANIFEST_PATH.test(manifest) && PUBLIC_VERSION.test(from) && PUBLIC_VERSION.test(to) && !PUBLIC_FORBIDDEN_TOKEN.test(text) ? { name, to } : null;
+}
+
+function publicLines(text) {
+    return String(text ?? '').replace(/\r\n/g, '\n').trim().split('\n').map(line => line.trimEnd());
+}
+
+// A commit message must be `Update dependencies`, optionally followed by a blank line and
+// one `<name> <from> -> <to>` line per package.
+function checkPublicCommitMessage(text) {
+    const [subject, ...rest] = publicLines(text);
+    if (subject !== PUBLIC_COMMIT_SUBJECT) {
+        return false;
+    }
+    if (rest.length === 0) {
+        return true;
+    }
+    const [separator, ...updates] = rest;
+    return separator === '' && updates.length <= MAX_PUBLIC_ROWS && updates.every(line => parsePublicUpdate(line, 'commit') !== null);
+}
+
+// Returns the table rows of a PR body that matches the fixed template, or null.
+function parsePublicPrBody(text) {
+    const lines = publicLines(text);
+    const head = lines.slice(0, PUBLIC_PR_BODY_HEAD.length);
+    const tail = lines.slice(lines.length - PUBLIC_PR_BODY_TAIL.length);
+    const rows = lines.slice(PUBLIC_PR_BODY_HEAD.length, lines.length - PUBLIC_PR_BODY_TAIL.length);
+    if (head.join('\n') !== PUBLIC_PR_BODY_HEAD.join('\n') || tail.join('\n') !== PUBLIC_PR_BODY_TAIL.join('\n')) {
+        return null;
+    }
+    if (rows.length === 0 || rows.length > MAX_PUBLIC_ROWS) {
+        return null;
+    }
+    const updates = rows.map(row => parsePublicUpdate(row, 'table'));
+    return updates.every(Boolean) ? updates : null;
+}
+
+// Splits a `git format-patch` (`am` transport) file into its commit headers and messages.
+// Each commit starts with an mbox separator and ends its message at the `---` line before
+// the diffstat:
+//   From 1234567890abcdef1234567890abcdef12345678 Mon Sep 17 00:00:00 2001
+//   From: "github-actions[bot]" <github-actions[bot]@users.noreply.github.com>
+//   Date: Sat, 3 Oct 2026 09:00:00 +0000
+//   Subject: [PATCH 1/2] Update dependencies
+//
+//   lodash 4.17.20 -> 4.17.21
+//   ---
+//    extension/package-lock.json | 4 ++--
+// Header continuation lines start with whitespace (RFC 5322 folding).
+function parsePatchCommits(patchText) {
+    const commits = [];
+    let current = null;
+    let inHeaders = false;
+    for (const line of String(patchText ?? '').split('\n').map(text => text.replace(/\r$/, ''))) {
+        if (/^From [0-9a-f]{40} Mon Sep 17 00:00:00 2001$/.test(line)) {
+            current = { headers: [], message: [], closed: false };
+            commits.push(current);
+            inHeaders = true;
+            continue;
+        }
+        if (!current || current.closed) {
+            continue;
+        }
+        if (inHeaders) {
+            if (line === '') {
+                inHeaders = false;
+            } else if (/^\s/.test(line) && current.headers.length > 0) {
+                current.headers[current.headers.length - 1] += ` ${line.trim()}`;
+            } else {
+                current.headers.push(line);
+            }
+            continue;
+        }
+        if (line === '---') {
+            current.closed = true;
+            continue;
+        }
+        current.message.push(line);
+    }
+    return commits;
+}
+
+function checkPatchCommits(patchText) {
+    const reasons = [];
+    const commits = parsePatchCommits(patchText);
+    if (commits.length === 0) {
+        reasons.push('missing-commit-headers');
+    }
+    for (const commit of commits) {
+        const headers = new Map();
+        let unknownHeader = false;
+        for (const header of commit.headers) {
+            const match = /^([A-Za-z-]+): (.*)$/.exec(header);
+            if (!match || headers.has(match[1].toLowerCase())) {
+                unknownHeader = true;
+                continue;
+            }
+            headers.set(match[1].toLowerCase(), match[2]);
+        }
+        // `git format-patch` writes only these headers for an ASCII commit; MIME headers mean
+        // non-ASCII text, which the templates never contain.
+        if (unknownHeader || [...headers.keys()].some(name => !['from', 'date', 'subject'].includes(name))) {
+            reasons.push('unexpected-commit-header');
+            continue;
+        }
+        const identity = String(headers.get('from') ?? '').replace(/^"([^"]*)"/, '$1');
+        if (identity !== PUBLIC_COMMIT_IDENTITY) {
+            reasons.push('unexpected-commit-author');
+        }
+        const subject = String(headers.get('subject') ?? '').replace(/^\[PATCH(?: \d+\/\d+)?\] /, '');
+        // The blank line between subject and body is the header terminator, so restore it.
+        if (!checkPublicCommitMessage([subject, '', ...commit.message].join('\n'))) {
+            reasons.push('non-template-commit-message');
+        }
+    }
+    return reasons;
+}
+
+/**
+ * Checks every agent-authored string the create and push handlers publish: the PR title and
+ * body, the push `message`, and each commit's author and message in the `am` patches. Every
+ * PR body row must also name a package and target version that the patches add, so the
+ * table cannot carry anything but the upgrade it describes. Returns `{ source, reason }`
+ * violations.
+ */
+function checkPublicText(items, patches) {
+    const violations = [];
+    // A lockfile hunk often names the package only in a context line (for example
+    // `"node_modules/lodash": {`), so the name may appear anywhere in the patch; the target
+    // version must be on an added line.
+    const patchText = [...patches.values()].join('\n').toLowerCase();
+    const addedText = [...patches.values()].flatMap(text => parsePatchFileDiffs(text).flatMap(diff => diff.blocks.flatMap(block => block.added))).join('\n');
+    for (const item of items) {
+        if (item?.type === 'create_pull_request') {
+            const title = String(item.title ?? '').trim();
+            if (title !== PUBLIC_PR_TITLE && title !== `[auto-sec] ${PUBLIC_PR_TITLE}`) {
+                violations.push({ source: 'create_pull_request.title', reason: 'non-template-text' });
+            }
+            const rows = parsePublicPrBody(item.body);
+            if (rows === null) {
+                violations.push({ source: 'create_pull_request.body', reason: 'non-template-text' });
+            } else if (!rows.every(row => patchText.includes(row.name.toLowerCase()) && addedText.includes(row.to.replace(/^(?:[~^=]|[<>]=?)?v?/, '')))) {
+                violations.push({ source: 'create_pull_request.body', reason: 'row-not-in-patch' });
+            }
+        } else if (item?.type === 'push_to_pull_request_branch' && !checkPublicCommitMessage(item.message)) {
+            violations.push({ source: 'push_to_pull_request_branch.message', reason: 'non-template-text' });
+        }
+    }
+    for (const [name, text] of patches) {
+        violations.push(...checkPatchCommits(text).map(reason => ({ source: name, reason })));
+    }
+    return violations;
+}
+
+/**
+ * Runs in the safe_outputs job before the create and push handlers and fails the job when
+ * any published string does not match its fixed template (see `checkPublicText`). The
+ * failure message names only the field and reason, never the rejected text.
+ */
+async function runPublicTextGate({ core, fs = require('node:fs'), env = process.env, patchDir = '/tmp/gh-aw' }) {
+    const path = require('node:path');
+    const outputPath = env.GH_AW_AGENT_OUTPUT;
+    const agentOutput = outputPath && fs.existsSync(outputPath) ? JSON.parse(fs.readFileSync(outputPath, 'utf8')) : {};
+    const items = (Array.isArray(agentOutput?.items) ? agentOutput.items : []).filter(item => ['create_pull_request', 'push_to_pull_request_branch'].includes(item?.type));
+    const names = fs.existsSync(patchDir) ? fs.readdirSync(patchDir).filter(name => /^aw-.*\.patch$/.test(name)).sort() : [];
+    const patches = new Map(names.map(name => [name, fs.readFileSync(path.join(patchDir, name), 'utf8')]));
+    const violations = checkPublicText(items, patches);
+    if (violations.length > 0) {
+        core.setFailed(`auto-sec public text gate failed: ${violations.map(v => `${v.source} ${v.reason}`).join('; ')}`);
+    } else {
+        core.info(`Public text gate passed for ${items.length} output(s) and ${names.length} patch file(s).`);
+    }
+    return { outputs: items.length, patches: names.length, violations };
+}
+
 async function main(argv) {
     const [command, ecosystem, name, version] = argv;
     if (command !== 'lookup' || !ecosystem || !name || !version) {
@@ -1929,7 +2158,9 @@ module.exports = {
     readApprovalRequests,
     runApprovalJob,
     runPatchContentGate,
+    runPublicTextGate,
     runPushTargetGate,
     checkPatchContents,
+    checkPublicText,
     selectNuGetSources,
 };
