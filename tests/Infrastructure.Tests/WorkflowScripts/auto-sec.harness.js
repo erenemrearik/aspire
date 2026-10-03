@@ -8,7 +8,7 @@
 //     malwareNumbers, checkRuns, statuses, reviews, responses, liveHeadSha, liveBaseRef, liveDraft,
 //     liveCheckRuns, liveStatuses } -> { value, reviews, summary, info, warnings }
 //   { mode: "push-gate", agentItems, pr, prOverrides } -> { value, info, failures }
-//   { mode: "patch-gate", patchFiles, workspaceFiles } -> { value, info, failures }
+//   { mode: "patch-gate", patchFiles, workspaceFiles, branchFiles } -> { value, info, failures }
 // PRs may carry `head_repo` (defaults to microsoft/aspire) and `base_ref` (defaults to main).
 // Alerts may carry `vulnerable_version_range` and `advisory_ranges` (every range the
 // advisory lists for the package).
@@ -220,9 +220,24 @@ async function main() {
                 fs.mkdirSync(path.dirname(path.join(workspace, name)), { recursive: true });
                 fs.writeFileSync(path.join(workspace, name), text);
             }
+            const branchFiles = request.branchFiles ?? {};
+            const github = {
+                rest: {
+                    repos: {
+                        getContent: async ({ path: file, ref }) => {
+                            if (ref !== gate.AUTO_SEC_BRANCH || !(file in branchFiles)) {
+                                throw Object.assign(new Error('Not Found'), { status: 404 });
+                            }
+                            return { data: { content: Buffer.from(branchFiles[file], 'utf8').toString('base64') } };
+                        },
+                    },
+                },
+            };
             try {
-                const value = gate.runPatchContentGate({
+                const value = await gate.runPatchContentGate({
                     core: { info: message => info.push(message), setFailed: message => failures.push(message) },
+                    github,
+                    context: { repo: { owner: 'microsoft', repo: 'aspire' } },
                     patchDir,
                     workspace,
                 });

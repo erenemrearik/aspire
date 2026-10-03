@@ -388,27 +388,54 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Equal(expected, result["value"]!.GetValue<bool>());
     }
 
+    private const string PackageJsonBase = "{\n  \"name\": \"x\",\n  \"scripts\": {\n    \"build\": \"vite --mode=1\",\n    \"preinstall\": \"1.0.0\"\n  },\n  \"dependencies\": {\n    \"lodash\": \"^4.17.20\"\n  }\n}\n";
+    private const string PackagesPropsBase = "<Project>\n  <ItemGroup>\n    <PackageVersion Include=\"X\" Version=\"9.0.4\" />\n  </ItemGroup>\n</Project>\n";
+    private const string PyprojectBase = "[tool.x]\ncommand = \"tool --level=1\"\nx = 1\n";
+    private const string PackageLockBase = "{\n  \"packages\": {\n    \"node_modules/lodash\": {\n      \"version\": \"4.17.20\",\n      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\"\n    }\n  }\n}\n";
+
     [Theory]
     [RequiresTools(["node"])]
-    [InlineData("extension/package.json", " \"dependencies\": {\n-    \"lodash\": \"^4.17.20\",\n+    \"lodash\": \"^4.17.21\",\n }", "")]
-    [InlineData("Directory.Packages.props", " <ItemGroup>\n-    <PackageVersion Include=\"X\" Version=\"9.0.4\" />\n+    <PackageVersion Include=\"X\" Version=\"9.0.5\" />\n </ItemGroup>", "")]
-    [InlineData("extension/package-lock.json", "     \"node_modules/lodash\": {\n-      \"version\": \"4.17.20\",\n+      \"version\": \"4.17.21\",\n     }", "")]
-    [InlineData("extension/package.json", " \"scripts\": {\n-    \"build\": \"vite --mode=1\",\n+    \"build\": \"vite --mode=2\",\n }", "non-version-manifest-edit")]
-    [InlineData("extension/package.json", " \"scripts\": {\n+    \"postinstall\": \"node x.js\",\n }", "non-version-manifest-edit")]
-    [InlineData("pyproject.toml", " [tool.x]\n-command = \"tool --level=1\"\n+command = \"tool --level=2\"\n x = 1", "non-version-manifest-edit")]
-    [InlineData("extension/package-lock.json", "     \"node_modules/lodash\": {\n-      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\",\n+      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\",\n     }", "new-package-source")]
-    public async Task PatchContentGateChecksEveryChangedLine(string path, string hunkBody, string expectedReason)
+    [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\"", "workspace", "")]
+    [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\"", "branch", "")]
+    [InlineData("Directory.Packages.props", PackagesPropsBase, "    <PackageVersion Include=\"X\" Version=\"9.0.4\" />", "    <PackageVersion Include=\"X\" Version=\"9.0.5\" />", "workspace", "")]
+    [InlineData("extension/package-lock.json", PackageLockBase, "      \"version\": \"4.17.20\",", "      \"version\": \"4.17.21\",", "workspace", "")]
+    [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\"", "stale", "non-version-manifest-edit")]
+    [InlineData("extension/package.json", PackageJsonBase, "    \"preinstall\": \"1.0.0\"", "    \"preinstall\": \"1.0.1\"", "workspace", "non-version-manifest-edit")]
+    [InlineData("extension/package.json", PackageJsonBase, "    \"build\": \"vite --mode=1\",", "    \"build\": \"vite --mode=2\",", "workspace", "non-version-manifest-edit")]
+    [InlineData("extension/package.json", PackageJsonBase, "  \"scripts\": {", "  \"scripts\": {\n    \"postinstall\": \"node x.js\",", "workspace", "non-version-manifest-edit")]
+    [InlineData("pyproject.toml", PyprojectBase, "command = \"tool --level=1\"", "command = \"tool --level=2\"", "workspace", "non-version-manifest-edit")]
+    [InlineData("extension/package-lock.json", PackageLockBase, "      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\"", "      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"", "workspace", "new-package-source")]
+    public async Task PatchContentGateChecksEveryChangedLine(string path, string baseText, string oldLine, string newLine, string baseLocation, string expectedReason)
     {
-        var lines = hunkBody.Split('\n');
-        var oldCount = lines.Count(line => line[0] is ' ' or '-');
-        var newCount = lines.Count(line => line[0] is ' ' or '+');
-        var patch = $"From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] update\n\n---\ndiff --git a/{path} b/{path}\nindex 1111111..2222222 100644\n--- a/{path}\n+++ b/{path}\n@@ -10,{oldCount} +10,{newCount} @@\n{hunkBody}\n-- \n2.43.0\n";
+        // One-line replacement hunk with a context line on each side, applied at the real
+        // position in baseText and labeled with baseText's git blob ID.
+        var baseLines = baseText.Split('\n');
+        var at = Array.IndexOf(baseLines, oldLine);
+        Assert.True(at > 0 && at + 1 < baseLines.Length);
+        var added = newLine.Split('\n');
+        var hunk = string.Join('\n', [$" {baseLines[at - 1]}", $"-{oldLine}", .. added.Select(line => $"+{line}"), $" {baseLines[at + 1]}"]);
+        var patch = $"From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] update\n\n---\ndiff --git a/{path} b/{path}\nindex {GitBlobId(baseText)[..7]}..2222222 100644\n--- a/{path}\n+++ b/{path}\n@@ -{at},3 +{at},{added.Length + 2} @@\n{hunk}\n-- \n2.43.0\n";
 
-        var result = await RunHarnessAsync(new JsonObject
+        var request = new JsonObject
         {
             ["mode"] = "patch-gate",
             ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
-        });
+        };
+        switch (baseLocation)
+        {
+            case "workspace":
+                request["workspaceFiles"] = new JsonObject { [path] = baseText };
+                break;
+            case "branch":
+                request["branchFiles"] = new JsonObject { [path] = baseText };
+                break;
+            case "stale":
+                // The checked-out file no longer matches the blob the patch was made from.
+                request["workspaceFiles"] = new JsonObject { [path] = baseText + "\n" };
+                break;
+        }
+
+        var result = await RunHarnessAsync(request);
 
         var violations = result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}").ToArray();
         if (expectedReason.Length == 0)
@@ -1044,7 +1071,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         var patchGateSection = compiled[patchGateStep..handlerStep];
         Assert.Contains("contains(needs.agent.outputs.output_types, 'create_pull_request')", patchGateSection, StringComparison.Ordinal);
         Assert.Contains("contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch')", patchGateSection, StringComparison.Ordinal);
-        Assert.Contains("gate.runPatchContentGate({ core })", patchGateSection, StringComparison.Ordinal);
+        Assert.Contains("await gate.runPatchContentGate({ github, context, core })", patchGateSection, StringComparison.Ordinal);
         Assert.Equal(2, Regex.Matches(source, "^    patch-format: am\r?$", RegexOptions.Multiline).Count);
         var compiledPatchFormats = Regex.Matches(compiled, "patch_format\\\\\":\\\\\"([a-z]+)\\\\\"").Select(match => match.Groups[1].Value).ToArray();
         Assert.True(compiledPatchFormats.Length >= 2, "Both code-writing outputs must configure patch_format.");
@@ -1076,6 +1103,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     }
 
     private static JsonObject Response(JsonNode body) => new() { ["status"] = 200, ["body"] = body };
+
+    // Git's object ID for a blob (git's identity scheme, not a security hash), so a test
+    // patch's `index` line names the exact base the gate must rebuild from.
+    private static string GitBlobId(string text)
+    {
+        var body = Encoding.UTF8.GetBytes(text);
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA1.HashData([.. Encoding.ASCII.GetBytes($"blob {body.Length}\0"), .. body]));
+    }
 
     private static string YarnLockEntry(string name, string version, string feedPrefix = "https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/")
         => $"{name}@^{version}:\n  version \"{version}\"\n  resolved \"{feedPrefix}npm/registry/{name}/-/{name}-{version}.tgz\"\n";

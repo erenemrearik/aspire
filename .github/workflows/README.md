@@ -95,8 +95,9 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   fails the run if the agent asks to push to any PR other than the open
   `auto-sec/security-updates` PR from this repository. A second step checks the
   agent's patch (sent with the `am` transport so the checked patch is the one
-  applied) and fails the run if a manifest line other than a dependency version
-  changes or any file adds an unapproved package source. NuGet bumps are made only when the fixed version
+  applied) and fails the run unless each changed manifest, rebuilt in full from
+  the base blob the patch names, differs only in dependency versions, or if any
+  file adds an unapproved package source. NuGet bumps are made only when the fixed version
   already restores from an approved dnceng feed that `NuGet.config` package source
   mapping assigns to the package. Otherwise the alert is reported as blocked on
   mirroring.

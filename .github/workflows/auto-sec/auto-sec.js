@@ -1540,9 +1540,9 @@ async function runPushTargetGate({ github, context, core, fs = require('node:fs'
 //   -    "lodash": "^4.17.20",
 //   +    "lodash": "^4.17.21",
 // Hunk bodies are consumed by the line counts in their `@@` header, so a hunk can never
-// swallow the next `diff --git` header. Each file diff records its change blocks (runs of
-// removed then added lines between context lines); git emits a block's removals before its
-// additions, so the i-th removed line pairs with the i-th added line.
+// swallow the next `diff --git` header. Each file diff records its `index <old>..<new>`
+// blob IDs, its hunks (for rebuilding the patched file), and its change blocks (runs of
+// removed then added lines between context lines).
 function parsePatchFileDiffs(patchText) {
     const diffs = [];
     let current = null;
@@ -1551,22 +1551,27 @@ function parsePatchFileDiffs(patchText) {
         const line = lines[index];
         if (line.startsWith('diff --git ')) {
             const paths = /^diff --git a\/(\S+) b\/(\S+)$/.exec(line);
-            current = { oldPath: paths?.[1] ?? null, newPath: paths?.[2] ?? null, parseable: Boolean(paths), metadata: [], blocks: [] };
+            current = { oldPath: paths?.[1] ?? null, newPath: paths?.[2] ?? null, parseable: Boolean(paths), metadata: [], oldBlob: null, hunks: [], blocks: [] };
             diffs.push(current);
             continue;
         }
         if (!current) {
             continue;
         }
-        const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
+        const hunk = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
         if (!hunk) {
-            if (/^(?:new file mode|deleted file mode|old mode|new mode|rename from|rename to|copy from|copy to|Binary files|GIT binary patch)/.test(line)) {
+            const blobs = /^index ([0-9a-f]+)\.\.([0-9a-f]+)/.exec(line);
+            if (blobs) {
+                current.oldBlob = blobs[1];
+            } else if (/^(?:new file mode|deleted file mode|old mode|new mode|rename from|rename to|copy from|copy to|Binary files|GIT binary patch)/.test(line)) {
                 current.metadata.push(line);
             }
             continue;
         }
-        let oldRemaining = hunk[1] === undefined ? 1 : Number(hunk[1]);
-        let newRemaining = hunk[2] === undefined ? 1 : Number(hunk[2]);
+        let oldRemaining = hunk[2] === undefined ? 1 : Number(hunk[2]);
+        let newRemaining = hunk[3] === undefined ? 1 : Number(hunk[3]);
+        const parsedHunk = { oldStart: Number(hunk[1]), oldCount: oldRemaining, lines: [] };
+        current.hunks.push(parsedHunk);
         let block = null;
         while ((oldRemaining > 0 || newRemaining > 0) && index + 1 < lines.length) {
             const body = lines[index + 1];
@@ -1577,6 +1582,7 @@ function parsePatchFileDiffs(patchText) {
             }
             if (marker === ' ' || body === '') {
                 block = null;
+                parsedHunk.lines.push({ marker: ' ', text: body.slice(1) });
                 oldRemaining--;
                 newRemaining--;
             } else if (marker === '-' || marker === '+') {
@@ -1585,6 +1591,7 @@ function parsePatchFileDiffs(patchText) {
                     current.blocks.push(block);
                 }
                 (marker === '-' ? block.removed : block.added).push(body.slice(1));
+                parsedHunk.lines.push({ marker, text: body.slice(1) });
                 marker === '-' ? oldRemaining-- : newRemaining--;
             } else {
                 break;
@@ -1595,18 +1602,62 @@ function parsePatchFileDiffs(patchText) {
     return diffs;
 }
 
+// Applies parsed hunks to `baseText` at their stated line numbers, requiring every context
+// and removed line to match exactly. Returns the patched text, or null when it does not apply.
+function applyHunks(baseText, hunks) {
+    const base = baseText.split('\n');
+    const out = [];
+    let position = 0;
+    for (const hunk of hunks) {
+        // `@@ -N,0` names the line after which the insertion happens.
+        const start = hunk.oldCount === 0 ? hunk.oldStart : hunk.oldStart - 1;
+        if (start < position || start > base.length) {
+            return null;
+        }
+        out.push(...base.slice(position, start));
+        position = start;
+        for (const { marker, text } of hunk.lines) {
+            if (marker === '+') {
+                out.push(text);
+                continue;
+            }
+            if (base[position] !== text) {
+                return null;
+            }
+            if (marker === ' ') {
+                out.push(text);
+            }
+            position++;
+        }
+    }
+    out.push(...base.slice(position));
+    return out.join('\n');
+}
+
+// Git's object ID for a blob, used to match the `index <old>..<new>` line of a patch to the
+// exact file content it was generated from. This is git's identity scheme, not a security
+// hash: https://git-scm.com/book/en/v2/Git-Internals-Git-Objects
+function gitBlobId(text) {
+    const body = Buffer.from(text, 'utf8');
+    return require('node:crypto').createHash('sha1').update(`blob ${body.length}\0`).update(body).digest('hex');
+}
+
 /**
  * Checks the contents of an agent patch before the create or push handler applies it.
- * The handler's file allowlist admits executable manifests, so every changed line in
- * package.json, pyproject.toml, or Directory.Packages.props must be a dependency-version
- * token swap, and no file may add a package source that is neither approved nor already
- * referenced by the lines it replaces or by `readBaseText(path)`, the file as checked out
- * in the safe_outputs job. Lockfiles list per-package funding and repository URLs, so a
- * newly added transitive entry usually repeats a host the file already contains.
- * Returns `{ path, reason }` violations.
+ * The handler's file allowlist admits executable manifests, so each changed package.json,
+ * pyproject.toml, or Directory.Packages.props is rebuilt in full: the base is the candidate
+ * from `readBaseTexts(path)` whose git blob ID matches the diff's `index` line, the hunks
+ * must apply to it exactly, and `isVersionOnlyEdit` must accept the result (which, for
+ * package.json, also requires the parsed documents to differ only inside dependency maps,
+ * so `"preinstall": "1.0.0"` -> `"1.0.1"` fails). No file may add a package source that is
+ * neither approved nor already referenced by the lines it replaces or by a base candidate.
+ * Lockfiles list per-package funding and repository URLs, so a newly added transitive entry
+ * usually repeats a host the file already contains. Returns `{ path, reason }` violations.
  */
-function checkPatchContents(patchText, readBaseText = () => undefined) {
+function checkPatchContents(patchText, readBaseTexts = () => []) {
     const violations = [];
+    // A later commit in the same patch applies on top of the file an earlier one produced.
+    const rebuilt = new Map();
     for (const diff of parsePatchFileDiffs(patchText)) {
         const path = diff.newPath ?? diff.oldPath ?? '(unknown)';
         if (!diff.parseable || diff.oldPath !== diff.newPath) {
@@ -1617,14 +1668,20 @@ function checkPatchContents(patchText, readBaseText = () => undefined) {
             violations.push({ path, reason: 'unsupported-file-diff' });
             continue;
         }
-        if (VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(path).toLowerCase())
-            && !diff.blocks.every(block => block.removed.length === block.added.length
-                && block.removed.every((line, index) => isDependencyVersionLineSwap(path, line, block.added[index])))) {
-            violations.push({ path, reason: 'non-version-manifest-edit' });
+        const candidates = [...(rebuilt.get(path) ?? []), ...(readBaseTexts(path) ?? [])].filter(text => typeof text === 'string');
+        if (VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(path).toLowerCase())) {
+            const base = diff.oldBlob ? candidates.find(text => gitBlobId(text).startsWith(diff.oldBlob)) : undefined;
+            const normalizedBase = base?.replace(/\r\n/g, '\n');
+            const head = normalizedBase === undefined ? null : applyHunks(normalizedBase, diff.hunks);
+            if (head === null || !isVersionOnlyEdit(path, normalizedBase, head)) {
+                violations.push({ path, reason: 'non-version-manifest-edit' });
+            } else {
+                rebuilt.set(path, [head, ...(rebuilt.get(path) ?? [])]);
+            }
         }
         const removed = diff.blocks.flatMap(block => block.removed).join('\n');
         const added = diff.blocks.flatMap(block => block.added).join('\n');
-        if (findNewSources(`${readBaseText(path) ?? ''}\n${removed}`, added).length > 0) {
+        if (findNewSources(`${candidates.join('\n')}\n${removed}`, added).length > 0) {
             violations.push({ path, reason: 'new-package-source' });
         }
     }
@@ -1634,14 +1691,35 @@ function checkPatchContents(patchText, readBaseText = () => undefined) {
 /**
  * Runs in the safe_outputs job before the create and push handlers. Both outputs use the
  * `am` patch transport, so the `aw-*.patch` files under `patchDir` are exactly what the
- * handlers apply; a bundle file would bypass this check and fails the step instead.
+ * handlers apply; a bundle file would bypass this check and fails the step instead. A
+ * create patch is based on the checked-out workspace and a push patch on the auto-sec
+ * branch, so both versions of each changed file are base candidates.
  */
-function runPatchContentGate({ core, fs = require('node:fs'), patchDir = '/tmp/gh-aw', workspace = process.env.GITHUB_WORKSPACE }) {
+async function runPatchContentGate({ core, github = null, context = null, fs = require('node:fs'), patchDir = '/tmp/gh-aw', workspace = process.env.GITHUB_WORKSPACE }) {
     const path = require('node:path');
     const names = fs.existsSync(patchDir) ? fs.readdirSync(patchDir).filter(name => /^aw-.*\.(?:patch|bundle)$/.test(name)).sort() : [];
-    const readBaseText = file => {
+    const patches = new Map(names.filter(name => name.endsWith('.patch')).map(name => [name, fs.readFileSync(path.join(patchDir, name), 'utf8')]));
+    const branchTexts = new Map();
+    if (github && context) {
+        const changed = new Set([...patches.values()].flatMap(text => parsePatchFileDiffs(text).map(diff => diff.oldPath).filter(Boolean)));
+        for (const file of changed) {
+            try {
+                const { data } = await github.rest.repos.getContent({ ...context.repo, path: file, ref: AUTO_SEC_BRANCH });
+                if (typeof data?.content === 'string') {
+                    branchTexts.set(file, Buffer.from(data.content, 'base64').toString('utf8'));
+                }
+            } catch (error) {
+                // No auto-sec branch yet, or the file is not on it.
+                if (error?.status !== 404) {
+                    throw error;
+                }
+            }
+        }
+    }
+    const readBaseTexts = file => {
         const full = workspace ? path.resolve(workspace, file) : null;
-        return full && full.startsWith(path.resolve(workspace) + path.sep) && fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : undefined;
+        const local = full && full.startsWith(path.resolve(workspace) + path.sep) && fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : undefined;
+        return [local, branchTexts.get(file)];
     };
     const violations = [];
     for (const name of names) {
@@ -1649,7 +1727,7 @@ function runPatchContentGate({ core, fs = require('node:fs'), patchDir = '/tmp/g
             violations.push({ path: name, reason: 'bundle-transport' });
             continue;
         }
-        violations.push(...checkPatchContents(fs.readFileSync(path.join(patchDir, name), 'utf8'), readBaseText));
+        violations.push(...checkPatchContents(patches.get(name), readBaseTexts));
     }
     if (violations.length > 0) {
         core.setFailed(`auto-sec patch content gate failed: ${violations.map(v => `${v.path} ${v.reason}`).join('; ')}`);
