@@ -292,8 +292,9 @@ safe-outputs:
           await gate.runPushTargetGate({ github, context, core });
     # The file allowlist admits executable manifests, so this gate fails the job
     # unless every changed manifest is a dependency-version-only edit of its full
-    # base file and no file adds an unapproved package source. It covers both
-    # code-writing outputs.
+    # base file and no file adds an unapproved package source. Because the patch
+    # is public, no added line may contain advisory text and comment-capable
+    # lockfiles may not gain comments. It covers both code-writing outputs.
     - name: Validate auto-sec patch contents
       if: (!cancelled()) && (contains(needs.agent.outputs.output_types, 'create_pull_request') || contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch'))
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

@@ -427,6 +427,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     private const string PackagesPropsBase = "<Project>\n  <ItemGroup>\n    <PackageVersion Include=\"X\" Version=\"9.0.4\" />\n  </ItemGroup>\n</Project>\n";
     private const string PyprojectBase = "[tool.x]\ncommand = \"tool --level=1\"\nx = 1\n";
     private const string PackageLockBase = "{\n  \"packages\": {\n    \"node_modules/lodash\": {\n      \"version\": \"4.17.20\",\n      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\"\n    }\n  }\n}\n";
+    private const string YarnLockBase = "lodash@^4.17.20:\n  version \"4.17.20\"\n  resolved \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz#abc\"\n";
 
     [Theory]
     [RequiresTools(["node"])]
@@ -434,6 +435,10 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\"", "branch", "")]
     [InlineData("Directory.Packages.props", PackagesPropsBase, "    <PackageVersion Include=\"X\" Version=\"9.0.4\" />", "    <PackageVersion Include=\"X\" Version=\"9.0.5\" />", "workspace", "")]
     [InlineData("extension/package-lock.json", PackageLockBase, "      \"version\": \"4.17.20\",", "      \"version\": \"4.17.21\",", "workspace", "")]
+    [InlineData("app/yarn.lock", YarnLockBase, "  version \"4.17.20\"", "  version \"4.17.21\"", "workspace", "")]
+    [InlineData("app/yarn.lock", YarnLockBase, "  version \"4.17.20\"", "  version \"4.17.21\" # alert 42", "workspace", "lockfile-comment")]
+    [InlineData("app/yarn.lock", YarnLockBase, "  version \"4.17.20\"", "  # fixes 42\n  version \"4.17.21\"", "workspace", "lockfile-comment")]
+    [InlineData("extension/package-lock.json", PackageLockBase, "      \"version\": \"4.17.20\",", "      \"version\": \"4.17.21\",\n      \"note\": \"GHSA-xxxx\",", "workspace", "forbidden-public-text")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\"", "stale", "non-version-manifest-edit")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"preinstall\": \"1.0.0\"", "    \"preinstall\": \"1.0.1\"", "workspace", "non-version-manifest-edit")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"build\": \"vite --mode=1\",", "    \"build\": \"vite --mode=2\",", "workspace", "non-version-manifest-edit")]

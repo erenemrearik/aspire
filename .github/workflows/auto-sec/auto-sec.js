@@ -1880,7 +1880,8 @@ function gitBlobId(text) {
  * package.json, also requires the parsed documents to differ only inside dependency maps,
  * so `"preinstall": "1.0.0"` -> `"1.0.1"` fails). No file may add a package source that is
  * neither approved nor already referenced, outside package metadata, by the lines it
- * replaces or by a base candidate (see `findNewSources`). Returns `{ path, reason }` violations.
+ * replaces or by a base candidate (see `findNewSources`). No added line may contain advisory
+ * text, and comment-capable lockfiles may not gain comments. Returns `{ path, reason }` violations.
  */
 function checkPatchContents(patchText, readBaseTexts = () => []) {
     const violations = [];
@@ -1915,8 +1916,28 @@ function checkPatchContents(patchText, readBaseTexts = () => []) {
         if (findNewSources([...candidates, removed].join(`\n${segmentBreak}\n`), added, path, segmentBreak).length > 0) {
             violations.push({ path, reason: 'new-package-source' });
         }
+        // The patch becomes public, so no added line may carry advisory text, and lockfiles,
+        // which skip the version-only check, may not gain comments to carry free text.
+        const addedLines = diff.blocks.flatMap(block => block.added);
+        if (addedLines.some(line => PUBLIC_FORBIDDEN_TOKEN.test(line))) {
+            violations.push({ path, reason: 'forbidden-public-text' });
+        }
+        if (COMMENT_LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase()) && addedLines.some(hasLockfileComment)) {
+            violations.push({ path, reason: 'lockfile-comment' });
+        }
     }
     return violations;
+}
+
+// Lockfiles whose formats allow `#` comments: yarn.lock (https://classic.yarnpkg.com/lang/en/docs/yarn-lock/),
+// pnpm-lock.yaml (YAML), and uv.lock (TOML). JSON lockfiles have no comment syntax.
+const COMMENT_LOCKFILE_BASENAMES = new Set(['yarn.lock', 'pnpm-lock.yaml', 'uv.lock']);
+
+// True when the line has a `#` comment outside quoted strings, for example
+//   # note        or   version = "1.0.0" # note
+// while `resolved "https://x/y.tgz#sha1"` (a quoted `#`) is not a comment.
+function hasLockfileComment(line) {
+    return /(?:^|\s)#/.test(line.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""'));
 }
 
 /**
