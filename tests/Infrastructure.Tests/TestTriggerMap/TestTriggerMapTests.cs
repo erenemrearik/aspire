@@ -1012,6 +1012,22 @@ public sealed class TestTriggerMapTests
             result.Jobs.Order(StringComparer.Ordinal));
     }
 
+    [Theory]
+    [InlineData("src/Aspire.ProjectTemplates/templates/aspire-ts-cs-starter/frontend/package.json")]
+    [InlineData("src/Aspire.ProjectTemplates/templates/aspire-ts-cs-starter/frontend/package-lock.json")]
+    public void ProjectTemplateFrontendDependencyInputsRunCliSecurityGuards(string path)
+    {
+        var result = SelectWithRealMap(path);
+
+        Assert.False(result.SelectsAll);
+        Assert.Equal(
+            ["Aspire.Cli.EndToEnd.Tests", "Aspire.Cli.Tests", "Aspire.Templates.Tests"],
+            result.TestProjects.Order(StringComparer.Ordinal));
+        Assert.Equal(
+            ["job:deployment-e2e", "job:homebrew-installer", "job:winget-installer"],
+            result.Jobs.Order(StringComparer.Ordinal));
+    }
+
     [Fact]
     public void CliStarterValidationDoesNotRunForSharedTestUtilityChange()
     {
