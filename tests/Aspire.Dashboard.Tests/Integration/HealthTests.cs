@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Net;
 using Aspire.Dashboard.Utils;
 using Microsoft.AspNetCore.InternalTesting;
+using Microsoft.DotNet.RemoteExecutor;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using OpenTelemetry;
@@ -13,7 +14,6 @@ using Xunit;
 
 namespace Aspire.Dashboard.Tests.Integration;
 
-[Collection(nameof(HealthTestsCollection))]
 public class HealthTests(HealthTests.Fixture fixture) : IClassFixture<HealthTests.Fixture>
 {
     private const string TestActivitySourceName = "Aspire.Dashboard.Tests.Integration.HealthTests";
@@ -86,20 +86,18 @@ public class HealthTests(HealthTests.Fixture fixture) : IClassFixture<HealthTest
     [InlineData("custom-dashboard", null, "custom-dashboard", null)]
     [InlineData(null, "service.name=resource-dashboard", "resource-dashboard", null)]
     [InlineData(null, "service.name=resource-dashboard,service.instance.id=stable-instance", "resource-dashboard", "stable-instance")]
-    public async Task OtlpExporterConfigured_ConfiguresResourceIdentity(
+    public void OtlpExporterConfigured_ConfiguresResourceIdentity(
         string? configuredServiceName,
         string? configuredResourceAttributes,
         string expectedServiceName,
         string? expectedServiceInstanceId)
     {
-        var originalServiceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME");
-        var originalResourceAttributes = Environment.GetEnvironmentVariable("OTEL_RESOURCE_ATTRIBUTES");
+        var options = new RemoteInvokeOptions();
+        SetEnvironmentVariable(options, "OTEL_SERVICE_NAME", configuredServiceName);
+        SetEnvironmentVariable(options, "OTEL_RESOURCE_ATTRIBUTES", configuredResourceAttributes);
 
-        try
+        RemoteExecutor.Invoke(static async (expectedServiceName, expectedServiceInstanceId) =>
         {
-            Environment.SetEnvironmentVariable("OTEL_SERVICE_NAME", configuredServiceName);
-            Environment.SetEnvironmentVariable("OTEL_RESOURCE_ATTRIBUTES", configuredResourceAttributes);
-
             await using var app = IntegrationTestHelpers.CreateDashboardWebApplication(
                 NullLoggerFactory.Instance,
                 config => config["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:1");
@@ -108,7 +106,7 @@ public class HealthTests(HealthTests.Fixture fixture) : IClassFixture<HealthTest
 
             var resourceAttributes = app.Services.GetRequiredService<TracerProvider>().GetResource().Attributes.ToDictionary();
             Assert.Equal(expectedServiceName, resourceAttributes["service.name"]);
-            if (expectedServiceInstanceId is null)
+            if (expectedServiceInstanceId.Length == 0)
             {
                 Assert.False(resourceAttributes.ContainsKey("service.instance.id"));
             }
@@ -116,11 +114,18 @@ public class HealthTests(HealthTests.Fixture fixture) : IClassFixture<HealthTest
             {
                 Assert.Equal(expectedServiceInstanceId, resourceAttributes["service.instance.id"]);
             }
-        }
-        finally
+        }, expectedServiceName, expectedServiceInstanceId ?? string.Empty, options).Dispose();
+
+        static void SetEnvironmentVariable(RemoteInvokeOptions options, string name, string? value)
         {
-            Environment.SetEnvironmentVariable("OTEL_SERVICE_NAME", originalServiceName);
-            Environment.SetEnvironmentVariable("OTEL_RESOURCE_ATTRIBUTES", originalResourceAttributes);
+            if (value is null)
+            {
+                options.StartInfo.Environment.Remove(name);
+            }
+            else
+            {
+                options.StartInfo.Environment[name] = value;
+            }
         }
     }
 
@@ -148,9 +153,6 @@ public class HealthTests(HealthTests.Fixture fixture) : IClassFixture<HealthTest
             TestActivitySource.Dispose();
         }
     }
-
-    [CollectionDefinition(nameof(HealthTestsCollection), DisableParallelization = true)]
-    public sealed class HealthTestsCollection;
 
     internal sealed class TestActivityExporter : BaseExporter<Activity>
     {
