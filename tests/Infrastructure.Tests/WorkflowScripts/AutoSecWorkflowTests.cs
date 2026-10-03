@@ -55,6 +55,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("non-dependabot-commit")]
     [InlineData("non-dependabot-commit-unverified")]
     [InlineData("non-version-manifest-edit")]
+    [InlineData("unbound-lockfile-artifact")]
     [InlineData("package-source-changed")]
     [InlineData("package-source-changed-other-org")]
     [InlineData("breaking-change")]
@@ -211,6 +212,11 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 break;
             case "fixes-no-open-alert":
                 scenario["alerts"]![0]!["first_patched_version"] = "4.17.22";
+                break;
+            case "unbound-lockfile-artifact":
+                // A verified commit with Dependabot author metadata keeps lodash@4.17.21 but
+                // points it at another package's tarball on the same approved registry.
+                scenario["contents"]!["extension/yarn.lock@head"] = YarnLockEntry("lodash", "4.17.21").Replace("/lodash/-/lodash-4.17.21.tgz", "/evil/-/evil-1.0.0.tgz", StringComparison.Ordinal);
                 break;
             case "fixes-no-open-alert-later-vulnerable-range":
                 // 4.17.21 is past the first patched version but inside a later range the
@@ -884,6 +890,38 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         });
 
         Assert.Equal(expected, string.Join(",", result["value"]!.AsArray().Select(source => source!.GetValue<string>())));
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("extension/package-lock.json", "", """{"packages":{"node_modules/lodash":{"version":"4.17.21","resolved":"https://r.example/lodash/-/lodash-4.17.21.tgz"}}}""", 0)]
+    [InlineData("extension/package-lock.json", "", """{"packages":{"node_modules/lodash":{"version":"4.17.21","resolved":"https://r.example/evil/-/evil-1.0.0.tgz"}}}""", 1)]
+    [InlineData("extension/package-lock.json", "", """{"packages":{"node_modules/lodash":{"version":"4.17.21","resolved":"https://r.example/lodash/-/lodash-4.17.20.tgz"}}}""", 1)]
+    [InlineData("extension/package-lock.json", "", """{"packages":{"node_modules/@babel/parser":{"version":"7.29.3","resolved":"https://r.example/@babel%2fparser/-/parser-7.29.3.tgz"}}}""", 0)]
+    [InlineData("extension/package-lock.json", "", """{"packages":{"node_modules/my-lodash":{"name":"lodash","version":"4.17.21","resolved":"https://r.example/lodash/-/lodash-4.17.21.tgz"}}}""", 0)]
+    [InlineData("extension/package-lock.json", "", """{"dependencies":{"my-lodash":{"version":"npm:lodash@4.17.21","resolved":"https://r.example/lodash/-/lodash-4.17.21.tgz"}}}""", 0)]
+    [InlineData("extension/package-lock.json", "", """{"dependencies":{"lodash":{"version":"4.17.21","resolved":"https://r.example/evil/-/evil-1.0.0.tgz"}}}""", 1)]
+    // An artifact the base already carries was reviewed when it landed.
+    [InlineData("extension/package-lock.json", """{"packages":{"node_modules/x":{"version":"1.0.0","resolved":"https://r.example/x/-/y-1.0.0.tgz"}}}""", """{"packages":{"node_modules/x":{"version":"1.0.0","resolved":"https://r.example/x/-/y-1.0.0.tgz"}}}""", 0)]
+    [InlineData("extension/yarn.lock", "", "my-lodash@npm:lodash@^4:\n  version \"4.17.21\"\n  resolved \"https://r.example/lodash/-/lodash-4.17.21.tgz#abc\"\n", 0)]
+    [InlineData("extension/yarn.lock", "", "\"lodash@npm:^4\":\n  version: 4.17.21\n  resolution: \"lodash@npm:4.17.21\"\n", 0)]
+    [InlineData("extension/yarn.lock", "", "\"lodash@npm:^4\":\n  version: 4.17.21\n  resolution: \"evil@npm:1.0.0\"\n", 1)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  lodash@4.17.21:\n    resolution: {integrity: sha512-x, tarball: https://r.example/lodash/-/lodash-4.17.21.tgz}\n", 0)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  lodash@4.17.21:\n    resolution: {integrity: sha512-x, tarball: https://r.example/evil/-/evil-1.0.0.tgz}\n", 1)]
+    [InlineData("uv.lock", "", "[[package]]\nname = \"Jinja2\"\nversion = \"3.1.6\"\nsource = { registry = \"https://pypi.org/simple\" }\nsdist = { url = \"https://f.example/jinja2-3.1.6.tar.gz\", hash = \"sha256:x\" }\nwheels = [\n    { url = \"https://f.example/jinja2-3.1.6-py3-none-any.whl\", hash = \"sha256:y\" },\n]\n", 0)]
+    [InlineData("uv.lock", "", "[[package]]\nname = \"python-dateutil\"\nversion = \"2.8.2\"\nsdist = { url = \"https://f.example/python-dateutil-2.8.2.tar.gz\" }\n", 0)]
+    [InlineData("uv.lock", "", "[[package]]\nname = \"jinja2\"\nversion = \"3.1.6\"\nwheels = [\n    { url = \"https://f.example/evil-1.0-py3-none-any.whl\" },\n]\n", 1)]
+    [InlineData("uv.lock", "", "[[package]]\nname = \"jinja2\"\nversion = \"3.1.6\"\nsdist = { url = \"https://f.example/jinja2-3.1.5.tar.gz\" }\n", 1)]
+    public async Task FindsLockfileArtifactsNotBoundToTheirEntry(string path, string baseText, string headText, int expectedCount)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "unboundLockfileArtifacts",
+            ["args"] = new JsonArray(path, baseText, headText),
+        });
+
+        Assert.Equal(expectedCount, result["value"]!.AsArray().Count);
     }
 
     [Fact]

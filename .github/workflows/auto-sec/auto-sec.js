@@ -674,6 +674,143 @@ function uvLockEntries(text) {
     return entries;
 }
 
+// Real package name behind an npm alias selector, or the name itself:
+//   lodash, ^4                      -> lodash
+//   my-lodash, npm:lodash@^4        -> lodash
+//   lodash, npm:^4 (yarn berry)     -> lodash
+function npmRealName(name, range) {
+    const target = String(range ?? '').startsWith('npm:') ? splitNpmSpec(range.slice(4)) : null;
+    return target?.range ? target.name : name;
+}
+
+// An npm registry tarball path names its package and version:
+//   <registry>/lodash/-/lodash-4.17.21.tgz
+//   <registry>/@babel/parser/-/parser-7.29.3.tgz   (the scope slash may be %2f)
+function isNpmTarballFor(url, names, version) {
+    let pathname;
+    try {
+        pathname = decodeURIComponent(new URL(url).pathname);
+    } catch {
+        return false;
+    }
+    return [...names].some(name => pathname.endsWith(`/${name}/-/${name.split('/').pop()}-${version}.tgz`));
+}
+
+// PyPI distribution filenames (https://packaging.python.org/en/latest/specifications/binary-distribution-format/,
+// https://packaging.python.org/en/latest/specifications/source-distribution-format/):
+//   jinja2-3.1.6-py3-none-any.whl     Jinja2-3.1.6.tar.gz     python-dateutil-2.8.2.tar.gz
+// Names compare after PEP 503 normalization; the version must match exactly.
+function isPythonDistributionFor(url, name, version) {
+    let file;
+    try {
+        file = decodeURIComponent(new URL(url).pathname.split('/').pop());
+    } catch {
+        return false;
+    }
+    const normalize = value => value.toLowerCase().replace(/[-_.]+/g, '-');
+    let distName;
+    let distVersion;
+    if (file.endsWith('.whl')) {
+        [distName, distVersion] = file.slice(0, -4).split('-');
+    } else {
+        const stem = file.replace(/\.(?:tar\.gz|tar\.bz2|tgz|zip)$/, '');
+        const dash = stem.lastIndexOf('-');
+        if (stem === file || dash < 0) {
+            return false;
+        }
+        [distName, distVersion] = [stem.slice(0, dash), stem.slice(dash + 1)];
+    }
+    return normalize(distName ?? '') === normalize(name) && distVersion === version;
+}
+
+// Each artifact a lockfile downloads, with the identity the entry claims for it. `bound`
+// is true only when the artifact itself names that package and version, so a lockfile
+// cannot keep `lodash@4.17.21` while pointing it at another package's tarball on the same
+// registry. Install-time integrity checks then verify the bytes against that artifact.
+//   package-lock.json:  "node_modules/lodash": { "version": "4.17.21", "resolved": "<url>" }
+//   yarn.lock classic:  lodash@^4:\n  version "4.17.21"\n  resolved "<url>#sha1"
+//   yarn.lock berry:    "lodash@npm:^4":\n  version: 4.17.21\n  resolution: "lodash@npm:4.17.21"
+//   pnpm-lock.yaml:     lodash@4.17.21:\n    resolution: {integrity: sha512-x, tarball: <url>}
+//   uv.lock:            [[package]]\nname = "jinja2"\nversion = "3.1.6"\nsdist = { url = "<url>" }
+function lockfileArtifacts(path, text) {
+    const basename = basenameOf(path).toLowerCase();
+    const artifacts = [];
+    const add = (key, value, bound) => artifacts.push({ key: `${key}\0${value}`, bound });
+    if (METADATA_LOCKFILE_BASENAMES.has(basename)) {
+        const json = readJson(text);
+        for (const [key, entry] of Object.entries(json?.packages ?? {})) {
+            const index = key.lastIndexOf('node_modules/');
+            if (index >= 0 && typeof entry?.resolved === 'string' && !entry.link) {
+                const name = typeof entry.name === 'string' ? entry.name : key.slice(index + 'node_modules/'.length);
+                add(key, entry.resolved, isNpmTarballFor(entry.resolved, [name], entry.version));
+            }
+        }
+        const visit = (dependencies, parent) => {
+            for (const [key, entry] of Object.entries(dependencies ?? {})) {
+                const path = `${parent}/${key}`;
+                if (typeof entry?.resolved === 'string') {
+                    const alias = String(entry.version ?? '').startsWith('npm:') ? splitNpmSpec(entry.version.slice(4)) : null;
+                    add(`v1${path}`, entry.resolved, isNpmTarballFor(entry.resolved, [alias?.name ?? key], alias?.range ?? entry.version));
+                }
+                visit(entry?.dependencies, path);
+            }
+        };
+        visit(json?.dependencies, '');
+    } else if (basename === 'yarn.lock') {
+        let header = '';
+        let names = new Set();
+        let version = '';
+        for (const line of String(text ?? '').split(/\r?\n/)) {
+            let match;
+            if (/^\S/.test(line)) {
+                header = line.startsWith('#') ? '' : line.trimEnd();
+                names = new Set(header.replace(/:$/, '').split(',')
+                    .map(spec => splitNpmSpec(spec.trim().replace(/^"|"$/g, '')))
+                    .filter(spec => spec.name)
+                    .map(spec => npmRealName(spec.name, spec.range)));
+                version = '';
+            } else if ((match = /^ {2}version:?\s+"?([^"\s]+)"?\s*$/.exec(line))) {
+                version = match[1];
+            } else if ((match = /^ {2}resolved\s+"?([^"\s]+)"?\s*$/.exec(line))) {
+                add(header, match[1], isNpmTarballFor(match[1].split('#')[0], names, version));
+            } else if ((match = /^ {2}resolution:\s+"?([^"\s]+)"?\s*$/.exec(line))) {
+                const resolved = splitNpmSpec(match[1]);
+                add(header, match[1], names.has(resolved.name) && resolved.range === `npm:${version}`);
+            }
+        }
+    } else if (basename === 'pnpm-lock.yaml') {
+        let entry = null;
+        for (const line of String(text ?? '').split(/\r?\n/)) {
+            let match;
+            if ((match = /^ {2}(\S.*?):\s*$/.exec(line))) {
+                const key = match[1].replace(/^'|'$/g, '').replace(/\(.*$/, '').replace(/^\//, '');
+                const spec = splitNpmSpec(key);
+                const slash = key.lastIndexOf('/');
+                entry = spec.range ? spec : slash > 0 ? { name: key.slice(0, slash), range: key.slice(slash + 1) } : null;
+            } else if (entry && (match = /^ {4}resolution:.*\btarball:\s*'?([^,'}\s]+)/.exec(line))) {
+                add(`${entry.name}@${entry.range}`, match[1], isNpmTarballFor(match[1], [entry.name], entry.range));
+            }
+        }
+    } else if (basename === 'uv.lock') {
+        for (const block of String(text ?? '').split(/^\[\[package\]\]\s*$/m).slice(1)) {
+            const body = block.split(/^\[/m)[0];
+            const name = /^name\s*=\s*"([^"]+)"/m.exec(body)?.[1] ?? '';
+            const version = /^version\s*=\s*"([^"]+)"/m.exec(body)?.[1] ?? '';
+            for (const [, url] of body.matchAll(/\burl\s*=\s*"([^"]+)"/g)) {
+                add(`${name}@${version}`, url, isPythonDistributionFor(url, name, version));
+            }
+        }
+    }
+    return artifacts;
+}
+
+// Artifacts the head lockfile adds that do not name the package and version their entry
+// claims. Artifacts already present in the base are trusted as reviewed.
+function unboundLockfileArtifacts(path, baseText, headText) {
+    const existing = new Set(lockfileArtifacts(path, baseText).map(artifact => artifact.key));
+    return lockfileArtifacts(path, headText).filter(artifact => !artifact.bound && !existing.has(artifact.key));
+}
+
 // pyproject.toml PEP 508 requirement strings (https://peps.python.org/pep-0508/):
 //   "jinja2>=3.1.6", "jinja2[i18n]==3.1.6; python_version >= '3.9'", "jinja2 ~= 3.1.6, < 4"
 // Only the lower or exact bound proves the version, so `<`, `<=` and `!=` are ignored.
@@ -1226,10 +1363,14 @@ function evaluateApprovalGates(input) {
     }
     // Commit author metadata is caller-controlled and the verified bit only proves some
     // trusted key signed it, so also prove from the content that executable manifests
-    // changed nothing but version tokens.
+    // changed nothing but version tokens and that every new lockfile artifact is the
+    // package and version its entry names.
     if (files.some(file => VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(file.filename).toLowerCase())
         && !isVersionOnlyEdit(file.filename, baseContents[file.filename], headContents[file.filename]))) {
         reasons.push('non-version-manifest-edit');
+    }
+    if (files.some(file => unboundLockfileArtifacts(file.filename, baseContents[file.filename], headContents[file.filename]).length > 0)) {
+        reasons.push('unbound-lockfile-artifact');
     }
     if (sourceChanges.some(change => change.newSources.length > 0)) {
         reasons.push('package-source-changed');
@@ -2378,6 +2519,7 @@ module.exports = {
     inVulnerableRanges,
     isAllowedManifest,
     isVersionOnlyEdit,
+    unboundLockfileArtifacts,
     isBreakingChange,
     isCooldownSatisfied,
     lookupPackageVersion,
