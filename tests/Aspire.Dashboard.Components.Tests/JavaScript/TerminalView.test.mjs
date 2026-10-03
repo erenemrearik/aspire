@@ -270,7 +270,7 @@ function mount({ visible = true, dotNetRef, options = {} } = {}) {
         focus() { document.activeElement = this; },
     });
     const viewId = options.viewId ?? `view-${++serial}`;
-    const id = terminal.initTerminal(element, "wss://dashboard/api/terminal?resource=app&replica=1",
+    const id = terminal.initTerminal(element, "wss://dashboard/api/terminal?resource=app-instance-1",
         dotNetRef ?? { invokeMethodAsync: (name, value) => {
             assert.equal(name, "OnTerminalStateChanged");
             snapshots.push(value);
@@ -322,7 +322,7 @@ test("pointer focus listeners follow replacement clients and are removed on disp
     attempts[0].resolve();
     await settle();
     const original = attempts[0].client;
-    terminal.reconnectTerminal(id, "wss://dashboard/api/terminal?resource=other&replica=1");
+    terminal.reconnectTerminal(id, "wss://dashboard/api/terminal?resource=other-instance-1");
     attempts[1].resolve();
     await settle();
     const replacement = attempts[1].client;
@@ -468,7 +468,7 @@ test("palette override updates every view including pending and hidden mounts wi
     assert.equal(attempts.length, 2);
     terminal.setTerminalPalette("dark");
     assert.equal(client.colorMode, "dark");
-    terminal.reconnectTerminal(first.id, "wss://dashboard/api/terminal?resource=app&replica=1");
+    terminal.reconnectTerminal(first.id, "wss://dashboard/api/terminal?resource=app-instance-1");
     assert.equal(attempts[2].options.colorMode, "dark");
     assert.equal(document.documentElement.dataset.theme, "dark");
 });
@@ -649,7 +649,7 @@ test("palette, theme and contrast changes replace the complete overlay without r
     assert.equal(attempt.client.selectionClears, 0);
     assert.equal(attempt.client.selection, selection);
     assert.equal(attempt.client.focusCalls, focusCalls);
-    terminal.reconnectTerminal(id, "wss://dashboard/api/terminal?resource=app&replica=1");
+    terminal.reconnectTerminal(id, "wss://dashboard/api/terminal?resource=app-instance-1");
     assert.equal(attempts[1].options.scrollbar, attempt.client.scrollbar);
     assert.equal(attempts[1].options.colorMode, "light");
     assert.deepEqual(attempts[1].options.lightModePalette, attempt.options.lightModePalette);
@@ -998,7 +998,7 @@ test("init returns an id while mount waits for its first connected frame", async
     const { id } = mount();
     assert.equal(terminal.getToolbarState(id).connected, false);
     assert.equal(attempts[0].options.label, "Localized terminal input");
-    assert.equal(attempts[0].options.url, "wss://dashboard/api/terminal?resource=app&replica=1");
+    assert.equal(attempts[0].options.url, "wss://dashboard/api/terminal?resource=app-instance-1");
     assert.equal(attempts[0].options.renderer, "auto");
     assert.equal(attempts[0].options.padding, 3);
     attempts[0].options.onStatus("Socket open", "ready");
@@ -1229,7 +1229,7 @@ test("Firefox keeps WebGL2 on automatic retries and explicit reconnects", async 
     assert.equal(attempts[1].options.renderer, "webgl2");
     attempts[1].resolve();
     await settle();
-    terminal.reconnectTerminal(id, "wss://dashboard/api/terminal?resource=other&replica=2");
+    terminal.reconnectTerminal(id, "wss://dashboard/api/terminal?resource=other-instance-2");
     assert.equal(attempts[2].options.renderer, "webgl2");
     attempts[2].resolve();
     await settle();
@@ -1254,7 +1254,7 @@ test("mount failure reports an error and retries with a fresh abortable generati
 
 test("resource reconnect aborts pending mount and ignores late completion and callbacks", async () => {
     const { id } = mount();
-    assert.equal(terminal.reconnectTerminal(id, "wss://dashboard/api/terminal?resource=other&replica=2"), 2);
+    assert.equal(terminal.reconnectTerminal(id, "wss://dashboard/api/terminal?resource=other-instance-2"), 2);
     assert.equal(attempts[0].options.signal.aborted, true);
     attempts[1].resolve();
     await settle();

@@ -68,6 +68,8 @@
   </PropertyGroup>
   <!-- .NET 11.0 Package Versions used by project templates -->
   <PropertyGroup Label="Net11Preview">
+    <MicrosoftAspNetCoreComponentsGatewayCliNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreComponentsGatewayCliNet11Version>
+    <MicrosoftAspNetCoreComponentsWebAssemblyNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreComponentsWebAssemblyNet11Version>
     <MicrosoftAspNetCoreAuthenticationCertificateNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationCertificateNet11Version>
     <MicrosoftAspNetCoreAuthenticationOpenIdConnectNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationOpenIdConnectNet11Version>
     <MicrosoftAspNetCoreOpenApiNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreOpenApiNet11Version>
@@ -75,6 +77,7 @@
     <MicrosoftExtensionsCachingMemoryNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsCachingMemoryNet11Version>
     <MicrosoftExtensionsConfigurationBinderNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsConfigurationBinderNet11Version>
     <MicrosoftExtensionsConfigurationEnvironmentVariablesNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsConfigurationEnvironmentVariablesNet11Version>
+    <MicrosoftExtensionsFeaturesNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsFeaturesNet11Version>
     <MicrosoftExtensionsFileSystemGlobbingNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsFileSystemGlobbingNet11Version>
     <MicrosoftExtensionsHttpNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsHttpNet11Version>
     <MicrosoftExtensionsLoggingNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsLoggingNet11Version>
