@@ -19,8 +19,6 @@ jobs:
   generate-and-pr:
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'microsoft' }}
-    env:
-      NUGET_PACKAGES: /mnt/nuget/packages
     strategy:
       fail-fast: false
       matrix:

@@ -50,8 +50,6 @@ jobs:
        startsWith(github.event.comment.body, '/create-issue'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      NUGET_PACKAGES: /mnt/nuget/packages
     permissions:
       contents: read # checkout repository
       issues: write # create/reopen/comment on issues

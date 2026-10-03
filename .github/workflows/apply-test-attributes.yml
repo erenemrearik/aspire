@@ -22,8 +22,6 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      NUGET_PACKAGES: /mnt/nuget/packages
     permissions:
       contents: write
       issues: write

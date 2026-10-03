@@ -79,7 +79,6 @@ jobs:
     # application under a debugger, so it needs more than the shared budget.
     timeout-minutes: ${{ matrix.timeoutMinutes || 75 }}
     env:
-      NUGET_PACKAGES: ${{ matrix.name == 'Linux' && '/mnt/nuget/packages' || format('{0}/.nuget/packages', github.workspace) }}
       NPM_REGISTRY: https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/
       COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
     strategy:
@@ -460,6 +459,11 @@ jobs:
         shell: pwsh
 
     steps:
+      - name: Configure NuGet package cache (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: echo "NUGET_PACKAGES=${{ github.workspace }}/.nuget/packages" >> $env:GITHUB_ENV
+
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

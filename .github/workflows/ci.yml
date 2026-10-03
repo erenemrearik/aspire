@@ -110,8 +110,6 @@ jobs:
     runs-on: 8-core-ubuntu-latest
     needs: [prepare_for_ci]
     if: ${{ github.repository_owner == 'microsoft' && needs.prepare_for_ci.outputs.skip_workflow != 'true' }}
-    env:
-      NUGET_PACKAGES: /mnt/nuget/packages
     steps:
       # The actual stabilization work only makes sense for pull_request events. On push
       # (including push to release branches with StabilizePackageVersion=true) the build is

@@ -25,7 +25,6 @@ jobs:
     permissions:
       contents: read
     env:
-      NUGET_PACKAGES: /mnt/nuget/packages
       # Single source of truth for the selection-summary path: passed to the select-tests action
       # (so it writes here) and reused by the upload step below (so it uploads the same file).
       # Mirrors the action's own default; keeping it here lets one value drive both the write and

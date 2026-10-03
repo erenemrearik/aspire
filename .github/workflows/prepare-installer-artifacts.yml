@@ -11,8 +11,6 @@ jobs:
   prepare_installer_artifacts:
     name: Prepare ${{ inputs.installer == 'winget' && 'WinGet manifests' || 'Homebrew cask' }}
     runs-on: ${{ inputs.installer == 'winget' && 'windows-latest' || 'macos-latest' }}
-    env:
-      NUGET_PACKAGES: ${{ format('{0}/.nuget/packages', github.workspace) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -93,6 +91,8 @@ jobs:
       - name: Smoke test installed CLI (aspire new + restore)
         if: ${{ inputs.installer == 'winget' }}
         shell: pwsh
+        env:
+          NUGET_PACKAGES: ${{ format('{0}/.nuget/packages', github.workspace) }}
         run: |
           $ErrorActionPreference = 'Stop'
           # winget added the shim under %LOCALAPPDATA%\Microsoft\WinGet\Links during the
