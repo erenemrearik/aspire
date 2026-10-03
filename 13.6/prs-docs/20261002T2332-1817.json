@@ -1,0 +1,9 @@
+{
+  "author": "davidfowl",
+  "comment": "General docs clarification of .NET SDK prerequisite wording; not documentation of a specific milestone feature, no match found",
+  "mergedAt": "2026-10-02T23:32:50Z",
+  "number": 1817,
+  "runDate": "2026-10-03T00:08:34Z",
+  "status": "excluded",
+  "title": "Clarify .NET SDK requirements in CLI and deployment docs"
+}
