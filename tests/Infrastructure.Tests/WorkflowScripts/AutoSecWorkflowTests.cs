@@ -470,28 +470,63 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}"));
     }
 
-    [Fact]
+    [Theory]
     [RequiresTools(["node"])]
-    public async Task PatchContentGateAllowsSourcesAlreadyInTheCheckedOutFile()
+    // A new transitive lockfile entry repeats a delivery host the file already uses.
+    [InlineData("      \"resolved\": \"https://registry.example.com/x/-/x-1.0.0.tgz\"", "{\n  \"resolved\": \"https://registry.example.com/y/-/y-1.0.0.tgz\"\n}\n", "")]
+    [InlineData("      \"resolved\": \"https://registry.example.com/x/-/x-1.0.0.tgz\"", null, "new-package-source")]
+    // Funding links are not delivery sources, so they neither need nor grant authorization.
+    [InlineData("      \"funding\": { \"url\": \"https://opencollective.com/x\" },", null, "")]
+    [InlineData("      \"resolved\": \"https://github.com/o/x/archive/v1.tgz\"", "{\n  \"funding\": {\n    \"url\": \"https://github.com/sponsors/y\"\n  }\n}\n", "new-package-source")]
+    [InlineData("      \"resolved\": \"https://github.com/o/x/archive/v1.tgz\"", "{\n  \"funding\": \"https://github.com/sponsors/y\"\n}\n", "new-package-source")]
+    // A metadata object opened in one block must not hide a source added in a later block.
+    [InlineData("      \"funding\": {\n \n      \"resolved\": \"https://evil.example/x.tgz\"", null, "new-package-source")]
+    public async Task PatchContentGateAllowsOnlyDeliverySourcesAlreadyInTheCheckedOutFile(string addedLines, string? baseText, string expectedReason)
     {
-        // A new transitive lockfile entry repeats hosts the file already lists.
-        var patch = "diff --git a/extension/package-lock.json b/extension/package-lock.json\nindex 1111111..2222222 100644\n--- a/extension/package-lock.json\n+++ b/extension/package-lock.json\n@@ -1,1 +1,2 @@\n   \"packages\": {\n+    \"node_modules/x\": { \"funding\": \"https://github.com/sponsors/x\" },\n";
-        var known = await RunHarnessAsync(new JsonObject
+        var lines = addedLines.Split('\n');
+        var body = string.Join('\n', lines.Select(line => line.Trim().Length == 0 ? line : $"+{line}"));
+        var contextCount = lines.Count(line => line.Trim().Length == 0);
+        var patch = $"diff --git a/extension/package-lock.json b/extension/package-lock.json\nindex 1111111..2222222 100644\n--- a/extension/package-lock.json\n+++ b/extension/package-lock.json\n@@ -1,{contextCount + 1} +1,{lines.Length + 1} @@\n   \"packages\": {{\n{body}\n";
+        var request = new JsonObject
         {
             ["mode"] = "patch-gate",
             ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
-            ["workspaceFiles"] = new JsonObject { ["extension/package-lock.json"] = "{ \"funding\": \"https://github.com/sponsors/y\" }" },
-        });
-        var unknown = await RunHarnessAsync(new JsonObject
+        };
+        if (baseText is not null)
         {
-            ["mode"] = "patch-gate",
-            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+            request["workspaceFiles"] = new JsonObject { ["extension/package-lock.json"] = baseText };
+        }
+
+        var result = await RunHarnessAsync(request);
+
+        var violations = result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}").ToArray();
+        if (expectedReason.Length == 0)
+        {
+            Assert.Empty(violations);
+        }
+        else
+        {
+            Assert.Equal([$"extension/package-lock.json {expectedReason}"], violations);
+        }
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("extension/package-lock.json", "{\n  \"funding\": \"https://github.com/sponsors/y\"\n}", "{\n  \"resolved\": \"https://github.com/o/x/archive/v1.tgz\"\n}", "https://github.com/")]
+    [InlineData("extension/package-lock.json", "{\n  \"resolved\": \"https://github.com/o/y/archive/v1.tgz\"\n}", "{\n  \"resolved\": \"https://github.com/o/x/archive/v1.tgz\"\n}", "")]
+    [InlineData("extension/package-lock.json", "{}", "{\n  \"repository\": {\n    \"url\": \"git+https://gitlab.example/o/r.git\"\n  }\n}", "")]
+    [InlineData("extension/package.json", "{}", "{\n  \"dependencies\": {\n    \"bugs\": \"https://evil.example/bugs.tgz\"\n  }\n}", "https://evil.example/")]
+    [InlineData("pyproject.toml", "[project.urls]\nHomepage = \"https://github.com/o/r\"\n", "[project]\ndependencies = [\"x @ https://github.com/o/x/archive/v1.tar.gz\"]\n", "https://github.com/")]
+    public async Task MetadataUrlsNeverAuthorizePackageSources(string path, string baseText, string headText, string expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "findNewSources",
+            ["args"] = new JsonArray(baseText, headText, path),
         });
 
-        Assert.Empty(known["value"]!["violations"]!.AsArray());
-        Assert.Equal(
-            ["extension/package-lock.json new-package-source"],
-            unknown["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}"));
+        Assert.Equal(expected, string.Join(",", result["value"]!.AsArray().Select(source => source!.GetValue<string>())));
     }
 
     [Theory]

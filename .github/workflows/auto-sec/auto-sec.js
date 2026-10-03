@@ -322,11 +322,72 @@ function isApprovedSource(source) {
     return APPROVED_SOURCE_PREFIXES.some(prefix => source.startsWith(prefix));
 }
 
+// Package metadata that names project pages rather than package delivery locations:
+//   "funding": "https://github.com/sponsors/x"
+//   "funding": { "type": "github", "url": "https://github.com/sponsors/x" }
+//   "repository": {                      <- multi-line objects and arrays are dropped
+//     "url": "git+https://github.com/o/r.git"     through their closing bracket
+//   }
+//   [project.urls]                       <- pyproject.toml metadata table
+//   Homepage = "https://example.com"
+const METADATA_JSON_KEYS = '(?:funding|repository|homepage|bugs|author|contributors|maintainers)';
+const METADATA_JSON_INLINE = new RegExp(`"${METADATA_JSON_KEYS}"\\s*:\\s*(?:"(?:[^"\\\\]|\\\\.)*"|\\{[^{}]*\\}|\\[(?:[^\\[\\]{}]|\\{[^{}]*\\})*\\])\\s*,?`, 'g');
+const METADATA_JSON_OPEN = new RegExp(`"${METADATA_JSON_KEYS}"\\s*:\\s*[\\[{]\\s*$`);
+const METADATA_LOCKFILE_BASENAMES = new Set(['package-lock.json', 'npm-shrinkwrap.json']);
+
+// Removes metadata URLs from `text`. A line equal to `segmentBreak` resets the scanner, so
+// separately added runs of patch lines are never read as one contiguous JSON fragment.
+function withoutMetadataUrls(text, segmentBreak = null) {
+    const out = [];
+    let depth = 0;
+    let tomlMetadata = false;
+    for (const line of String(text ?? '').split('\n')) {
+        if (line === segmentBreak) {
+            depth = 0;
+            tomlMetadata = false;
+            continue;
+        }
+        if (depth > 0) {
+            // Count brackets outside string literals so a URL containing `}` cannot end
+            // (or extend) the metadata object early.
+            const structural = line.replace(/"(?:[^"\\]|\\.)*"/g, '');
+            depth += (structural.match(/[[{]/g) ?? []).length - (structural.match(/[\]}]/g) ?? []).length;
+            depth = Math.max(depth, 0);
+            continue;
+        }
+        const tomlHeader = /^\s*\[\[?\s*([A-Za-z0-9_.-]+)\s*\]\]?\s*$/.exec(line);
+        if (tomlHeader) {
+            tomlMetadata = /^(?:project|tool\.poetry)\.urls$/i.test(tomlHeader[1]);
+            out.push(line);
+            continue;
+        }
+        if (tomlMetadata) {
+            continue;
+        }
+        let stripped = line.replace(METADATA_JSON_INLINE, '');
+        const open = METADATA_JSON_OPEN.exec(stripped);
+        if (open) {
+            stripped = stripped.slice(0, open.index);
+            depth = 1;
+        }
+        out.push(stripped);
+    }
+    return out.join('\n');
+}
+
 // Sources present in the head version of a file that are neither approved nor already
 // present on the base version. A non-empty result means the PR introduces a new source.
-function findNewSources(baseText, headText) {
-    const baseSources = extractSources(baseText);
-    return [...extractSources(headText)]
+// Metadata URLs on the base never authorize a head source: an existing
+// `https://github.com/sponsors/...` funding link must not admit a `resolved` tarball from
+// github.com. On the head side, metadata is ignored only in npm lockfiles, where each
+// package's `resolved` field is the fetch location and is still checked; elsewhere a
+// metadata-looking key may be a dependency name whose value is a source, so it counts.
+function findNewSources(baseText, headText, path = '', segmentBreak = null) {
+    const baseSources = extractSources(withoutMetadataUrls(baseText, segmentBreak));
+    const headSources = extractSources(METADATA_LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase())
+        ? withoutMetadataUrls(headText, segmentBreak)
+        : headText);
+    return [...headSources]
         .filter(source => !baseSources.has(source) && !isApprovedSource(source))
         .sort();
 }
@@ -1334,7 +1395,7 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
         const headText = await getFileText(github, owner, repo, file.filename, pr.head_sha);
         headContents[file.filename] = headText;
         baseContents[file.filename] = baseText;
-        sourceChanges.push({ filename: file.filename, newSources: findNewSources(baseText, headText) });
+        sourceChanges.push({ filename: file.filename, newSources: findNewSources(baseText, headText, file.filename) });
         if (ecosystem && ecosystem !== 'actions') {
             for (const change of manifestVersionChanges(file.filename, baseText, headText, ecosystem)) {
                 const key = `${normalizePackageName(ecosystem, change.name)}@${change.to}`;
@@ -1650,9 +1711,8 @@ function gitBlobId(text) {
  * must apply to it exactly, and `isVersionOnlyEdit` must accept the result (which, for
  * package.json, also requires the parsed documents to differ only inside dependency maps,
  * so `"preinstall": "1.0.0"` -> `"1.0.1"` fails). No file may add a package source that is
- * neither approved nor already referenced by the lines it replaces or by a base candidate.
- * Lockfiles list per-package funding and repository URLs, so a newly added transitive entry
- * usually repeats a host the file already contains. Returns `{ path, reason }` violations.
+ * neither approved nor already referenced, outside package metadata, by the lines it
+ * replaces or by a base candidate (see `findNewSources`). Returns `{ path, reason }` violations.
  */
 function checkPatchContents(patchText, readBaseTexts = () => []) {
     const violations = [];
@@ -1679,9 +1739,12 @@ function checkPatchContents(patchText, readBaseTexts = () => []) {
                 rebuilt.set(path, [head, ...(rebuilt.get(path) ?? [])]);
             }
         }
-        const removed = diff.blocks.flatMap(block => block.removed).join('\n');
-        const added = diff.blocks.flatMap(block => block.added).join('\n');
-        if (findNewSources(`${candidates.join('\n')}\n${removed}`, added).length > 0) {
+        // Each block's added lines are contiguous in the new file; the break line keeps the
+        // metadata scanner from reading separate blocks (or files) as one JSON fragment.
+        const segmentBreak = '\0';
+        const removed = diff.blocks.map(block => block.removed.join('\n')).join(`\n${segmentBreak}\n`);
+        const added = diff.blocks.map(block => block.added.join('\n')).join(`\n${segmentBreak}\n`);
+        if (findNewSources([...candidates, removed].join(`\n${segmentBreak}\n`), added, path, segmentBreak).length > 0) {
             violations.push({ path, reason: 'new-package-source' });
         }
     }
