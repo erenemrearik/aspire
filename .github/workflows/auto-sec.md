@@ -116,10 +116,11 @@ pre-agent-steps:
       # Open Dependabot PRs with their parsed updates, CI rollup, and the alerts each
       # one provably covers. Coverage uses the same module as the approval gate:
       # the head version of every changed manifest is fetched and must bind the
-      # alert package to the new version in the alert's own manifest. Bodies are
-      # parsed and then dropped.
-      gh pr list --repo "${REPO}" --author "app/dependabot" --state open --limit 200 \
-        --json number,title,body,headRefName,headRefOid,isDraft,files,statusCheckRollup \
+      # alert package to the new version in the alert's own manifest. The base
+      # version is diffed too, so lockfile-only (transitive) upgrades count. Bodies
+      # are parsed and then dropped. Alerts describe main, so only PRs into main count.
+      gh pr list --repo "${REPO}" --author "app/dependabot" --state open --base main --limit 200 \
+        --json number,title,body,headRefName,headRefOid,baseRefOid,isDraft,files,statusCheckRollup \
         > .auto-sec/dependabot-prs-raw.json
       node -e '
         const fs = require("node:fs");
@@ -144,10 +145,14 @@ pre-agent-steps:
           const updates = m.parseDependabotUpdates(pr.title, pr.body);
           const files = (pr.files ?? []).map(f => f.path);
           const headContents = {};
+          const versionChanges = [];
           for (const path of files.filter(m.isAllowedManifest)) {
             const text = headText(path, pr.headRefOid);
             if (text !== null) {
               headContents[path] = text;
+              if (ecosystem && ecosystem !== "actions") {
+                versionChanges.push(...m.manifestVersionChanges(path, headText(path, pr.baseRefOid) ?? "", text, ecosystem));
+              }
             }
           }
           return {
@@ -159,7 +164,7 @@ pre-agent-steps:
             ecosystem,
             updates,
             files,
-            covered_alerts: m.coveredAlerts(alerts, ecosystem, updates, headContents),
+            covered_alerts: m.coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents),
             checks: { total: rollup.length, green: rollup.filter(c => ok.has(String(state(c)).toUpperCase())).length },
           };
         });

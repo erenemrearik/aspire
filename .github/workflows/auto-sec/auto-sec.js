@@ -15,6 +15,8 @@
 const COOLDOWN_DAYS = 7;
 // The single long-lived branch behind the open auto-sec PR (see auto-sec.md safe-outputs).
 const AUTO_SEC_BRANCH = 'auto-sec/security-updates';
+// Dependabot alerts describe the default branch, so only PRs into it can fix them.
+const BASE_BRANCH = 'main';
 const DEPENDABOT_LOGIN = 'dependabot[bot]';
 const DEFAULT_BOT_LOGIN = 'aspire-repo-bot[bot]';
 // At most this many reviews are submitted per run. Requests beyond the limit are still
@@ -744,14 +746,17 @@ function inVulnerableRanges(version, ranges) {
  * auto-sec PR. Non-malware alerts use the same proof as the approval gate
  * (`alertFixedByUpdate`). Malware alerts have no patched version; they are covered only
  * when every occurrence of the flagged package in the alert's own manifest is the PR's new
- * version, and the approval gate still leaves those PRs to a human reviewer.
+ * version, and the approval gate still leaves those PRs to a human reviewer. Candidates
+ * include `versionChanges` from the manifest diff, so a transitive upgrade that only
+ * appears in a regenerated lockfile still counts.
  */
-function coveredAlerts(alerts, ecosystem, updates, headContents) {
+function coveredAlerts(alerts, ecosystem, updates, versionChanges, headContents) {
     if (!ecosystem) {
         return [];
     }
+    const candidates = [...updates, ...versionChanges];
     return (alerts ?? [])
-        .filter(alert => updates.some(update => alert.malware
+        .filter(alert => candidates.some(update => alert.malware
             ? updateMatchesAlert(alert, ecosystem, update)
                 && alertManifestCarries(alert, ecosystem, update, headContents, version => sameVersion(version, update.to))
             : alertFixedByUpdate(alert, ecosystem, update, headContents)))
@@ -778,6 +783,9 @@ function evaluateApprovalGates(input) {
     }
     if (!expectedHeadSha || pr.head_sha !== expectedHeadSha) {
         reasons.push('head-sha-mismatch');
+    }
+    if (pr.base_ref !== BASE_BRANCH) {
+        reasons.push('wrong-base-branch');
     }
 
     const ecosystem = ecosystemFromBranch(pr.head_ref);
@@ -836,9 +844,11 @@ function evaluateApprovalGates(input) {
         reasons.push('malware-requires-review');
     }
 
+    // Lockfile-only changes count too: a regenerated lockfile can upgrade the alerted
+    // package transitively without the PR body listing it.
     const fixedAlerts = ecosystem
         ? alerts
-            .filter(alert => updates.some(update => alertFixedByUpdate(alert, ecosystem, update, headContents)))
+            .filter(alert => touched.some(update => alertFixedByUpdate(alert, ecosystem, update, headContents)))
             .map(alert => alert.number)
             .sort((a, b) => a - b)
         : [];
@@ -1111,6 +1121,7 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
         head_sha: pull.head?.sha ?? '',
         head_ref: pull.head?.ref ?? '',
         base_sha: pull.base?.sha ?? '',
+        base_ref: pull.base?.ref ?? '',
         title: pull.title ?? '',
         body: pull.body ?? '',
     };
@@ -1230,10 +1241,13 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
 
         if (result.decision === 'approve' && !staged) {
             // The gates take many requests; Dependabot can rebase meanwhile, and an
-            // approval on the older commit could still count for the new head.
+            // approval on the older commit could still count for the new head, or the PR can
+            // be retargeted away from the branch its alerts describe.
             const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: request.prNumber });
             if (live.head?.sha !== request.headSha) {
                 result = { ...result, decision: 'skip', reasons: ['head-sha-mismatch'] };
+            } else if (live.base?.ref !== BASE_BRANCH) {
+                result = { ...result, decision: 'skip', reasons: ['wrong-base-branch'] };
             }
         }
         if (result.decision === 'approve') {
@@ -1251,17 +1265,25 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
         }
 
         results.push(result);
-        core.info(`#${result.pr}: ${result.decision}${staged ? ' (staged)' : ''} ${result.reasons.join(',')}`);
+        core.info(`#${result.pr}: ${result.decision}${staged ? ' (staged)' : ''} ${publicReasons(result.reasons).join(',')}`);
     }
 
     const approved = results.filter(result => result.decision === 'approve').length;
     await core.summary
         .addHeading('auto-sec Dependabot approvals', 3)
         .addRaw(`Requests: ${results.length}. Approved: ${approved}${staged ? ' (staged)' : ''}. Skipped: ${results.length - approved}.\n\n`)
-        .addRaw(results.map(result => `- #${result.pr}: ${result.decision}${result.reasons.length ? ` (${result.reasons.join(', ')})` : ''}`).join('\n'))
+        .addRaw(results.map(result => `- #${result.pr}: ${result.decision}${result.reasons.length ? ` (${publicReasons(result.reasons).join(', ')})` : ''}`).join('\n'))
         .write();
 
     return results;
+}
+
+// The run log and job summary are public. Reasons that would reveal which PR touches an
+// alert class the workflow keeps private are reported under a generic code.
+const PUBLIC_REASON_CODES = new Map([['malware-requires-review', 'human-review-required']]);
+
+function publicReasons(reasons) {
+    return [...new Set(reasons.map(reason => PUBLIC_REASON_CODES.get(reason) ?? reason))];
 }
 
 /**
@@ -1292,6 +1314,8 @@ async function runPushTargetGate({ github, context, core, fs = require('node:fs'
             violations.push({ pr: prNumber, reason: 'wrong-head-branch' });
         } else if (String(pr.head?.repo?.full_name ?? '').toLowerCase() !== fullName) {
             violations.push({ pr: prNumber, reason: 'wrong-head-repository' });
+        } else if (pr.base?.ref !== BASE_BRANCH) {
+            violations.push({ pr: prNumber, reason: 'wrong-base-branch' });
         }
     }
 

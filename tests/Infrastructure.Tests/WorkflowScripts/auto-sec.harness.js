@@ -5,9 +5,9 @@
 //   { mode: "call", fn, args }                    -> { value }
 //   { mode: "lookup", ecosystem, name, version, now, responses, nugetConfigText } -> { value, urls }
 //   { mode: "approve", now, staged, agentItems, pr, prOverrides, files, contents, alerts,
-//     malwareNumbers, checkRuns, statuses, reviews, responses, liveHeadSha } -> { value, reviews, summary, info, warnings }
+//     malwareNumbers, checkRuns, statuses, reviews, responses, liveHeadSha, liveBaseRef } -> { value, reviews, summary, info, warnings }
 //   { mode: "push-gate", agentItems, pr, prOverrides } -> { value, info, failures }
-// PRs may carry `head_repo` (defaults to microsoft/aspire).
+// PRs may carry `head_repo` (defaults to microsoft/aspire) and `base_ref` (defaults to main).
 // Alerts may carry `vulnerable_version_range` and `advisory_ranges` (every range the
 // advisory lists for the package).
 // `responses` maps a URL to `{ status, body }`; unknown URLs return 404.
@@ -52,10 +52,13 @@ function createGitHub(request, created) {
         pulls: {
             get: async ({ pull_number: pullNumber }) => {
                 const pr = { ...request.pr, number: pullNumber, ...(request.prOverrides?.[pullNumber] ?? {}) };
-                // `liveHeadSha` simulates a push that lands after the gates were evaluated.
+                // `liveHeadSha` / `liveBaseRef` simulate a push or retarget that lands after the gates were evaluated.
                 getCalls.set(pullNumber, (getCalls.get(pullNumber) ?? 0) + 1);
                 if (request.liveHeadSha && getCalls.get(pullNumber) > 1) {
                     pr.head_sha = request.liveHeadSha;
+                }
+                if (request.liveBaseRef && getCalls.get(pullNumber) > 1) {
+                    pr.base_ref = request.liveBaseRef;
                 }
                 return {
                     data: {
@@ -64,7 +67,7 @@ function createGitHub(request, created) {
                         draft: pr.draft ?? false,
                         user: { login: pr.user_login ?? 'dependabot[bot]' },
                         head: { sha: pr.head_sha, ref: pr.head_ref, repo: { full_name: pr.head_repo ?? 'microsoft/aspire' } },
-                        base: { sha: 'base0000000000000000000000000000000000000' },
+                        base: { sha: 'base0000000000000000000000000000000000000', ref: pr.base_ref ?? 'main' },
                         title: pr.title,
                         body: pr.body,
                     },
