@@ -24,10 +24,11 @@ import { AspireAppHostTreeProvider } from '../views/AspireAppHostTreeProvider';
 import { ResourceItem } from '../views/treeItems/resourceItems';
 import { ResourceCommandJson, ResourceJson } from '../data/appHostCliContracts';
 import { AppHostDataRepository } from '../data/AppHostDataRepository';
-import { getSupportedCapabilities, javaLanguageExtensionId, useCsharpExtensionVersionProviderForTests } from '../capabilities';
+import { csharpExtensionId, getSupportedCapabilities, javaLanguageExtensionId, useCsharpExtensionVersionProviderForTests } from '../capabilities';
 import { getCliPathTargetKey, workspaceFolderCliPathTarget } from '../utils/cliPathVariables';
 import { isEnabledCommand } from '../views/treePresentation';
 import { blazorWasmDebugProofTimeoutMs, getBlazorWasmDebugProofCleanupTimeoutMs } from './blazorWasmDebugProofTimeouts';
+import type { BlazorWasmDebuggerStatus } from './blazorWasmDebuggerSetup';
 
 let atomicWriteSequence = 0;
 
@@ -785,6 +786,10 @@ export async function executeE2eControlCommand(
       markStarted();
       return await proveAppHostAndResourceDebugging(command, aspireContext, appHostTreeProvider);
     }
+    case 'prepareBlazorWasmDebugger': {
+      markStarted();
+      return await prepareBlazorWasmDebugger();
+    }
     case 'proveBlazorWasmDebugging': {
       markStarted();
       return await proveBlazorWasmDebugging(command, appHostTreeProvider, context.logUri.fsPath);
@@ -1352,6 +1357,15 @@ async function proveBlazorWasmDebugging(command: BlazorWasmDebugProofCommand, ap
   const expectedBrowser = getE2eBlazorBrowser(command.expectedBrowser);
   const closeMode = getE2eBlazorCloseMode(command.closeMode);
   const timeoutMs = getE2eStrictlyPositiveInteger(command.timeoutMs, blazorWasmDebugProofTimeoutMs, 'timeoutMs');
+  const runRoot = process.env.ASPIRE_EXTENSION_E2E_RUN_ROOT;
+  if (!runRoot || !path.isAbsolute(runRoot)) {
+    throw new Error('Aspire extension E2E Blazor WASM proof requires an absolute ASPIRE_EXTENSION_E2E_RUN_ROOT.');
+  }
+  // userDataDir=true reuses js-debug's workspace profile. A lock left by another proof must not
+  // block this one. The runner removes these profiles only after VS Code exits, including when
+  // a failed adapter cannot acknowledge stop; never delete a possibly live browser's profile here.
+  // https://github.com/microsoft/vscode-js-debug/blob/v1.117.0/src/ui/configuration/chromiumDebugConfigurationProvider.ts
+  const browserProfileDirectory = fs.mkdtempSync(path.join(runRoot, 'blazor-browser-profile-'));
   const deadline = Date.now() + timeoutMs;
 
   const debugSessions: DebugSessionSnapshot[] = [];
@@ -1436,6 +1450,7 @@ async function proveBlazorWasmDebugging(command: BlazorWasmDebugProofCommand, ap
     resolveDebugConfiguration(_folder, configuration) {
       if (configuration.resourceType === 'browser' && typeof configuration.projectPath === 'string'
         && isPathWithinDirectory(sourcePath, path.dirname(configuration.projectPath))) {
+        configuration.userDataDir = browserProfileDirectory;
         // C#'s resolved launch bypasses js-debug's configuration resolver. Boolean
         // tracing then defaults to OS temp, outside the collected/redacted VS Code logs.
         // https://github.com/microsoft/vscode-js-debug/blob/v1.117.0/src/common/logging/index.ts
@@ -2550,6 +2565,7 @@ function getE2eWorkspaceFolderEntries(folders: unknown): Array<{ uri: vscode.Uri
   if (typeof expectedWorkspaceRoot !== 'string' || expectedWorkspaceRoot.length === 0) {
     throw new Error('Aspire extension E2E setWorkspaceFolders requires ASPIRE_EXTENSION_E2E_WORKSPACE_ROOT.');
   }
+  const allowedRoots = getE2eWorkspaceFolderRoots();
 
   return folders.map((folder, index) => {
     if (!folder || typeof folder !== 'object') {
@@ -2563,8 +2579,8 @@ function getE2eWorkspaceFolderEntries(folders: unknown): Array<{ uri: vscode.Uri
     if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) {
       throw new Error(`Aspire extension E2E workspace folder ${index} requires an existing directory: ${folderPath}`);
     }
-    if (!isPathWithinDirectory(folderPath, expectedWorkspaceRoot)) {
-      throw new Error(`Aspire extension E2E workspace folder ${index} must stay inside the configured E2E workspace root.`);
+    if (!allowedRoots.some(root => isPathWithinDirectory(folderPath, root))) {
+      throw new Error(`Aspire extension E2E workspace folder ${index} must stay inside the configured E2E run root or workspace root.`);
     }
     if (name !== undefined && (typeof name !== 'string' || name.length === 0)) {
       throw new Error(`Aspire extension E2E workspace folder ${index} name must be a non-empty string when provided.`);
@@ -2673,16 +2689,18 @@ export function getE2eAddableWorkspaceFolderPath(folderPath: unknown): string {
     throw new Error(`Aspire extension E2E addWorkspaceFolder requires an existing folder: ${folderPath}`);
   }
 
-  const allowedRoots = [
-    process.env.ASPIRE_EXTENSION_E2E_RUN_ROOT,
-    process.env.ASPIRE_EXTENSION_E2E_WORKSPACE_ROOT,
-  ].filter((root): root is string => typeof root === 'string' && root.length > 0);
-
-  if (!allowedRoots.some(root => isPathWithinDirectory(folderPath, root))) {
+  if (!getE2eWorkspaceFolderRoots().some(root => isPathWithinDirectory(folderPath, root))) {
     throw new Error('Aspire extension E2E addWorkspaceFolder can only add folders inside the configured E2E run root or workspace root.');
   }
 
   return folderPath;
+}
+
+function getE2eWorkspaceFolderRoots(): string[] {
+  return [
+    process.env.ASPIRE_EXTENSION_E2E_RUN_ROOT,
+    process.env.ASPIRE_EXTENSION_E2E_WORKSPACE_ROOT,
+  ].filter((root): root is string => typeof root === 'string' && root.length > 0);
 }
 
 function getE2eBreakpointLine(line: unknown): number {
@@ -3027,6 +3045,25 @@ function cloneDebugConsoleOutputEvent(event: AspireDebugConsoleOutputEvent, sequ
     category: event.category,
     output: event.output,
   };
+}
+
+async function prepareBlazorWasmDebugger(): Promise<BlazorWasmDebuggerStatus> {
+  const extension = vscode.extensions.getExtension(csharpExtensionId);
+  if (!extension) {
+    throw new Error(`${csharpExtensionId} is required for the Blazor browser debugger E2E tests.`);
+  }
+
+  // Activation awaits runtime dependency installation. initializationFinished() additionally
+  // waits for project import, which is unrelated to checking the bridge and can remain pending.
+  // https://github.com/dotnet/vscode-csharp/blob/v2.148.23-prerelease/src/main.ts
+  await extension.activate();
+
+  // The pinned C# extension downloads this runtime dependency during activation. If acquisition
+  // fails, it still activates but silently selects the legacy app-hosted proxy instead of VSdbg.
+  // Match its availability check; let C# perform acquisition and integrity validation on reload.
+  // https://github.com/dotnet/vscode-csharp/blob/v2.148.23-prerelease/src/razor/src/blazorDebug/blazorDebugConfigurationProvider.ts
+  const bridgePath = path.join(extension.extensionPath, '.vswebassemblybridge', 'Microsoft.Diagnostics.BrowserDebugHost.dll');
+  return fs.existsSync(bridgePath) && fs.statSync(bridgePath).isFile() ? 'ready' : 'missing-bridge';
 }
 
 /**

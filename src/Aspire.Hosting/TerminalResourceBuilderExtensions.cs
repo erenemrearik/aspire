@@ -21,8 +21,6 @@ namespace Aspire.Hosting;
 /// </summary>
 public static class TerminalResourceBuilderExtensions
 {
-    private const string TerminalExperimentalDiagnosticId = "ASPIRETERMINAL001";
-
     /// <summary>
     /// Configures a resource to expose an interactive terminal session.
     /// </summary>
@@ -65,7 +63,7 @@ public static class TerminalResourceBuilderExtensions
     ///     });
     /// </code>
     /// </example>
-    [Experimental(TerminalExperimentalDiagnosticId, UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [Experimental(TerminalDiagnostics.DiagnosticId, UrlFormat = TerminalDiagnostics.UrlFormat)]
     [AspireExportIgnore(Reason = "Polyglot AppHosts use the parameterless withTerminal dispatcher export.")]
     public static IResourceBuilder<T> WithTerminal<T>(this IResourceBuilder<T> builder, Action<TerminalOptions>? configure = null)
         where T : IResource
@@ -116,7 +114,7 @@ public static class TerminalResourceBuilderExtensions
     /// Polyglot dispatcher for <see cref="WithTerminal{T}(IResourceBuilder{T}, Action{TerminalOptions}?)"/>.
     /// Exposed to non-C# AppHosts via ATS as <c>withTerminal</c> — they cannot pass a
     /// C# <see cref="Action{T}"/>, so this overload simply applies the defaults from
-    /// <see cref="TerminalOptions"/> (120×30). Polyglot AppHosts that need to customise
+    /// <see cref="TerminalOptions"/> (132×50). Polyglot AppHosts that need to customise
     /// the terminal dimensions can wait for a future overload that accepts a DTO.
     /// </summary>
     /// <ats-summary>Adds an interactive terminal session to a resource using the default terminal options.</ats-summary>
@@ -180,25 +178,15 @@ public static class TerminalResourceBuilderExtensions
         }
 
         var trmnlDirectory = configuration[TerminalHostPaths.DirectoryOverrideConfigName];
+        var useDefaultDirectory = string.IsNullOrEmpty(trmnlDirectory);
         if (string.IsNullOrEmpty(trmnlDirectory))
         {
             var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             trmnlDirectory = TerminalHostPaths.GetTrmnlDirectory(homeDirectory);
         }
 
-        // 0700 on Unix so other local users cannot enumerate which terminals exist on
-        // this machine. On Windows the user-profile ACLs (per-user by default) make this
-        // a no-op; CreateDirectory is idempotent.
-        try
-        {
-            DirectoryHelper.CreateWithOwnerOnlyPermissions(trmnlDirectory);
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-        {
-            // Best-effort: directory may already have stricter perms or be on a filesystem
-            // that does not support chmod (e.g. some FAT-formatted home dirs). Per-socket
-            // 0600 in TerminalHostControlListener still protects each endpoint.
-        }
+        // Secure the directory before writing terminal metadata or starting any socket listeners.
+        SocketPermissionHelper.CreateDirectory(trmnlDirectory, repairExisting: useDefaultDirectory);
 
         var terminalHosts = new TerminalHostResource[replicaCount];
         var replicaIds = new string[replicaCount];

@@ -278,6 +278,11 @@ The CLI passes the connection path via **environment variable**:
 |---------------------|-------------|---------|
 | `REMOTE_APP_HOST_SOCKET_PATH` | Unix socket path (or named pipe name on Windows) | `/tmp/aspire/host.sock` |
 
+The CLI normally allocates a randomized Unix socket path under `~/.aspire/cli/bch`.
+Explicit paths such as the example above are also supported. If the parent directory
+already exists on Unix, it must have mode `0700`; its permissions are not rewritten.
+A missing parent directory is created with mode `0700`.
+
 **Security:** The socket is protected by file system permissions (Unix: `0600`, Windows: current user ACL). Only processes running as the same user can connect.
 
 **Guest startup requirements:**
@@ -1394,6 +1399,32 @@ The unified config file for polyglot AppHosts. Replaces the legacy split across 
 **Language persistence:** On first `aspire run`, if `appHost.language` is not set, the CLI detects it from file patterns and saves it to `aspire.config.json`. Subsequent runs use the persisted value.
 
 **Package entry shape.** Each value in `packages` is either a **string** (short form: a `.csproj` path is a project reference; otherwise empty means the SDK version and non-empty is an explicit NuGet version) or an **object** (long form, carries a required `source` discriminator — `nuget`, `project`, or `npm` — with per-source fields). See the [Integration Declaration](./polyglot-integrations.md#integration-declaration) section of the sibling spec for the full schema and examples.
+
+### Project-local experimental language flags
+
+The experimental polyglot AppHost flags use the same flat naming pattern:
+`experimentalPolyglotJava`, `experimentalPolyglotGo`, `experimentalPolyglotPython`,
+and `experimentalPolyglotRust`. To enable Java for a single AppHost, run this from
+its project directory:
+
+```console
+aspire config set features.experimentalPolyglotJava true
+```
+
+This writes a single key in the `features` dictionary of `aspire.config.json`:
+
+```json
+{
+  "features": {
+    "experimentalPolyglotJava": "true"
+  }
+}
+```
+
+The configuration reader accepts both `"true"` and `true` for feature values.
+Existing project or global configurations using `experimentalPolyglot:java`,
+`experimentalPolyglot:go`, `experimentalPolyglot:python`, or
+`experimentalPolyglot:rust` must rename those keys to the flat names above.
 
 ### Application settings
 
