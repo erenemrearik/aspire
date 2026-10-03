@@ -77,8 +77,6 @@ Replace `<your-pinned-image-tag>` with the tag of that image:
 **C#**
 
 ```csharp
-using Aspire.Hosting.SqlServer;
-
 builder.AddSqlServer("sqlserver")
     .WithImageTag("<your-pinned-image-tag>")
     .WithRepl(options => options.Command = SqlServerReplCommand.Version17);
