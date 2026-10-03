@@ -320,9 +320,25 @@ function extractSources(text) {
         .replace(/\\u([0-9A-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
         .replace(/\\U([0-9A-Fa-f]{8})/g, (_, hex) => String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10FFFF)))
         .replace(/\\\//g, '/');
-    // Hosts are DNS names, IPv4 literals, or bracketed IPv6 literals (`https://[2001:db8::1]/`).
-    for (const match of decoded.matchAll(/\b(https?|git\+https?|git\+ssh|git|ssh):\/\/(?:[^@/\s"']+@)?(\[[0-9A-Fa-f:.]+(?:%[0-9A-Za-z._~-]+)?\]|[A-Za-z0-9.-]+)(?::(\d+))?(\/[^\s"'<>]*)?/gi)) {
-        sources.add(sourceKey(match[1], match[2], match[3], match[4] ?? '/'));
+    // Each candidate runs through the WHATWG URL parser (https://url.spec.whatwg.org/), the
+    // same parser Node and npm use, so userinfo cannot hide the destination:
+    //   https://user@registry.npmjs.org@evil.example/x.tgz   -> host evil.example
+    //   https://evil.example\@registry.npmjs.org/x.tgz       -> host evil.example
+    // http(s) transports parse as special URLs (`\` ends the authority); ssh and git parse
+    // as non-special URLs so their explicit ports are kept. A candidate the parser rejects
+    // is keyed by its raw text, which is never an approved source.
+    for (const match of decoded.matchAll(/\b(https?|git\+https?|git\+ssh|git|ssh):\/\/[^\s"'<>]*/gi)) {
+        const scheme = match[1].toLowerCase();
+        const transport = scheme.replace(/^git\+/, '');
+        const parseScheme = transport === 'http' || transport === 'https' ? transport : 'x-auto-sec';
+        let url;
+        try {
+            url = new URL(`${parseScheme}${match[0].slice(match[1].length)}`);
+        } catch {
+            sources.add(`unparsed:${match[0]}`);
+            continue;
+        }
+        sources.add(sourceKey(scheme, url.hostname, url.port, url.pathname || '/'));
     }
     for (const match of decoded.matchAll(/(?<![A-Za-z0-9+.-])(file|link|portal):([^\s"'<>,;)]*)/gi)) {
         sources.add(`${match[1].toLowerCase()}:${match[2]}`);
