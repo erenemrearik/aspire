@@ -55,6 +55,9 @@ version, scaffolds its starter, and compiles both the AppHost/generated SDK and
 the API without starting any application or container. Sources remain under
 `artifacts/codeql/<language>/starter` for CodeQL finalization. CLI state and
 dependency caches are isolated per job.
+Java's Gradle init script routes plugin and Maven dependencies through the
+existing `dotnet-public-maven` feed, using the job token for upstream access
+without weakening the pipeline's network isolation policy or editing the starter.
 
 1ES injects CodeQL Initialize and Finalize, with each job restricted to its own
 language. The default scan cadence still applies. Check Finalize for a database

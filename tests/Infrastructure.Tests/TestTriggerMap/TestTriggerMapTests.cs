@@ -76,6 +76,7 @@ public sealed class TestTriggerMapTests
 
     [Theory]
     [InlineData("eng/scripts/build-codeql-starter.ps1")]
+    [InlineData("eng/scripts/codeql-gradle-init.gradle")]
     [InlineData("eng/pipelines/templates/polyglot-codeql.yml")]
     public void PolyglotCodeqlInputsSelectInfrastructureCoverage(string path)
     {

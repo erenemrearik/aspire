@@ -49,7 +49,7 @@ public sealed class BuildCodeqlStarterTests(ITestOutputHelper output)
                 ["--release", "25", "-d", Path.Combine(environment.OutputDirectory, "java-classes"),
                     "@.aspire/modules/sources.txt", "AppHost.java"]));
         Assert.Equal(
-            $"gradle|{Path.Combine(project, "api")}|--no-daemon --no-build-cache clean classes",
+            $"gradle|{Path.Combine(project, "api")}|--no-daemon --no-build-cache --init-script {Path.Combine(RepoRoot.Path, "eng", "scripts", "codeql-gradle-init.gradle")} clean classes",
             File.ReadAllText(environment.GradleTracePath).Trim());
         AssertSameBuildIdentity(environment);
         AssertRestoredEnvironment(environment);

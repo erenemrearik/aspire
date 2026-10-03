@@ -140,7 +140,8 @@ try {
             # its daemon and build cache so CodeQL observes actual compilation.
             # https://aka.ms/codeql-tsg-onboard-compiled
             $gradle = if ($IsWindows) { '.\gradlew.bat' } else { './gradlew' }
-            Invoke-CheckedCommand $gradle @('--no-daemon', '--no-build-cache', 'clean', 'classes')
+            Invoke-CheckedCommand $gradle @('--no-daemon', '--no-build-cache', '--init-script',
+                (Join-Path $PSScriptRoot 'codeql-gradle-init.gradle'), 'clean', 'classes')
         }
     } finally {
         Pop-Location

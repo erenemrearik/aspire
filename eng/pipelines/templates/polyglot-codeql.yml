@@ -96,3 +96,5 @@ jobs:
             -PackageDirectory "$(Pipeline.Workspace)/codeql-packages" `
             -OutputDirectory "$(Build.SourcesDirectory)/artifacts/codeql/${{ parameters.language }}"
         displayName: Scaffold and compile starter AppHost and API
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
