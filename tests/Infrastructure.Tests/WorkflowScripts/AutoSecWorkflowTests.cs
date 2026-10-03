@@ -542,6 +542,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("extension/package.json", "{\n  \"bugs\": {\n    \"url\": \"https://github.com/o/r/issues\"\n  },\n  \"repository\": \"https://github.com/o/r\",\n  \"dependencies\": {\n    \"x\": \"^1.0.0\"\n  }\n}", "{\n  \"bugs\": {\n    \"url\": \"https://github.com/o/r/issues\"\n  },\n  \"repository\": \"https://github.com/o/r\",\n  \"dependencies\": {\n    \"x\": \"^1.0.1\"\n  }\n}", "")]
     [InlineData("extension/package.json", "{\n  \"repository\": \"https://github.com/o/r\"\n}", "{\n  \"repository\": \"https://github.com/o/r\",\n  \"dependencies\": {\n    \"x\": \"https://github.com/o/x/archive/v1.tgz\"\n  }\n}", "https://github.com/")]
     [InlineData("pyproject.toml", "[project.urls]\nHomepage = \"https://github.com/o/r\"\n", "[project]\ndependencies = [\"x @ https://github.com/o/x/archive/v1.tar.gz\"]\n", "https://github.com/")]
+    [InlineData("extension/package.json", "{\n  \"dependencies\": {\n    \"x\": \"file:../x\"\n  }\n}", "{\n  \"dependencies\": {\n    \"x\": \"file:../x\",\n    \"y\": \"file:../y\"\n  }\n}", "file:../y")]
     public async Task MetadataUrlsNeverAuthorizePackageSources(string path, string baseText, string headText, string expected)
     {
         var result = await RunHarnessAsync(new JsonObject
@@ -594,6 +595,12 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("HTTPS://REGISTRY.NPMJS.ORG/a/-/a-1.0.0.tgz", "")]
     [InlineData("https://[2001:db8::1]/a/-/a-1.0.0.tgz", "https://[2001:db8::1]/")]
     [InlineData("https://user@[2001:DB8::1]:8443/a.tgz", "https://[2001:db8::1]:8443/")]
+    [InlineData("https:\\/\\/evil.example\\/x.tgz", "https://evil.example/")]
+    [InlineData("https\\u003a\\u002f\\u002fevil.example/x.tgz", "https://evil.example/")]
+    [InlineData("file:../x.tgz", "file:../x.tgz")]
+    [InlineData("x@link:../x", "link:../x")]
+    [InlineData("portal:../x", "portal:../x")]
+    [InlineData("file:///tmp/x.tgz", "file:///tmp/x.tgz")]
     public async Task FindsPackageSourcesAddedOnHead(string headUrl, string expected)
     {
         var result = await RunHarnessAsync(new JsonObject

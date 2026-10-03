@@ -309,11 +309,23 @@ function sourceKey(scheme, host, port, path) {
 //   ssh://git@github.com/o/r.git
 // URI schemes and hosts are case-insensitive (RFC 3986 sections 3.1 and 3.2.2), so
 // `HTTPS://Registry.Example.com/` is matched and keyed like its lowercase form.
+// Local delivery protocols are sources too, keyed by their target path:
+//   "x": "file:../x.tgz"   "x@link:../x"   "x": "portal:../x"   file:///tmp/x.tgz
+// JSON and TOML string escapes are decoded first, because the package manager reads
+// `https:\/\/evil.example\/x.tgz` or `https\u003a//evil.example/x.tgz` as a plain URL
+// (https://www.rfc-editor.org/rfc/rfc8259#section-7, https://toml.io/en/v1.0.0#string).
 function extractSources(text) {
     const sources = new Set();
+    const decoded = String(text ?? '')
+        .replace(/\\u([0-9A-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/\\U([0-9A-Fa-f]{8})/g, (_, hex) => String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10FFFF)))
+        .replace(/\\\//g, '/');
     // Hosts are DNS names, IPv4 literals, or bracketed IPv6 literals (`https://[2001:db8::1]/`).
-    for (const match of String(text ?? '').matchAll(/\b(https?|git\+https?|git\+ssh|git|ssh):\/\/(?:[^@/\s"']+@)?(\[[0-9A-Fa-f:.]+(?:%[0-9A-Za-z._~-]+)?\]|[A-Za-z0-9.-]+)(?::(\d+))?(\/[^\s"'<>]*)?/gi)) {
+    for (const match of decoded.matchAll(/\b(https?|git\+https?|git\+ssh|git|ssh):\/\/(?:[^@/\s"']+@)?(\[[0-9A-Fa-f:.]+(?:%[0-9A-Za-z._~-]+)?\]|[A-Za-z0-9.-]+)(?::(\d+))?(\/[^\s"'<>]*)?/gi)) {
         sources.add(sourceKey(match[1], match[2], match[3], match[4] ?? '/'));
+    }
+    for (const match of decoded.matchAll(/(?<![A-Za-z0-9+.-])(file|link|portal):([^\s"'<>,;)]*)/gi)) {
+        sources.add(`${match[1].toLowerCase()}:${match[2]}`);
     }
     return sources;
 }
