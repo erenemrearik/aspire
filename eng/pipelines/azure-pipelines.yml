@@ -119,6 +119,13 @@ extends:
     featureFlags:
       autoEnablePREfastWithNewRuleset: false
       autoEnableRoslynWithNewRuleset: false
+      # Public Go modules must use the 1ES credential provider/proxy, not
+      # proxy.golang.org. Enable it on the same builds as the Go scan stage.
+      # https://aka.ms/goproxy
+      ${{ if and(ne(variables['_RunAsPublic'], 'true'), eq(variables['Build.SourceBranch'], 'refs/heads/main')) }}:
+        golang:
+          internalModuleProxy:
+            enabled: true
     sdl:
       componentgovernance:
         # Exclude .packages folder from CG scanning. This folder contains older versions of our own

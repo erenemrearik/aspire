@@ -55,6 +55,8 @@ version, scaffolds its starter, and compiles both the AppHost/generated SDK and
 the API without starting any application or container. Sources remain under
 `artifacts/codeql/<language>/starter` for CodeQL finalization. CLI state and
 dependency caches are isolated per job.
+Official `main` builds enable the 1ES internal Go module proxy so Go dependencies
+are restored through the supported credential provider rather than public hosts.
 Java's Gradle init script routes plugin and Maven dependencies through the
 existing `dotnet-public-maven` feed, using the job token for upstream access
 without weakening the pipeline's network isolation policy or editing the starter.
