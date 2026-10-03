@@ -440,6 +440,40 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Equal(Enumerable.Range(4, 10), result["reviews"]!.AsArray().Select(review => review!["pull_number"]!.GetValue<int>()));
     }
 
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData(
+        "app/yarn.lock",
+        "foo@^1.0.0, foo@>=1.5.0:\n  version \"1.9.0\"\nfoo@^2.0.0:\n  version \"2.1.0\"\n",
+        "foo@^1.0.0:\n  version \"1.9.0\"\nfoo@>=1.5.0, foo@^2.0.0:\n  version \"2.1.0\"\n",
+        """[{"name":"foo","from":["1.9.0"],"to":"2.1.0"}]""")]
+    [InlineData(
+        "app/package-lock.json",
+        """{"packages":{"node_modules/foo":{"version":"1.9.0"},"node_modules/a/node_modules/foo":{"version":"1.9.0"},"node_modules/b/node_modules/foo":{"version":"2.1.0"}}}""",
+        """{"packages":{"node_modules/foo":{"version":"1.9.0"},"node_modules/a/node_modules/foo":{"version":"2.1.0"},"node_modules/b/node_modules/foo":{"version":"2.1.0"}}}""",
+        """[{"name":"foo","from":["1.9.0"],"to":"2.1.0"}]""")]
+    [InlineData(
+        "app/pnpm-lock.yaml",
+        "importers:\n  .:\n    dependencies:\n      foo:\n        specifier: ^1.0.0\n        version: 1.9.0\n\npackages:\n  foo@1.9.0:\n    resolution: {}\n  foo@2.1.0:\n    resolution: {}\n\nsnapshots:\n  a@1.0.0:\n    dependencies:\n      foo: 1.9.0\n  b@1.0.0:\n    dependencies:\n      foo: 2.1.0\n",
+        "importers:\n  .:\n    dependencies:\n      foo:\n        specifier: ^1.0.0\n        version: 1.9.0\n\npackages:\n  foo@1.9.0:\n    resolution: {}\n  foo@2.1.0:\n    resolution: {}\n\nsnapshots:\n  a@1.0.0:\n    dependencies:\n      foo: 2.1.0\n  b@1.0.0:\n    dependencies:\n      foo: 2.1.0\n",
+        """[{"name":"foo","from":["1.9.0"],"to":"2.1.0"}]""")]
+    [InlineData(
+        "app/yarn.lock",
+        "foo@^1.0.0:\n  version \"1.9.0\"\nfoo@^2.0.0:\n  version \"2.1.0\"\n",
+        "foo@^1.0.0:\n  version \"1.9.0\"\nfoo@^2.0.0:\n  version \"2.1.0\"\n",
+        "[]")]
+    public async Task DetectsConsumerMovingBetweenRetainedVersions(string path, string baseText, string headText, string expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "manifestVersionChanges",
+            ["args"] = new JsonArray(path, baseText, headText, "npm"),
+        });
+
+        Assert.Equal(expected, result["value"]!.ToJsonString());
+    }
+
     [Fact]
     [RequiresTools(["node"])]
     public async Task ParsesGroupedDependabotBody()
@@ -474,6 +508,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("app/pnpm-lock.yaml", "packages:\n\n  lodash@4.17.20:\n    resolution: {}\n\n  minimist@4.17.21:\n    resolution: {}\n", "lodash", "4.17.21", false)]
     [InlineData("app/pnpm-lock.yaml", "packages:\n\n  '@babel/parser@7.29.3':\n    resolution: {}\n", "@babel/parser", "7.29.3", true)]
     [InlineData("app/pnpm-lock.yaml", "packages:\n  /lodash/4.17.21:\n    resolution: {}\n", "lodash", "4.17.21", true)]
+    [InlineData("app/pnpm-lock.yaml", "importers:\n  .:\n    dependencies:\n      lodash:\n        specifier: ^4.17.0\n        version: 4.17.21\n\npackages:\n  minimist@1.2.8:\n    resolution: {}\n", "lodash", "4.17.21", true)]
     [InlineData("app/uv.lock", "[[package]]\nname = \"jinja2\"\nversion = \"3.1.5\"\n\n[[package]]\nname = \"markupsafe\"\nversion = \"3.1.6\"\n", "jinja2", "3.1.6", false)]
     [InlineData("app/uv.lock", "[[package]]\nname = \"Jinja2\"\nversion = \"3.1.6\"\n", "jinja2", "3.1.6", true)]
     [InlineData("app/pyproject.toml", "dependencies = [\"jinja2>=3.1.5\", \"markupsafe==3.1.6\"]\n", "jinja2", "3.1.6", false)]

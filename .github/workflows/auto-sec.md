@@ -87,9 +87,12 @@ pre-agent-steps:
       # Only structured fields are kept. Advisory text (summaries, descriptions,
       # CVE prose) is dropped so it cannot be copied into a public PR or prompt.
       # A 403 here means the token lost alert access; fail loudly rather than
-      # report a misleading "nothing to do".
+      # report a misleading "nothing to do". Every advisory range for the alert's
+      # package is kept, not just the one the installed version fell in, so the
+      # coverage check below rejects a target inside a later disjoint range, as the
+      # approval job does.
       gh api --paginate "/repos/${REPO}/dependabot/alerts?state=open&per_page=100" \
-        --jq '.[] | {number, ecosystem: .dependency.package.ecosystem, package: .dependency.package.name, manifest_path: .dependency.manifest_path, scope: .dependency.scope, relationship: .dependency.relationship, vulnerable_version_range: .security_vulnerability.vulnerable_version_range, first_patched_version: .security_vulnerability.first_patched_version.identifier}' \
+        --jq '.[] | .dependency.package as $pkg | ($pkg.name | ascii_downcase | gsub("[-_.]+"; "-")) as $key | {number, ecosystem: $pkg.ecosystem, package: $pkg.name, manifest_path: .dependency.manifest_path, scope: .dependency.scope, relationship: .dependency.relationship, vulnerable_version_range: .security_vulnerability.vulnerable_version_range, vulnerable_ranges: ([.security_vulnerability.vulnerable_version_range] + [(.security_advisory.vulnerabilities // [])[] | select(.package.ecosystem == $pkg.ecosystem and (.package.name | ascii_downcase | gsub("[-_.]+"; "-")) == $key) | .vulnerable_version_range] | map(select(type == "string" and . != "")) | unique), first_patched_version: .security_vulnerability.first_patched_version.identifier}' \
         | jq -s '.' > .auto-sec/dependabot-alerts.json
       gh api --paginate "/repos/${REPO}/dependabot/alerts?state=open&classification=malware&per_page=100" \
         --jq '.[] | .number' | jq -s '.' > .auto-sec/malware-alert-numbers.json

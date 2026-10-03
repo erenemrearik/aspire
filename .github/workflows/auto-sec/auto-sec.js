@@ -325,9 +325,12 @@ function readJson(text) {
     }
 }
 
-// Every manifest reader below returns the `{ name, version }` entries the file declares
-// or resolves. A package can appear more than once (a lockfile with a top-level and a
-// nested copy, or a dependency plus an override), and every occurrence is returned.
+// Every manifest reader below returns the `{ name, version, key }` entries the file
+// declares or resolves. A package can appear more than once (a lockfile with a top-level
+// and a nested copy, or a dependency plus an override), and every occurrence is returned.
+// `key` identifies the occurrence (an install path, a yarn selector, a pnpm dependency
+// reference) when the format has one, so a consumer moving between two versions that
+// both stay in the file is still seen as a version change.
 
 // package.json pins a range per dependency map; `overrides` nest by package name and
 // `resolutions` keys can be glob paths (`**/lodash`), so both are searched recursively.
@@ -342,7 +345,7 @@ function packageJsonEntries(text) {
     for (const map of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
         for (const [key, value] of Object.entries(json[map] ?? {})) {
             if (typeof value === 'string') {
-                entries.push({ name: key, version: stripRangeOperators(value) });
+                entries.push({ name: key, version: stripRangeOperators(value), key: `${map}/${key}` });
             }
         }
     }
@@ -375,18 +378,19 @@ function packageLockEntries(text) {
     for (const [path, entry] of Object.entries(json.packages ?? {})) {
         const index = path.lastIndexOf('node_modules/');
         if (index >= 0 && typeof entry?.version === 'string') {
-            entries.push({ name: path.slice(index + 'node_modules/'.length), version: entry.version });
+            entries.push({ name: path.slice(index + 'node_modules/'.length), version: entry.version, key: path });
         }
     }
-    const visit = dependencies => {
+    const visit = (dependencies, parent) => {
         for (const [key, entry] of Object.entries(dependencies ?? {})) {
+            const path = `${parent}/${key}`;
             if (typeof entry?.version === 'string') {
-                entries.push({ name: key, version: entry.version });
+                entries.push({ name: key, version: entry.version, key: `v1${path}` });
             }
-            visit(entry?.dependencies);
+            visit(entry?.dependencies, path);
         }
     };
-    visit(json.dependencies);
+    visit(json.dependencies, '');
     return entries;
 }
 
@@ -395,22 +399,24 @@ function packageLockEntries(text) {
 //   classic: "lodash@^4.17.20", lodash@^4.17.21:\n  version "4.17.21"
 //   berry:   "lodash@npm:^4.17.20":\n  version: 4.17.21
 // Nested `dependencies:` entries are indented further and never bind a version here.
-// A header can alias several names to one block; the version is attributed to each.
+// A header can list several selectors, including aliases of other names; one entry is
+// returned per selector, keyed by the selector, so moving `foo@^1.5.0` from the 1.x
+// block into an existing 2.x block is visible.
 function yarnLockEntries(text) {
     const entries = [];
-    let names = [];
+    let specs = [];
     for (const line of String(text ?? '').split(/\r?\n/)) {
         if (/^\S/.test(line)) {
-            names = !line.startsWith('#') && line.trimEnd().endsWith(':')
+            specs = !line.startsWith('#') && line.trimEnd().endsWith(':')
                 ? [...new Set(line.trimEnd().slice(0, -1).split(',')
-                    .map(spec => splitNpmSpec(spec.trim().replace(/^"|"$/g, '')).name)
-                    .filter(Boolean))]
+                    .map(spec => spec.trim().replace(/^"|"$/g, ''))
+                    .filter(spec => splitNpmSpec(spec).name))]
                 : [];
             continue;
         }
-        const version = names.length ? /^ {2}version:?\s+"?([^"\s]+)"?\s*$/.exec(line) : null;
+        const version = specs.length ? /^ {2}version:?\s+"?([^"\s]+)"?\s*$/.exec(line) : null;
         if (version) {
-            entries.push(...names.map(name => ({ name, version: version[1] })));
+            entries.push(...specs.map(spec => ({ name: splitNpmSpec(spec).name, version: version[1], key: spec })));
         }
     }
     return entries;
@@ -422,6 +428,11 @@ function yarnLockEntries(text) {
 //   v6:  /lodash@4.17.21:
 //   v5:  /lodash/4.17.21:            /@babel/parser/7.29.3:
 // Keys without a version (`importers:` children such as `  .:`) are skipped.
+// Each package key appears once per version, so the dependency references that select a
+// version are returned too, keyed by the importer or package that holds them:
+//   importers:\n  .:\n    dependencies:\n      lodash:\n        specifier: ^4\n        version: 4.17.21
+//   snapshots:\n  a@1.0.0:\n    dependencies:\n      lodash: 4.17.21(peer@1.0.0)
+// References to non-registry targets (`link:../x`) carry no version and are skipped.
 function pnpmLockEntries(text) {
     const entries = [];
     for (const [, rawKey] of String(text ?? '').matchAll(/^ {2}(\S.*?):\s*$/gm)) {
@@ -435,6 +446,39 @@ function pnpmLockEntries(text) {
         }
         if (range && name) {
             entries.push({ name, version: range });
+        }
+    }
+    const unquote = value => value.trim().replace(/^'|'$/g, '');
+    let section = '';
+    let owner = '';
+    let group = '';
+    let pending = '';
+    for (const line of String(text ?? '').split(/\r?\n/)) {
+        const reference = (name, value) => {
+            const version = unquote(value).replace(/\(.*$/, '');
+            if (name && /^\d/.test(version)) {
+                entries.push({ name, version, key: `${section}/${owner}/${group}/${name}` });
+            }
+        };
+        let match;
+        if ((match = /^(\S.*?):\s*$/.exec(line))) {
+            [section, owner, group, pending] = [match[1], '', '', ''];
+        } else if ((match = /^ {2}(\S.*?):\s*$/.exec(line))) {
+            [owner, group, pending] = [unquote(match[1]), '', ''];
+        } else if ((match = /^ {4}(\w*[dD]ependencies):\s*$/.exec(line))) {
+            [group, pending] = [match[1], ''];
+        } else if (group && (match = /^ {6}(\S.*?):\s*(\S.*)?$/.exec(line))) {
+            pending = '';
+            if (match[2]) {
+                reference(unquote(match[1]), match[2]);
+            } else {
+                pending = unquote(match[1]);
+            }
+        } else if (pending && (match = /^ {8}version:\s*(\S.*)$/.exec(line))) {
+            reference(pending, match[1]);
+            pending = '';
+        } else if (!/^ {8}/.test(line)) {
+            [group, pending] = /^ {4}/.test(line) ? ['', ''] : [group, pending];
         }
     }
     return entries;
@@ -529,10 +573,14 @@ function manifestMentionsVersion(path, text, ecosystem, name, version) {
 }
 
 /**
- * Package versions a PR introduces in one manifest: every `{ name, from, to }` where
- * `to` is bound on head but not on base. `from` lists the base versions the new one
- * replaces: those removed by the PR, or, when the PR adds a copy and keeps the old ones,
- * every base version of the package. It is empty for a package that is new to the file.
+ * Package version changes a PR makes in one manifest, as `{ name, from, to }` entries
+ * with one entry per package and target version:
+ * - a version bound on head but not on base. `from` lists the base versions it replaces:
+ *   those removed by the PR, or, when the PR adds a copy and keeps the old ones, every
+ *   base version of the package. It is empty for a package that is new to the file.
+ * - a consolidation into a version the base already carries.
+ * - a consumer that moves between two versions that both stay in the file, detected
+ *   through the occurrence key or, for formats without one, through version counts.
  */
 function manifestVersionChanges(path, baseText, headText, ecosystem) {
     const reader = manifestReader(path);
@@ -541,34 +589,63 @@ function manifestVersionChanges(path, baseText, headText, ecosystem) {
     }
     const group = text => {
         const packages = new Map();
-        for (const { name, version } of reader(text)) {
-            const key = normalizePackageName(ecosystem, name);
-            if (!packages.has(key)) {
-                packages.set(key, { name, versions: new Set() });
+        for (const { name, version, key } of reader(text)) {
+            const id = normalizePackageName(ecosystem, name);
+            if (!packages.has(id)) {
+                packages.set(id, { name, counts: new Map(), keys: new Map() });
             }
-            packages.get(key).versions.add(version);
+            const entry = packages.get(id);
+            entry.counts.set(version, (entry.counts.get(version) ?? 0) + 1);
+            if (key !== undefined) {
+                // A key seen twice is ambiguous and cannot pair base and head occurrences.
+                entry.keys.set(key, entry.keys.has(key) ? null : version);
+            }
         }
         return packages;
     };
     const base = group(baseText);
-    const changes = [];
-    for (const [key, { name, versions }] of group(headText)) {
-        const baseVersions = [...(base.get(key)?.versions ?? [])];
-        const removed = baseVersions.filter(version => !versions.has(version));
-        const introduced = [...versions].filter(version => !baseVersions.includes(version));
+    const changes = new Map();
+    const add = (name, from, to) => {
+        const id = `${name}\u0000${to}`;
+        if (!changes.has(id)) {
+            changes.set(id, { name, from: [], to });
+        }
+        const change = changes.get(id);
+        change.from = [...new Set([...change.from, ...from])];
+    };
+    for (const [id, { name, counts, keys }] of group(headText)) {
+        const baseEntry = base.get(id);
+        const baseCounts = baseEntry?.counts ?? new Map();
+        const baseVersions = [...baseCounts.keys()];
+        const removed = baseVersions.filter(version => !counts.has(version));
+        const introduced = [...counts.keys()].filter(version => !baseCounts.has(version));
         for (const version of introduced) {
-            changes.push({ name, from: removed.length ? removed : baseVersions, to: version });
+            add(name, removed.length ? removed : baseVersions, version);
         }
         // A consolidation into a version the base already carries introduces nothing new:
         // base `foo@1.0.0` + `foo@2.1.0` -> head `foo@2.1.0` still moves the 1.x consumers
         // to 2.1.0, so the surviving versions are the targets of the removed ones.
         if (!introduced.length && removed.length) {
-            for (const version of versions) {
-                changes.push({ name, from: removed, to: version });
+            for (const version of counts.keys()) {
+                add(name, removed, version);
+            }
+        }
+        // Both versions can survive while a consumer moves between them: yarn selector
+        // `foo@^1.5.0` resolving to 1.x on base and to the 2.x block on head.
+        for (const [key, version] of keys) {
+            const baseVersion = baseEntry?.keys.get(key);
+            if (version !== null && baseVersion && baseVersion !== version) {
+                add(name, [baseVersion], version);
+            }
+        }
+        const shrunk = baseVersions.filter(version => counts.has(version) && counts.get(version) < baseCounts.get(version));
+        for (const version of counts.keys()) {
+            if (shrunk.length && baseCounts.has(version) && counts.get(version) > baseCounts.get(version)) {
+                add(name, shrunk, version);
             }
         }
     }
-    return changes;
+    return [...changes.values()];
 }
 
 // A new version is breaking when any base version it replaces crosses a breaking
@@ -626,8 +703,9 @@ function alertFixedByUpdate(alert, ecosystem, update, headContents) {
         version => (compareVersions(version, patched) ?? -1) >= 0 && !inVulnerableRanges(version, alertVulnerableRanges(alert)));
 }
 
-// The approval job's alerts carry every advisory range (`vulnerable_ranges`); the agent's
-// pre-collected alerts.json carries only the alert's own `vulnerable_version_range`.
+// Both the approval job and the agent's pre-collected alerts.json carry every advisory
+// range for the package as `vulnerable_ranges`. An alert with only the installed
+// version's `vulnerable_version_range` falls back to that single range.
 function alertVulnerableRanges(alert) {
     return alert.vulnerable_ranges ?? (alert.vulnerable_version_range ? [alert.vulnerable_version_range] : []);
 }
