@@ -49,9 +49,48 @@ public class TemplatePackageLockTests
 
         Assert.True(overrides.TryGetProperty("minimatch@3.1.5", out var minimatchOverride));
         Assert.Equal(
-            "2.1.4",
+            "2.1.7",
             minimatchOverride.GetProperty("brace-expansion").GetString());
+        Assert.Equal("5.0.12", overrides.GetProperty("brace-expansion@>=5").GetString());
         Assert.False(overrides.TryGetProperty("brace-expansion@1", out _));
+    }
+
+    [Theory]
+    [InlineData("ts-starter", "frontend")]
+    [InlineData("py-starter", "frontend")]
+    [InlineData("java-starter", "frontend")]
+    [InlineData("ts-starter", "")]
+    [InlineData("py-starter", "")]
+    public void StarterPackageLock_UsesPatchedBraceExpansion(string templateName, string subdirectory)
+    {
+        var filePath = Path.Combine(
+            GetRepoRoot(),
+            "src",
+            "Aspire.Cli",
+            "Templating",
+            "Templates",
+            templateName,
+            subdirectory,
+            "package-lock.json");
+
+        using var packageLock = JsonDocument.Parse(File.ReadAllText(filePath));
+        var packages = packageLock.RootElement.GetProperty("packages").EnumerateObject()
+            .Where(package => package.Name.EndsWith("/brace-expansion", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(packages);
+        Assert.All(packages, package =>
+        {
+            var version = Version.Parse(package.Value.GetProperty("version").GetString()!);
+            var minimum = version.Major switch
+            {
+                2 => new Version(2, 1, 6),
+                5 => new Version(5, 0, 11),
+                _ => throw new InvalidOperationException($"Unexpected brace-expansion major version: {version}")
+            };
+
+            Assert.True(version >= minimum, $"brace-expansion {version} predates the security fixes in {minimum}.");
+        });
     }
 
     [Theory]
