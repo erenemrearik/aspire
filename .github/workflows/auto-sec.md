@@ -199,6 +199,9 @@ safe-outputs:
     recreate-ref: true
     allowed-branches: ["auto-sec/security-updates"]
     if-no-changes: ignore
+    # Use the `am` patch transport so the patch content gate below inspects exactly
+    # what the handler applies; a bundle would bypass it.
+    patch-format: am
     allowed-files: &auto-sec-files
       - "**/package.json"
       - "**/package-lock.json"
@@ -238,6 +241,7 @@ safe-outputs:
     # auto-sec branch is a bot-owned topic branch and is never protected.
     check-branch-protection: false
     if-no-changes: ignore
+    patch-format: am
     allowed-files: *auto-sec-files
     protected-files: *auto-sec-protected
   # Runs in the safe_outputs job after its checkout and before the handlers.
@@ -255,6 +259,16 @@ safe-outputs:
         script: |
           const gate = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/auto-sec/auto-sec.js`);
           await gate.runPushTargetGate({ github, context, core });
+    # The file allowlist admits executable manifests, so this gate fails the job
+    # unless every changed manifest line is a dependency-version swap and no file
+    # adds an unapproved package source. It covers both code-writing outputs.
+    - name: Validate auto-sec patch contents
+      if: (!cancelled()) && (contains(needs.agent.outputs.output_types, 'create_pull_request') || contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch'))
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        script: |
+          const gate = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/auto-sec/auto-sec.js`);
+          gate.runPatchContentGate({ core });
   jobs:
     approve-dependabot-pr:
       name: "Approve Dependabot PR"

@@ -345,24 +345,114 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     [Theory]
     [RequiresTools(["node"])]
-    [InlineData("\"lodash\": \"^4.17.20\",", "\"lodash\": \"^4.17.21\",", true)]
-    [InlineData("\"lodash\": \"1.2.9\",", "\"lodash\": \"1.2.10\",", true)]
-    [InlineData("<PackageVersion Include=\"X\" Version=\"9.0.4\" />", "<PackageVersion Include=\"X\" Version=\"9.0.5-rc.1\" />", true)]
-    [InlineData("  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", true)]
-    [InlineData("\"build\": \"tsc\",", "\"build\": \"tsc && node x.js\",", false)]
-    [InlineData("\"build\": \"node script-1.js\",", "\"build\": \"node script-2.js\",", false)]
-    [InlineData("\"lodash\": \"^4.17.20\",", "\"lodash\": \"^4.17.20\",\n\"postinstall\": \"node x.js\",", false)]
-    [InlineData("\"foo\": \">=1.0 <2.0\",", "\"foo\": \">=1.1 <3.0\",", false)]
-    public async Task DetectsVersionOnlyManifestEdits(string baseText, string headText, bool expected)
+    [InlineData("package.json", "dependencies", "\"lodash\": \"^4.17.20\"", "\"lodash\": \"^4.17.21\"", true)]
+    [InlineData("package.json", "devDependencies", "\"lodash\": \"1.2.9\"", "\"lodash\": \"1.2.10\"", true)]
+    [InlineData("package.json", "overrides", "\"alias\": \"npm:lodash@4.17.20\"", "\"alias\": \"npm:lodash@4.17.21\"", true)]
+    [InlineData("Directory.Packages.props", null, "<PackageVersion Include=\"X\" Version=\"9.0.4\" />", "<PackageVersion Include=\"X\" Version=\"9.0.5-rc.1\" />", true)]
+    [InlineData("pyproject.toml", null, "  \"requests>=2.31.0\",", "  \"requests>=2.32.3\",", true)]
+    [InlineData("pyproject.toml", null, "  \"requests[socks]>=2.31.0; python_version >= '3.9'\",", "  \"requests[socks]>=2.32.3; python_version >= '3.9'\",", true)]
+    [InlineData("package.json", "scripts", "\"build\": \"tsc\"", "\"build\": \"tsc && node x.js\"", false)]
+    [InlineData("package.json", "scripts", "\"build\": \"node script-1.js\"", "\"build\": \"node script-2.js\"", false)]
+    [InlineData("package.json", "scripts", "\"build\": \"vite --mode=1\"", "\"build\": \"vite --mode=2\"", false)]
+    [InlineData("package.json", "scripts", "\"build\": \"1.0.0\"", "\"build\": \"1.0.1\"", false)]
+    [InlineData("package.json", "dependencies", "\"lodash\": \"^4.17.20\"", "\"lodash\": \"^4.17.20\",\n    \"postinstall\": \"node x.js\"", false)]
+    [InlineData("package.json", "dependencies", "\"foo\": \">=1.0 <2.0\"", "\"foo\": \">=1.1 <3.0\"", false)]
+    [InlineData("pyproject.toml", null, "command = \"tool --level=1\"", "command = \"tool --level=2\"", false)]
+    [InlineData("Directory.Packages.props", null, "<Exec Command=\"tool --level=1\" />", "<Exec Command=\"tool --level=2\" />", false)]
+    [InlineData("yarn.lock", null, "  version \"1.0.0\"", "  version \"1.0.1\"", false)]
+    public async Task DetectsVersionOnlyManifestEdits(string path, string? section, string baseLine, string headLine, bool expected)
     {
+        // package.json lines are wrapped in a document so the JSON-path check sees them
+        // inside the named top-level section.
+        string Wrap(string line) => section is null ? line : $"{{\n  \"{section}\": {{\n    {line}\n  }}\n}}";
+
         var result = await RunHarnessAsync(new JsonObject
         {
             ["mode"] = "call",
             ["fn"] = "isVersionOnlyEdit",
-            ["args"] = new JsonArray(baseText, headText),
+            ["args"] = new JsonArray(path, Wrap(baseLine), Wrap(headLine)),
         });
 
         Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("extension/package.json", " \"dependencies\": {\n-    \"lodash\": \"^4.17.20\",\n+    \"lodash\": \"^4.17.21\",\n }", "")]
+    [InlineData("Directory.Packages.props", " <ItemGroup>\n-    <PackageVersion Include=\"X\" Version=\"9.0.4\" />\n+    <PackageVersion Include=\"X\" Version=\"9.0.5\" />\n </ItemGroup>", "")]
+    [InlineData("extension/package-lock.json", "     \"node_modules/lodash\": {\n-      \"version\": \"4.17.20\",\n+      \"version\": \"4.17.21\",\n     }", "")]
+    [InlineData("extension/package.json", " \"scripts\": {\n-    \"build\": \"vite --mode=1\",\n+    \"build\": \"vite --mode=2\",\n }", "non-version-manifest-edit")]
+    [InlineData("extension/package.json", " \"scripts\": {\n+    \"postinstall\": \"node x.js\",\n }", "non-version-manifest-edit")]
+    [InlineData("pyproject.toml", " [tool.x]\n-command = \"tool --level=1\"\n+command = \"tool --level=2\"\n x = 1", "non-version-manifest-edit")]
+    [InlineData("extension/package-lock.json", "     \"node_modules/lodash\": {\n-      \"resolved\": \"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/lodash/-/lodash-4.17.20.tgz\",\n+      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\",\n     }", "new-package-source")]
+    public async Task PatchContentGateChecksEveryChangedLine(string path, string hunkBody, string expectedReason)
+    {
+        var lines = hunkBody.Split('\n');
+        var oldCount = lines.Count(line => line[0] is ' ' or '-');
+        var newCount = lines.Count(line => line[0] is ' ' or '+');
+        var patch = $"From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] update\n\n---\ndiff --git a/{path} b/{path}\nindex 1111111..2222222 100644\n--- a/{path}\n+++ b/{path}\n@@ -10,{oldCount} +10,{newCount} @@\n{hunkBody}\n-- \n2.43.0\n";
+
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "patch-gate",
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        var violations = result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}").ToArray();
+        if (expectedReason.Length == 0)
+        {
+            Assert.Empty(violations);
+            Assert.Empty(result["failures"]!.AsArray());
+        }
+        else
+        {
+            Assert.Equal([$"{path} {expectedReason}"], violations);
+            Assert.Single(result["failures"]!.AsArray());
+        }
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task PatchContentGateRejectsUnsupportedTransportsAndFileDiffs()
+    {
+        var newFile = "diff --git a/extension/package.json b/extension/package.json\nnew file mode 100644\n--- /dev/null\n+++ b/extension/package.json\n@@ -0,0 +1 @@\n+{}\n";
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "patch-gate",
+            ["patchFiles"] = new JsonObject
+            {
+                ["aw-auto-sec-security-updates.bundle"] = "bundle",
+                ["aw-auto-sec-security-updates.patch"] = newFile,
+            },
+        });
+
+        Assert.Equal(
+            ["aw-auto-sec-security-updates.bundle bundle-transport", "extension/package.json unsupported-file-diff"],
+            result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}"));
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task PatchContentGateAllowsSourcesAlreadyInTheCheckedOutFile()
+    {
+        // A new transitive lockfile entry repeats hosts the file already lists.
+        var patch = "diff --git a/extension/package-lock.json b/extension/package-lock.json\nindex 1111111..2222222 100644\n--- a/extension/package-lock.json\n+++ b/extension/package-lock.json\n@@ -1,1 +1,2 @@\n   \"packages\": {\n+    \"node_modules/x\": { \"funding\": \"https://github.com/sponsors/x\" },\n";
+        var known = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "patch-gate",
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+            ["workspaceFiles"] = new JsonObject { ["extension/package-lock.json"] = "{ \"funding\": \"https://github.com/sponsors/y\" }" },
+        });
+        var unknown = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "patch-gate",
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        Assert.Empty(known["value"]!["violations"]!.AsArray());
+        Assert.Equal(
+            ["extension/package-lock.json new-package-source"],
+            unknown["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}"));
     }
 
     [Theory]
@@ -906,6 +996,20 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         var gateSection = compiled[gateStep..handlerStep];
         Assert.Contains("GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}", gateSection, StringComparison.Ordinal);
         Assert.Contains("gate.runPushTargetGate({ github, context, core })", gateSection, StringComparison.Ordinal);
+
+        // The file allowlist admits executable manifests, so the patch content gate must run
+        // before the handlers apply any patch, and both outputs must use the `am` transport
+        // whose patch files the gate inspects.
+        var patchGateStep = compiled.IndexOf("name: Validate auto-sec patch contents", StringComparison.Ordinal);
+        Assert.True(patchGateStep >= 0 && handlerStep > patchGateStep, "Patch content gate must run before Process Safe Outputs.");
+        var patchGateSection = compiled[patchGateStep..handlerStep];
+        Assert.Contains("contains(needs.agent.outputs.output_types, 'create_pull_request')", patchGateSection, StringComparison.Ordinal);
+        Assert.Contains("contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch')", patchGateSection, StringComparison.Ordinal);
+        Assert.Contains("gate.runPatchContentGate({ core })", patchGateSection, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Matches(source, "^    patch-format: am\r?$", RegexOptions.Multiline).Count);
+        var compiledPatchFormats = Regex.Matches(compiled, "patch_format\\\\\":\\\\\"([a-z]+)\\\\\"").Select(match => match.Groups[1].Value).ToArray();
+        Assert.True(compiledPatchFormats.Length >= 2, "Both code-writing outputs must configure patch_format.");
+        Assert.All(compiledPatchFormats, format => Assert.Equal("am", format));
     }
 
     private static JsonObject CreatePushGateScenario(JsonObject prOverrides, JsonObject? item = null)

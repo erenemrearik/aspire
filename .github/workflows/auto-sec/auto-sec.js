@@ -68,6 +68,36 @@ const VERSION_ONLY_MANIFEST_BASENAMES = new Set([
 const VERSION_TOKEN_CHAR = /[0-9A-Za-z.+-]/;
 const VERSION_TOKEN = /^v?\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.+-]*)?$/;
 
+// package.json maps whose string values are dependency version ranges. A version-only
+// edit of package.json may change nothing outside these maps.
+const PACKAGE_JSON_DEPENDENCY_MAPS = new Set([
+    'dependencies',
+    'devDependencies',
+    'optionalDependencies',
+    'peerDependencies',
+    'overrides',
+    'resolutions',
+]);
+
+// One npm range comparator (https://docs.npmjs.com/cli/v10/using-npm/semver#ranges):
+//   4.17.21  ^4.17.21  ~1.2  >=1.0.0  <2  1.x  *  -  ||
+const NPM_RANGE_PART = /^(?:\|\||-|\*|[xX]|(?:[\^~]|[<>]=?|=)?v?\d+(?:\.(?:\d+|[xX*]))*(?:[-+][0-9A-Za-z.+-]*)?)$/;
+
+// A package.json entry on its own line whose value is a version range, optionally behind an
+// npm alias (`"lodash": "npm:lodash@^4.17.21"`). Script commands such as
+// `"build": "vite --mode=1"` do not match.
+const PACKAGE_JSON_VERSION_LINE = /^\s*"(?:[^"\\]|\\.)+"\s*:\s*"(?:npm:(?:@[^@"\s/]+\/)?[^@"\s]+@)?([^"]*)"\s*,?\s*$/;
+
+// A quoted PEP 508 requirement string on its own line in a TOML array, with an optional
+// extras list and environment marker (https://peps.python.org/pep-0508/):
+//   "requests>=2.32.3",   'jinja2[i18n] ~= 3.1.6, < 4; python_version >= "3.9"',
+const PYPROJECT_VERSION_LINE = /^\s*(["'])[A-Za-z0-9][A-Za-z0-9._-]*\s*(?:\[[A-Za-z0-9._,\s-]*\])?\s*(?:===|==|~=|>=|<=|!=|>|<)\s*[0-9A-Za-z.*+!-]+(?:\s*,\s*(?:===|==|~=|>=|<=|!=|>|<)\s*[0-9A-Za-z.*+!-]+)*\s*(?:;(?:(?!\1)[^\n])*)?\1\s*,?\s*$/;
+
+// A single central package version element on its own line:
+//   <PackageVersion Include="System.Text.Json" Version="9.0.5" />
+//   <PackageVersion Update="Npgsql.EntityFrameworkCore.PostgreSQL" Version="[9.0.4]" />
+const PACKAGES_PROPS_VERSION_LINE = /^\s*<PackageVersion\s+(?:Include|Update)="[^"$%@]+"\s+Version="\[?[0-9A-Za-z.+-]+\]?"\s*\/>\s*$/;
+
 const DEFAULT_PORTS = {
     'http': 80,
     'https': 443,
@@ -694,25 +724,65 @@ function alertManifestCarries(alert, ecosystem, update, headContents, acceptable
 }
 
 /**
- * True when `headText` differs from `baseText` only by swapping one version token per
- * changed line, for example:
- *   "lodash": "^4.17.20",                                ->  "lodash": "^4.17.21",
- *   <PackageVersion Include="X" Version="9.0.4" />       ->  ... Version="9.0.5" />
- *   "requests>=2.31.0",                                  ->  "requests>=2.32.3",
- * Added, removed, or otherwise edited lines fail, so a commit that only claims to be
- * from Dependabot cannot slip a script or build hook change into an executable
- * manifest. Missing text on either side also fails closed.
+ * True when `headText` differs from `baseText` only by swapping one version token on
+ * lines that are dependency-version entries for the manifest at `path`, for example:
+ *   package.json              "lodash": "^4.17.20",                       ->  "^4.17.21"
+ *   Directory.Packages.props  <PackageVersion Include="X" Version="9.0.4" />  ->  "9.0.5"
+ *   pyproject.toml            "requests>=2.31.0",                          ->  ">=2.32.3"
+ * Added, removed, or otherwise edited lines fail, and so does a version-looking token
+ * swap on any other line (a script argument such as `--mode=1`). For package.json the
+ * parsed documents must also be identical outside the dependency maps. This keeps a
+ * commit that only claims to be from Dependabot from slipping a script or build hook
+ * change into an executable manifest. Missing text on either side fails closed.
  */
-function isVersionOnlyEdit(baseText, headText) {
+function isVersionOnlyEdit(path, baseText, headText) {
     if (typeof baseText !== 'string' || typeof headText !== 'string') {
         return false;
     }
     const baseLines = baseText.split(/\r?\n/);
     const headLines = headText.split(/\r?\n/);
-    if (baseLines.length !== headLines.length) {
+    if (baseLines.length !== headLines.length
+        || !baseLines.every((line, index) => line === headLines[index] || isDependencyVersionLineSwap(path, line, headLines[index]))) {
         return false;
     }
-    return baseLines.every((line, index) => line === headLines[index] || isVersionTokenSwap(line, headLines[index]));
+    if (basenameOf(path).toLowerCase() === 'package.json' && baseText !== headText) {
+        const base = readJson(baseText);
+        const head = readJson(headText);
+        return base !== null && head !== null
+            && jsonDifferencePaths(base, head).every(([section]) => PACKAGE_JSON_DEPENDENCY_MAPS.has(section));
+    }
+    return true;
+}
+
+/**
+ * True when `baseLine` -> `headLine` swaps one version token and both lines are
+ * dependency-version entries for the manifest at `path`. Unknown manifests fail closed.
+ */
+function isDependencyVersionLineSwap(path, baseLine, headLine) {
+    const isVersionLine = DEPENDENCY_VERSION_LINE_RULES[basenameOf(path).toLowerCase()];
+    return Boolean(isVersionLine) && isVersionLine(baseLine) && isVersionLine(headLine) && isVersionTokenSwap(baseLine, headLine);
+}
+
+const DEPENDENCY_VERSION_LINE_RULES = {
+    'package.json': line => {
+        const match = PACKAGE_JSON_VERSION_LINE.exec(line);
+        const parts = match ? match[1].trim().split(/\s+/) : [];
+        return parts.length > 0 && parts.every(part => NPM_RANGE_PART.test(part));
+    },
+    'pyproject.toml': line => PYPROJECT_VERSION_LINE.test(line),
+    'directory.packages.props': line => PACKAGES_PROPS_VERSION_LINE.test(line),
+};
+
+// JSON paths (as key arrays) whose values differ between two parsed documents.
+function jsonDifferencePaths(left, right, prefix = []) {
+    const isObject = value => value !== null && typeof value === 'object';
+    if (!isObject(left) || !isObject(right) || Array.isArray(left) !== Array.isArray(right)) {
+        return Object.is(left, right) ? [] : [prefix];
+    }
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+    return [...keys].flatMap(key => !(key in left) || !(key in right)
+        ? [[...prefix, key]]
+        : jsonDifferencePaths(left[key], right[key], [...prefix, key]));
 }
 
 function isVersionTokenSwap(baseLine, headLine) {
@@ -898,7 +968,7 @@ function evaluateApprovalGates(input) {
     // trusted key signed it, so also prove from the content that executable manifests
     // changed nothing but version tokens.
     if (files.some(file => VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(file.filename).toLowerCase())
-        && !isVersionOnlyEdit(baseContents[file.filename], headContents[file.filename]))) {
+        && !isVersionOnlyEdit(file.filename, baseContents[file.filename], headContents[file.filename]))) {
         reasons.push('non-version-manifest-edit');
     }
     if (sourceChanges.some(change => change.newSources.length > 0)) {
@@ -1427,6 +1497,136 @@ async function runPushTargetGate({ github, context, core, fs = require('node:fs'
     return { requests: items.length, violations };
 }
 
+// Split a `git format-patch` file into per-file diffs. Commit headers and messages before
+// the first `diff --git` line are skipped:
+//   diff --git a/extension/package.json b/extension/package.json
+//   index 1111111..2222222 100644
+//   --- a/extension/package.json
+//   +++ b/extension/package.json
+//   @@ -10,7 +10,7 @@
+//      "dependencies": {
+//   -    "lodash": "^4.17.20",
+//   +    "lodash": "^4.17.21",
+// Hunk bodies are consumed by the line counts in their `@@` header, so a hunk can never
+// swallow the next `diff --git` header. Each file diff records its change blocks (runs of
+// removed then added lines between context lines); git emits a block's removals before its
+// additions, so the i-th removed line pairs with the i-th added line.
+function parsePatchFileDiffs(patchText) {
+    const diffs = [];
+    let current = null;
+    const lines = String(patchText ?? '').split('\n').map(line => line.replace(/\r$/, ''));
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
+        if (line.startsWith('diff --git ')) {
+            const paths = /^diff --git a\/(\S+) b\/(\S+)$/.exec(line);
+            current = { oldPath: paths?.[1] ?? null, newPath: paths?.[2] ?? null, parseable: Boolean(paths), metadata: [], blocks: [] };
+            diffs.push(current);
+            continue;
+        }
+        if (!current) {
+            continue;
+        }
+        const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
+        if (!hunk) {
+            if (/^(?:new file mode|deleted file mode|old mode|new mode|rename from|rename to|copy from|copy to|Binary files|GIT binary patch)/.test(line)) {
+                current.metadata.push(line);
+            }
+            continue;
+        }
+        let oldRemaining = hunk[1] === undefined ? 1 : Number(hunk[1]);
+        let newRemaining = hunk[2] === undefined ? 1 : Number(hunk[2]);
+        let block = null;
+        while ((oldRemaining > 0 || newRemaining > 0) && index + 1 < lines.length) {
+            const body = lines[index + 1];
+            const marker = body[0];
+            if (marker === '\\') {
+                index++;
+                continue;
+            }
+            if (marker === ' ' || body === '') {
+                block = null;
+                oldRemaining--;
+                newRemaining--;
+            } else if (marker === '-' || marker === '+') {
+                if (!block || (marker === '-' && block.added.length > 0)) {
+                    block = { removed: [], added: [] };
+                    current.blocks.push(block);
+                }
+                (marker === '-' ? block.removed : block.added).push(body.slice(1));
+                marker === '-' ? oldRemaining-- : newRemaining--;
+            } else {
+                break;
+            }
+            index++;
+        }
+    }
+    return diffs;
+}
+
+/**
+ * Checks the contents of an agent patch before the create or push handler applies it.
+ * The handler's file allowlist admits executable manifests, so every changed line in
+ * package.json, pyproject.toml, or Directory.Packages.props must be a dependency-version
+ * token swap, and no file may add a package source that is neither approved nor already
+ * referenced by the lines it replaces or by `readBaseText(path)`, the file as checked out
+ * in the safe_outputs job. Lockfiles list per-package funding and repository URLs, so a
+ * newly added transitive entry usually repeats a host the file already contains.
+ * Returns `{ path, reason }` violations.
+ */
+function checkPatchContents(patchText, readBaseText = () => undefined) {
+    const violations = [];
+    for (const diff of parsePatchFileDiffs(patchText)) {
+        const path = diff.newPath ?? diff.oldPath ?? '(unknown)';
+        if (!diff.parseable || diff.oldPath !== diff.newPath) {
+            violations.push({ path, reason: 'unsupported-file-diff' });
+            continue;
+        }
+        if (diff.metadata.length > 0) {
+            violations.push({ path, reason: 'unsupported-file-diff' });
+            continue;
+        }
+        if (VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(path).toLowerCase())
+            && !diff.blocks.every(block => block.removed.length === block.added.length
+                && block.removed.every((line, index) => isDependencyVersionLineSwap(path, line, block.added[index])))) {
+            violations.push({ path, reason: 'non-version-manifest-edit' });
+        }
+        const removed = diff.blocks.flatMap(block => block.removed).join('\n');
+        const added = diff.blocks.flatMap(block => block.added).join('\n');
+        if (findNewSources(`${readBaseText(path) ?? ''}\n${removed}`, added).length > 0) {
+            violations.push({ path, reason: 'new-package-source' });
+        }
+    }
+    return violations;
+}
+
+/**
+ * Runs in the safe_outputs job before the create and push handlers. Both outputs use the
+ * `am` patch transport, so the `aw-*.patch` files under `patchDir` are exactly what the
+ * handlers apply; a bundle file would bypass this check and fails the step instead.
+ */
+function runPatchContentGate({ core, fs = require('node:fs'), patchDir = '/tmp/gh-aw', workspace = process.env.GITHUB_WORKSPACE }) {
+    const path = require('node:path');
+    const names = fs.existsSync(patchDir) ? fs.readdirSync(patchDir).filter(name => /^aw-.*\.(?:patch|bundle)$/.test(name)).sort() : [];
+    const readBaseText = file => {
+        const full = workspace ? path.resolve(workspace, file) : null;
+        return full && full.startsWith(path.resolve(workspace) + path.sep) && fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : undefined;
+    };
+    const violations = [];
+    for (const name of names) {
+        if (name.endsWith('.bundle')) {
+            violations.push({ path: name, reason: 'bundle-transport' });
+            continue;
+        }
+        violations.push(...checkPatchContents(fs.readFileSync(path.join(patchDir, name), 'utf8'), readBaseText));
+    }
+    if (violations.length > 0) {
+        core.setFailed(`auto-sec patch content gate failed: ${violations.map(v => `${v.path} ${v.reason}`).join('; ')}`);
+    } else {
+        core.info(`Patch content gate passed for ${names.length} patch file(s).`);
+    }
+    return { patches: names.length, violations };
+}
+
 async function main(argv) {
     const [command, ecosystem, name, version] = argv;
     if (command !== 'lookup' || !ecosystem || !name || !version) {
@@ -1474,6 +1674,8 @@ module.exports = {
     parseNuGetConfig,
     readApprovalRequests,
     runApprovalJob,
+    runPatchContentGate,
     runPushTargetGate,
+    checkPatchContents,
     selectNuGetSources,
 };

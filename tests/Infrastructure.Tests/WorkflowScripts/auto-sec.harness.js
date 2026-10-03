@@ -7,6 +7,7 @@
 //   { mode: "approve", now, staged, agentItems, pr, prOverrides, files, contents, alerts,
 //     malwareNumbers, checkRuns, statuses, reviews, responses, liveHeadSha, liveBaseRef, liveDraft } -> { value, reviews, summary, info, warnings }
 //   { mode: "push-gate", agentItems, pr, prOverrides } -> { value, info, failures }
+//   { mode: "patch-gate", patchFiles, workspaceFiles } -> { value, info, failures }
 // PRs may carry `head_repo` (defaults to microsoft/aspire) and `base_ref` (defaults to main).
 // Alerts may carry `vulnerable_version_range` and `advisory_ranges` (every range the
 // advisory lists for the package).
@@ -196,6 +197,32 @@ async function main() {
                 result = { value, info, failures };
             } finally {
                 fs.rmSync(outputDir, { recursive: true, force: true });
+            }
+            break;
+        }
+        case 'patch-gate': {
+            const info = [];
+            const failures = [];
+            const root = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-'));
+            const patchDir = path.join(root, 'patches');
+            const workspace = path.join(root, 'workspace');
+            for (const [name, text] of Object.entries(request.patchFiles ?? {})) {
+                fs.mkdirSync(patchDir, { recursive: true });
+                fs.writeFileSync(path.join(patchDir, name), text);
+            }
+            for (const [name, text] of Object.entries(request.workspaceFiles ?? {})) {
+                fs.mkdirSync(path.dirname(path.join(workspace, name)), { recursive: true });
+                fs.writeFileSync(path.join(workspace, name), text);
+            }
+            try {
+                const value = gate.runPatchContentGate({
+                    core: { info: message => info.push(message), setFailed: message => failures.push(message) },
+                    patchDir,
+                    workspace,
+                });
+                result = { value, info, failures };
+            } finally {
+                fs.rmSync(root, { recursive: true, force: true });
             }
             break;
         }

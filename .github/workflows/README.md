@@ -76,7 +76,9 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   `approve_dependabot_pr` safe-output job. The gates are:
   - only manifest or lock files change, every commit is a GitHub-verified
     commit authored by Dependabot, and `package.json`, `pyproject.toml`, and
-    `Directory.Packages.props` change only version tokens
+    `Directory.Packages.props` change only one version token on dependency-version
+    lines (for `package.json`, only inside the dependency, override, and resolution
+    maps)
   - no package source or feed is added (only the dnceng public feeds and sources the
     file already uses are accepted)
   - the alert's own manifest is changed and carries the fixed version, and no copy
@@ -91,7 +93,10 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   `auto-sec/security-updates`, labeled `auto-sec`. Later runs update that PR
   instead of opening another one. A deterministic step in the safe-outputs job
   fails the run if the agent asks to push to any PR other than the open
-  `auto-sec/security-updates` PR from this repository. NuGet bumps are made only when the fixed version
+  `auto-sec/security-updates` PR from this repository. A second step checks the
+  agent's patch (sent with the `am` transport so the checked patch is the one
+  applied) and fails the run if a manifest line other than a dependency version
+  changes or any file adds an unapproved package source. NuGet bumps are made only when the fixed version
   already restores from an approved dnceng feed that `NuGet.config` package source
   mapping assigns to the package. Otherwise the alert is reported as blocked on
   mirroring.
