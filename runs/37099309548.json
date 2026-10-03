@@ -1,0 +1,131 @@
+{
+  "run_id": 37099309548,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/37099309548",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-03T06:34:54Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 19432,
+    "title": "Use Blazor gateway CLI during development",
+    "author": "javiercn",
+    "state": "closed",
+    "head_branch": "javiercn-blazor-cli-development",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/19432",
+    "merged_at": "2026-10-03T05:16:32Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "472be2166d6cf40f7b981561e3d4902a5ff50487",
+    "failed_sha": "810d40942cd18ec3e6c47ee0fdeaacc44d6c7c97",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "9c2163ab31847d196039757af12063a6dddf6d16",
+        "message": "Reduce AppHost log noise for CLI connections and readiness checks (#20542) ## Description Reduce routine AppHost diagnostic noise produced by CLI connections and repeated dashboard readiness checks: - Move expected auxiliary backchannel connections, disconnects, and shutdown cancellations from Debug to Trace. Expected connection resets no longer attach exception stack traces; unexpected failures still log as errors. - Avoid emitting wait/finished Debug messages when a resource is already healthy",
+        "html_url": "https://github.com/microsoft/aspire/commit/9c2163ab31847d196039757af12063a6dddf6d16",
+        "pull_request": {
+          "number": 20542,
+          "title": "Reduce AppHost log noise for CLI connections and readiness checks",
+          "url": "https://github.com/microsoft/aspire/pull/20542",
+          "merged_at": "2026-10-03T01:24:27Z"
+        }
+      },
+      {
+        "sha": "013ad14a2b4f4f1a2114c42f9854bc13bdc4951c",
+        "message": "Render terminal footer F6 shortcut as a keyboard key (#20694)",
+        "html_url": "https://github.com/microsoft/aspire/commit/013ad14a2b4f4f1a2114c42f9854bc13bdc4951c",
+        "pull_request": {
+          "number": 20694,
+          "title": "Render terminal footer F6 shortcut as a keyboard key",
+          "url": "https://github.com/microsoft/aspire/pull/20694",
+          "merged_at": "2026-10-03T03:48:15Z"
+        }
+      },
+      {
+        "sha": "6f0c408b3ccb1e8aaa94149eac7a6da9015e8d90",
+        "message": "Add Dashboard setting to disable Blazor WebSocket compression (#20633)",
+        "html_url": "https://github.com/microsoft/aspire/commit/6f0c408b3ccb1e8aaa94149eac7a6da9015e8d90",
+        "pull_request": {
+          "number": 20633,
+          "title": "Add Dashboard setting to disable Blazor WebSocket compression",
+          "url": "https://github.com/microsoft/aspire/pull/20633",
+          "merged_at": "2026-10-03T04:40:04Z"
+        }
+      },
+      {
+        "sha": "1ce8ac6763265e0e85b7574ad4f94efd3f58a68c",
+        "message": "Configure dashboard OTLP service name (#20600) ## Description Dashboard traces exported through OTLP now use `aspire-dashboard` as the default `service.name`, making dashboard telemetry identifiable instead of inheriting the OpenTelemetry SDK's generic default. Deployments can continue to override the name with `OTEL_SERVICE_NAME`. The dashboard configures its OpenTelemetry resource only when the OTLP exporter is enabled and disables automatic service instance ID generation to keep the resource ",
+        "html_url": "https://github.com/microsoft/aspire/commit/1ce8ac6763265e0e85b7574ad4f94efd3f58a68c",
+        "pull_request": {
+          "number": 20600,
+          "title": "Configure dashboard OTLP service name",
+          "url": "https://github.com/microsoft/aspire/pull/20600",
+          "merged_at": "2026-10-03T05:01:50Z"
+        }
+      },
+      {
+        "sha": "810d40942cd18ec3e6c47ee0fdeaacc44d6c7c97",
+        "message": "Use Blazor gateway CLI during development (#19432) ## Description Standalone Blazor WebAssembly apps now use the official Blazor Gateway CLI during local development instead of launching Aspire's generated file-based gateway. This keeps development aligned with the ASP.NET Core gateway implementation while preserving the existing `AddBlazorGateway` API, project resource/dashboard experience, endpoints, certificates, telemetry, and client resource relationships. The run-mode project resource is l",
+        "html_url": "https://github.com/microsoft/aspire/commit/810d40942cd18ec3e6c47ee0fdeaacc44d6c7c97",
+        "pull_request": {
+          "number": 19432,
+          "title": "Use Blazor gateway CLI during development",
+          "url": "https://github.com/microsoft/aspire/pull/19432",
+          "merged_at": "2026-10-03T05:16:32Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "id": 111138356371,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37099309548/job/111138356371",
+      "classification": "flaky-test",
+      "reason": "Single test ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput failed on Windows due to an InvalidOperationException stopping a project resource during rebuild, a known intermittent race (973 passed, 1 failed, 19 skipped).",
+      "failed_steps": [
+        "Run tests (Windows)"
+      ]
+    },
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "id": 111138361050,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37099309548/job/111138361050",
+      "classification": "flaky-test",
+      "reason": "Single test TrayWatchStreamTests.StalledResourceWatchDoesNotBlockReconciliationOrQuit failed an assertion (expected 0, got 7) in 3ms, indicating a timing/race condition rather than a deterministic code issue (6616 passed, 1 failed, 40 skipped).",
+      "failed_steps": [
+        "Run tests (Linux/macOS)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput",
+      "job": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "error": "Assert.True() Failure\nExpected: True\nActual:   False",
+      "stack_trace": "at Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput() in D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.Tests\\ResourceCommandServiceTests.cs:line 1767\n--- End of stack trace from previous location ---",
+      "standard_output": "Temporary workspace created at: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\Aspire.Hosting.TestUtilities\\Workspace\\fl51t1zm.vk3\n| [2026-10-03T05:41:22] Aspire.Hosting.DistributedApplication Information: Aspire AppHost version: 17.0.0-ci\n| [2026-10-03T05:41:22] Aspire.Hosting.DistributedApplication Information: Distributed application starting.\n| [2026-10-03T05:41:22] Aspire.Hosting.DistributedApplication Information: Application host directory is: D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.TestUtilities\n| [2026-10-03T05:41:22] Aspire.Hosting.Cli.CliOrphanDetector Debug: No CLI process ID configured. Orphan detection disabled.\n| [2026-10-03T05:41:22] Aspire.Hosting.Cli.BackchannelService Debug: Backchannel socket path was not specified.\n| [2026-10-03T05:41:22] Aspire.Hosting.Devcontainers.Codespaces.CodespacesResourceUrlRewriterService Trace: Not running in Codespaces, skipping URL rewriting.\n| [2026-10-03T05:41:22] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Starting auxiliary backchannel service on socket path: C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFAFkBdbame.5232\n| [2026-10-03T05:41:22] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Auxiliary backchannel listening on C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFAFkBdbame.5232\n| [2026-10-03T05:41:23] Aspire.Hosting.Dcp.DcpHost Warning: No trusted Aspire development certificate was found. See https://aka.ms/aspire/devcerts for more information.\n| [2026-10-03T05:41:23] Aspire.Hosting.FileSystemService Debug: Allocated temporary directory: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcplzgaqx2r.qcb\n| [2026-10-03T05:41:23] Aspire.Hosting.Dcp.DcpHost Information: Starting DCP with arguments: start-apiserver --monitor 5232 --detach --kubeconfig \"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcplzgaqx2r.qcb\\kubeconfig\"\n| [2026-10-03T05:41:23] Aspire.Hosting.Dcp.DcpHost Debug: A complete bundled ConPTY provider was not found; DCP will use the inbox Windows provider.\n| [2026-10-03T05:41:23] Aspire.Hosting.Dcp.DcpExecutor Debug: Preparing services. Ports randomized: True\n| [2026-10-03T05:41:23] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject/myProject-tfyqdjxn update published: ResourceType = Project, CreationTimeStamp = (null), State = { Text = (null), Style = (null) }, IsHidden = False, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = {  }, HealthReports = {  }, Commands = { start (Start) = Disabled stop (Stop) = Hidden restart (Restart) = Disabled rebuild (Rebuild) = Disabled }\n| [2026-10-03T05:41:23] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject-rebuilder/myProject-rebuilder-exhnybqh update published: ResourceType = Executable, CreationTimeStamp = (null), State = { Text = NotStarted, Style = (null) }, IsHidden = True, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = { resource.parentName = myProject-tfyqdjxn }, HealthReports = {  }, Commands = {  }\n| [2026-10-03T05:41:23] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Endpoint resources.\n| [2026-10-03T05:41:23] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Service resources.\n| [2026-10-03T05:41:23] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP ContainerExec resources.\n| [2026-10-03T05:41:23] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Container resources.\n| [2026-10-03T05:41:23] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Executable resources.\n| [2026-10-03T05:41:23] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Converting relative endpoint URLs to absolute URLs for resource 'myProject-rebuilder'.\n| [2026-10-03T05:41:23] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Added total of 0 URLs to resource 'myProject-rebuilder'\n| [2026-10-03T05:41:23] Aspire.Hosting.ApplicationModel.Res",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "This test is a known recurring flaky test on Windows (prior cause aspire-hosting-resourcecommandservice-rebuild-buildcount-race, 3 prior occurrences) tied to a resource-stop race during rebuild; it is unrelated to the merged Blazor gateway CLI change."
+    },
+    {
+      "name": "Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.StalledResourceWatchDoesNotBlockReconciliationOrQuit(removeFirst: True, brokenPipe: False)",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "error": "Assert.Equal() Failure: Values differ\nExpected: 0\nActual:   7",
+      "stack_trace": "at Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.StalledResourceWatchDoesNotBlockReconciliationOrQuit(Boolean removeFirst, Boolean brokenPipe) in /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Backchannel/TrayWatchStreamTests.cs:line 925\n   at Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.StalledResourceWatchDoesNotBlockReconciliationOrQuit(Boolean removeFirst, Boolean brokenPipe) in /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Backchannel/TrayWatchStreamTests.cs:line 940\n--- End of stack trace from previous location ---",
+      "standard_output": "",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Test failed in 3ms with a reconciliation-count mismatch typical of a timing/stream-ordering race in a stalled-watch simulation; unrelated to the Blazor gateway CLI change merged on main and not previously tracked under this exact test name."
+    }
+  ],
+  "causes": [
+    "aspire-hosting-resourcecommandservice-rebuild-buildcount-race",
+    "aspire-cli-tests-backchannel-traywatchstream-stalled-flaky"
+  ]
+}
