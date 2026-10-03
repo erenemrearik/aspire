@@ -2494,8 +2494,10 @@ const AGENT_TRANSCRIPT_PATHS = [
 /**
  * Checks the raw safe-output items before they leave the agent job: every item must be a
  * template-checked type, a `noop` must be counts only, an approval request is reduced to
- * a valid PR number and head SHA, and PR text and patches must pass `checkPublicText`. Returns
- * the items to keep and `{ source, reason }` violations.
+ * a valid PR number and head SHA, and PR text and patches must pass `checkPublicText`.
+ * Patch contents must also pass `checkPatchUploadSafety`, since the patches are uploaded
+ * before the safe_outputs job's content gate runs. Returns the items to keep and
+ * `{ source, reason }` violations.
  */
 function checkAgentOutputs(lines, patches) {
     const violations = [];
@@ -2525,7 +2527,52 @@ function checkAgentOutputs(lines, patches) {
         kept.push(item);
     }
     violations.push(...checkPublicText(kept, patches));
+    for (const [name, text] of patches) {
+        violations.push(...checkPatchUploadSafety(text).map(reason => ({ source: name, reason })));
+    }
     return { kept, violations };
+}
+
+// The manifest and lockfile basenames the create/push `allowed-files` lists permit.
+const UPLOADABLE_PATCH_BASENAMES = new Set([
+    'package.json',
+    'package-lock.json',
+    'npm-shrinkwrap.json',
+    'yarn.lock',
+    'pnpm-lock.yaml',
+    'uv.lock',
+    'pyproject.toml',
+    'Directory.Packages.props',
+]);
+
+/**
+ * Base-free checks on an agent patch before the agent job uploads it in the public `agent`
+ * artifact. The full content gate needs the original files and runs later in the
+ * safe_outputs job, so without this a patch the handlers would reject (for example one
+ * adding `.auto-sec/alerts.json`, or advisory text in any line) would still be published
+ * in the artifact. Every file diff must be an in-place edit of an allowed manifest or
+ * lockfile, no line anywhere in the patch may carry advisory text, and lockfiles may not
+ * gain comments. Returns reason codes.
+ */
+function checkPatchUploadSafety(patchText) {
+    const reasons = new Set();
+    for (const diff of parsePatchFileDiffs(patchText)) {
+        if (!diff.parseable || diff.oldPath !== diff.newPath || diff.metadata.length > 0
+            || String(diff.newPath).startsWith('.github/')
+            || !UPLOADABLE_PATCH_BASENAMES.has(basenameOf(diff.newPath ?? ''))) {
+            reasons.add('disallowed-patch-file');
+        }
+        if (COMMENT_LOCKFILE_BASENAMES.has(basenameOf(diff.newPath ?? '').toLowerCase())
+            && diff.blocks.some(block => block.added.some(hasLockfileComment))) {
+            reasons.add('lockfile-comment');
+        }
+    }
+    // Context lines, diffstat lines, and any text between hunks are uploaded too, so the
+    // whole patch is scanned rather than only the added lines.
+    if (String(patchText ?? '').split('\n').some(line => PUBLIC_FORBIDDEN_TOKEN.test(line))) {
+        reasons.add('forbidden-public-text');
+    }
+    return [...reasons];
 }
 
 /**
@@ -2620,6 +2667,7 @@ module.exports = {
     runPushTargetGate,
     checkAgentOutputs,
     checkPatchContents,
+    checkPatchUploadSafety,
     checkPatchVersionPolicy,
     checkPublicNoopMessage,
     checkPublicText,

@@ -804,9 +804,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("malformed-line", "line 2 malformed-output")]
     [InlineData("approval-invalid-sha", "approve_dependabot_pr invalid-inputs")]
     [InlineData("body-free-text", "create_pull_request.body non-template-text")]
+    // Patches ship in the public `agent` artifact, so their content is checked here too.
+    [InlineData("patch-alert-file", "aw-auto-sec-security-updates.patch disallowed-patch-file")]
+    [InlineData("patch-advisory-context", "aw-auto-sec-security-updates.patch forbidden-public-text")]
+    [InlineData("patch-lockfile-comment", "aw-auto-sec-security-updates.patch lockfile-comment")]
     public async Task AgentOutputScrubEmptiesOutputsWhenAnyTextIsOffTemplate(string scenario, string expected)
     {
         var body = PublicTextBody.Replace("\r\n", "\n");
+        var patch = PublicTextPatch.Replace("\r\n", "\n");
         var second = new JsonObject { ["type"] = "noop", ["message"] = "alerts=1 dependabot-pr=0 auto-sec-pr=1 blocked=0 code-findings-out-of-scope=0" }.ToJsonString();
         switch (scenario)
         {
@@ -822,6 +827,15 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             case "body-free-text":
                 body += "\n\nThis resolves alert 42.";
                 break;
+            case "patch-alert-file":
+                patch = patch.Replace("-- \n", "diff --git a/.auto-sec/alerts.json b/.auto-sec/alerts.json\nindex 1111111..2222222 100644\n--- a/.auto-sec/alerts.json\n+++ b/.auto-sec/alerts.json\n@@ -1 +1 @@\n-[]\n+[{\"number\":42}]\n-- \n");
+                break;
+            case "patch-advisory-context":
+                patch = patch.Replace("     \"node_modules/lodash\": {", "     \"node_modules/lodash\": { \"note\": \"GHSA-xxxx\",");
+                break;
+            case "patch-lockfile-comment":
+                patch = patch.Replace("-- \n", "diff --git a/app/yarn.lock b/app/yarn.lock\nindex 1111111..2222222 100644\n--- a/app/yarn.lock\n+++ b/app/yarn.lock\n@@ -1 +1,2 @@\n lodash@^4.17.20:\n+# alert 42\n-- \n");
+                break;
         }
 
         var result = await RunHarnessAsync(new JsonObject
@@ -830,7 +844,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["outputLines"] = new JsonArray(
                 new JsonObject { ["type"] = "create_pull_request", ["branch"] = "auto-sec/security-updates", ["title"] = "Automated dependency updates", ["body"] = body }.ToJsonString(),
                 second),
-            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
         });
 
         Assert.Equal([expected], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
