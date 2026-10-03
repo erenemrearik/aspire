@@ -80,6 +80,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("no-checks")]
     [InlineData("checks-not-green")]
     [InlineData("statuses-not-green")]
+    [InlineData("statuses-not-green-on-later-page")]
+    [InlineData("statuses-combined-state-not-green")]
     [InlineData("already-approved")]
     public async Task SkipsDependabotPrThatFailsGate(string scenarioName)
     {
@@ -272,6 +274,22 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             case "statuses-not-green":
                 scenario["statuses"] = new JsonArray(new JsonObject { ["context"] = "license/cla", ["state"] = "pending" });
                 break;
+            case "statuses-not-green-on-later-page":
+                // 30 green contexts fill the API's default page; the red one is on page two.
+                expectedReason = "statuses-not-green";
+                var statuses = new JsonArray();
+                for (var i = 0; i < 30; i++)
+                {
+                    statuses.Add(new JsonObject { ["context"] = $"ok-{i}", ["state"] = "success" });
+                }
+                statuses.Add(new JsonObject { ["context"] = "license/cla", ["state"] = "failure" });
+                scenario["statuses"] = statuses;
+                break;
+            case "statuses-combined-state-not-green":
+                expectedReason = "statuses-not-green";
+                scenario["statuses"] = new JsonArray(new JsonObject { ["context"] = "license/cla", ["state"] = "success" });
+                scenario["combinedState"] = "failure";
+                break;
             case "already-approved":
                 scenario["reviews"] = new JsonArray(new JsonObject { ["user_login"] = "aspire-repo-bot[bot]", ["state"] = "APPROVED", ["commit_id"] = HeadSha });
                 break;
@@ -372,6 +390,11 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("pyproject.toml", null, "command = \"tool --level=1\"", "command = \"tool --level=2\"", false)]
     [InlineData("Directory.Packages.props", null, "<Exec Command=\"tool --level=1\" />", "<Exec Command=\"tool --level=2\" />", false)]
     [InlineData("yarn.lock", null, "  version \"1.0.0\"", "  version \"1.0.1\"", false)]
+    [InlineData("package.json", "overrides", "\"x\": \"npm:1@1.0.0\"", "\"x\": \"npm:2@1.0.0\"", false)]
+    [InlineData("package.json", "dependencies", "\"v1\": \"1.0.0\"", "\"v2\": \"1.0.0\"", false)]
+    [InlineData("pyproject.toml", null, "  \"pkg1>=1.0.0\",", "  \"pkg2>=1.0.0\",", false)]
+    [InlineData("pyproject.toml", null, "  \"requests>=2.31.0; python_version >= '3.9'\",", "  \"requests>=2.31.0; python_version >= '3.10'\",", false)]
+    [InlineData("Directory.Packages.props", null, "<PackageVersion Include=\"X1\" Version=\"9.0.4\" />", "<PackageVersion Include=\"X2\" Version=\"9.0.4\" />", false)]
     public async Task DetectsVersionOnlyManifestEdits(string path, string? section, string baseLine, string headLine, bool expected)
     {
         // package.json lines are wrapped in a document so the JSON-path check sees them
@@ -516,6 +539,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("extension/package-lock.json", "{\n  \"resolved\": \"https://github.com/o/y/archive/v1.tgz\"\n}", "{\n  \"resolved\": \"https://github.com/o/x/archive/v1.tgz\"\n}", "")]
     [InlineData("extension/package-lock.json", "{}", "{\n  \"repository\": {\n    \"url\": \"git+https://gitlab.example/o/r.git\"\n  }\n}", "")]
     [InlineData("extension/package.json", "{}", "{\n  \"dependencies\": {\n    \"bugs\": \"https://evil.example/bugs.tgz\"\n  }\n}", "https://evil.example/")]
+    [InlineData("extension/package.json", "{\n  \"bugs\": {\n    \"url\": \"https://github.com/o/r/issues\"\n  },\n  \"repository\": \"https://github.com/o/r\",\n  \"dependencies\": {\n    \"x\": \"^1.0.0\"\n  }\n}", "{\n  \"bugs\": {\n    \"url\": \"https://github.com/o/r/issues\"\n  },\n  \"repository\": \"https://github.com/o/r\",\n  \"dependencies\": {\n    \"x\": \"^1.0.1\"\n  }\n}", "")]
+    [InlineData("extension/package.json", "{\n  \"repository\": \"https://github.com/o/r\"\n}", "{\n  \"repository\": \"https://github.com/o/r\",\n  \"dependencies\": {\n    \"x\": \"https://github.com/o/x/archive/v1.tgz\"\n  }\n}", "https://github.com/")]
     [InlineData("pyproject.toml", "[project.urls]\nHomepage = \"https://github.com/o/r\"\n", "[project]\ndependencies = [\"x @ https://github.com/o/x/archive/v1.tar.gz\"]\n", "https://github.com/")]
     public async Task MetadataUrlsNeverAuthorizePackageSources(string path, string baseText, string headText, string expected)
     {

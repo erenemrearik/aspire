@@ -86,17 +86,17 @@ const NPM_RANGE_PART = /^(?:\|\||-|\*|[xX]|(?:[\^~]|[<>]=?|=)?v?\d+(?:\.(?:\d+|[
 // A package.json entry on its own line whose value is a version range, optionally behind an
 // npm alias (`"lodash": "npm:lodash@^4.17.21"`). Script commands such as
 // `"build": "vite --mode=1"` do not match.
-const PACKAGE_JSON_VERSION_LINE = /^\s*"(?:[^"\\]|\\.)+"\s*:\s*"(?:npm:(?:@[^@"\s/]+\/)?[^@"\s]+@)?([^"]*)"\s*,?\s*$/;
+const PACKAGE_JSON_VERSION_LINE = /^\s*"(?:[^"\\]|\\.)+"\s*:\s*"(?:npm:(?:@[^@"\s/]+\/)?[^@"\s]+@)?([^"]*)"\s*,?\s*$/d;
 
 // A quoted PEP 508 requirement string on its own line in a TOML array, with an optional
 // extras list and environment marker (https://peps.python.org/pep-0508/):
 //   "requests>=2.32.3",   'jinja2[i18n] ~= 3.1.6, < 4; python_version >= "3.9"',
-const PYPROJECT_VERSION_LINE = /^\s*(["'])[A-Za-z0-9][A-Za-z0-9._-]*\s*(?:\[[A-Za-z0-9._,\s-]*\])?\s*(?:===|==|~=|>=|<=|!=|>|<)\s*[0-9A-Za-z.*+!-]+(?:\s*,\s*(?:===|==|~=|>=|<=|!=|>|<)\s*[0-9A-Za-z.*+!-]+)*\s*(?:;(?:(?!\1)[^\n])*)?\1\s*,?\s*$/;
+const PYPROJECT_VERSION_LINE = /^\s*(["'])[A-Za-z0-9][A-Za-z0-9._-]*\s*(?:\[[A-Za-z0-9._,\s-]*\])?\s*((?:===|==|~=|>=|<=|!=|>|<)\s*[0-9A-Za-z.*+!-]+(?:\s*,\s*(?:===|==|~=|>=|<=|!=|>|<)\s*[0-9A-Za-z.*+!-]+)*)\s*(?:;(?:(?!\1)[^\n])*)?\1\s*,?\s*$/d;
 
 // A single central package version element on its own line:
 //   <PackageVersion Include="System.Text.Json" Version="9.0.5" />
 //   <PackageVersion Update="Npgsql.EntityFrameworkCore.PostgreSQL" Version="[9.0.4]" />
-const PACKAGES_PROPS_VERSION_LINE = /^\s*<PackageVersion\s+(?:Include|Update)="[^"$%@]+"\s+Version="\[?[0-9A-Za-z.+-]+\]?"\s*\/>\s*$/;
+const PACKAGES_PROPS_VERSION_LINE = /^\s*<PackageVersion\s+(?:Include|Update)="[^"$%@]+"\s+Version="(\[?[0-9A-Za-z.+-]+\]?)"\s*\/>\s*$/d;
 
 const DEFAULT_PORTS = {
     'http': 80,
@@ -334,6 +334,7 @@ const METADATA_JSON_KEYS = '(?:funding|repository|homepage|bugs|author|contribut
 const METADATA_JSON_INLINE = new RegExp(`"${METADATA_JSON_KEYS}"\\s*:\\s*(?:"(?:[^"\\\\]|\\\\.)*"|\\{[^{}]*\\}|\\[(?:[^\\[\\]{}]|\\{[^{}]*\\})*\\])\\s*,?`, 'g');
 const METADATA_JSON_OPEN = new RegExp(`"${METADATA_JSON_KEYS}"\\s*:\\s*[\\[{]\\s*$`);
 const METADATA_LOCKFILE_BASENAMES = new Set(['package-lock.json', 'npm-shrinkwrap.json']);
+const PACKAGE_JSON_METADATA_KEYS = new Set(['funding', 'repository', 'homepage', 'bugs', 'author', 'contributors', 'maintainers']);
 
 // Removes metadata URLs from `text`. A line equal to `segmentBreak` resets the scanner, so
 // separately added runs of patch lines are never read as one contiguous JSON fragment.
@@ -379,17 +380,30 @@ function withoutMetadataUrls(text, segmentBreak = null) {
 // present on the base version. A non-empty result means the PR introduces a new source.
 // Metadata URLs on the base never authorize a head source: an existing
 // `https://github.com/sponsors/...` funding link must not admit a `resolved` tarball from
-// github.com. On the head side, metadata is ignored only in npm lockfiles, where each
-// package's `resolved` field is the fetch location and is still checked; elsewhere a
+// github.com. Metadata is ignored on the head side only where it is unambiguous: in npm
+// lockfiles, where each package's `resolved` field is the fetch location and is still
+// checked, and in a parseable package.json, where only the top-level metadata fields are
+// dropped so a dependency named `bugs` with a URL value still counts. Elsewhere a
 // metadata-looking key may be a dependency name whose value is a source, so it counts.
 function findNewSources(baseText, headText, path = '', segmentBreak = null) {
-    const baseSources = extractSources(withoutMetadataUrls(baseText, segmentBreak));
-    const headSources = extractSources(METADATA_LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase())
-        ? withoutMetadataUrls(headText, segmentBreak)
-        : headText);
+    const name = basenameOf(path).toLowerCase();
+    const packageJson = text => name === 'package.json' ? packageJsonWithoutMetadata(text) : null;
+    const baseSources = extractSources(packageJson(baseText) ?? withoutMetadataUrls(baseText, segmentBreak));
+    const headSources = extractSources(packageJson(headText)
+        ?? (METADATA_LOCKFILE_BASENAMES.has(name) ? withoutMetadataUrls(headText, segmentBreak) : headText));
     return [...headSources]
         .filter(source => !baseSources.has(source) && !isApprovedSource(source))
         .sort();
+}
+
+// A full package.json document re-serialized without its top-level metadata fields, or
+// null when `text` is not a JSON object (for example, a patch-gate fragment).
+function packageJsonWithoutMetadata(text) {
+    const parsed = readJson(String(text ?? ''));
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return null;
+    }
+    return JSON.stringify(Object.fromEntries(Object.entries(parsed).filter(([key]) => !PACKAGE_JSON_METADATA_KEYS.has(key))), null, 1);
 }
 
 function isCooldownSatisfied(publishedAt, now, days = COOLDOWN_DAYS) {
@@ -817,23 +831,40 @@ function isVersionOnlyEdit(path, baseText, headText) {
 }
 
 /**
- * True when `baseLine` -> `headLine` swaps one version token and both lines are
- * dependency-version entries for the manifest at `path`. Unknown manifests fail closed.
+ * True when `baseLine` -> `headLine` swaps one version token inside the version value of a
+ * dependency-version entry for the manifest at `path`. Everything before the version value
+ * (the package key, an npm alias target, the PEP 508 name and extras, the NuGet `Include`)
+ * must be unchanged, so `"x": "npm:a@1.0.0"` -> `"x": "npm:b@1.0.0"` or a key `"v1"` ->
+ * `"v2"` is a package substitution, not a version edit. Unknown manifests fail closed.
  */
 function isDependencyVersionLineSwap(path, baseLine, headLine) {
-    const isVersionLine = DEPENDENCY_VERSION_LINE_RULES[basenameOf(path).toLowerCase()];
-    return Boolean(isVersionLine) && isVersionLine(baseLine) && isVersionLine(headLine) && isVersionTokenSwap(baseLine, headLine);
+    const versionRange = DEPENDENCY_VERSION_LINE_RULES[basenameOf(path).toLowerCase()];
+    const base = versionRange ? versionRange(baseLine) : null;
+    const head = versionRange ? versionRange(headLine) : null;
+    if (!base || !head || base.start !== head.start || baseLine.slice(0, base.start) !== headLine.slice(0, head.start)) {
+        return false;
+    }
+    const span = versionTokenSwapSpan(baseLine, headLine);
+    return span !== null && span.start >= base.start && span.baseEnd <= base.end && span.headEnd <= head.end;
 }
 
+// Each rule returns the `[start, end)` index range of the line's version value, or null
+// when the line is not a dependency-version entry.
 const DEPENDENCY_VERSION_LINE_RULES = {
     'package.json': line => {
         const match = PACKAGE_JSON_VERSION_LINE.exec(line);
         const parts = match ? match[1].trim().split(/\s+/) : [];
-        return parts.length > 0 && parts.every(part => NPM_RANGE_PART.test(part));
+        return parts.length > 0 && parts.every(part => NPM_RANGE_PART.test(part)) ? groupRange(match, 1) : null;
     },
-    'pyproject.toml': line => PYPROJECT_VERSION_LINE.test(line),
-    'directory.packages.props': line => PACKAGES_PROPS_VERSION_LINE.test(line),
+    'pyproject.toml': line => groupRange(PYPROJECT_VERSION_LINE.exec(line), 2),
+    'directory.packages.props': line => groupRange(PACKAGES_PROPS_VERSION_LINE.exec(line), 1),
 };
+
+// Index range of a capture group from a regex compiled with the `d` (hasIndices) flag.
+function groupRange(match, group) {
+    const indices = match?.indices?.[group];
+    return indices ? { start: indices[0], end: indices[1] } : null;
+}
 
 // JSON paths (as key arrays) whose values differ between two parsed documents.
 function jsonDifferencePaths(left, right, prefix = []) {
@@ -847,7 +878,9 @@ function jsonDifferencePaths(left, right, prefix = []) {
         : jsonDifferencePaths(left[key], right[key], [...prefix, key]));
 }
 
-function isVersionTokenSwap(baseLine, headLine) {
+// The `{ start, baseEnd, headEnd }` span of the single version token that differs between
+// the lines, or null when the lines differ by anything other than one version token.
+function versionTokenSwapSpan(baseLine, headLine) {
     let start = 0;
     while (start < baseLine.length && start < headLine.length && baseLine[start] === headLine[start]) {
         start++;
@@ -867,7 +900,9 @@ function isVersionTokenSwap(baseLine, headLine) {
         baseEnd++;
         headEnd++;
     }
-    return VERSION_TOKEN.test(baseLine.slice(start, baseEnd)) && VERSION_TOKEN.test(headLine.slice(start, headEnd));
+    return VERSION_TOKEN.test(baseLine.slice(start, baseEnd)) && VERSION_TOKEN.test(headLine.slice(start, headEnd))
+        ? { start, baseEnd, headEnd }
+        : null;
 }
 
 function updateMatchesAlert(alert, ecosystem, update) {
@@ -1006,8 +1041,26 @@ function ciReasons(checkRuns, statuses) {
 async function fetchCiState(github, owner, repo, sha) {
     const checkRuns = (await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: sha, per_page: 100 }))
         .map(run => ({ name: run.name, status: run.status, conclusion: run.conclusion }));
-    const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ owner, repo, ref: sha });
-    const statuses = (combined.statuses ?? []).map(status => ({ context: status.context, state: status.state }));
+    // The combined status lists one (latest) status per context, 100 per page at most, so
+    // read every page; a failing context on page two must still block approval. The
+    // aggregate `state` is `pending` when no statuses exist, so it is only enforced when
+    // `total_count` is non-zero.
+    const statuses = [];
+    let combinedState = null;
+    let totalCount = 0;
+    for (let page = 1; ; page++) {
+        const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ owner, repo, ref: sha, per_page: 100, page });
+        const pageStatuses = combined.statuses ?? [];
+        statuses.push(...pageStatuses.map(status => ({ context: status.context, state: status.state })));
+        combinedState = combined.state ?? combinedState;
+        totalCount = Number(combined.total_count ?? statuses.length);
+        if (pageStatuses.length === 0 || statuses.length >= totalCount) {
+            break;
+        }
+    }
+    if (totalCount > 0 && combinedState !== 'success') {
+        statuses.push({ context: 'combined', state: combinedState ?? 'pending' });
+    }
     return { checkRuns, statuses };
 }
 

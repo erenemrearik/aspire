@@ -99,9 +99,23 @@ function createGitHub(request, created) {
                 }
                 return { data: request.contents[key] };
             },
-            getCombinedStatusForRef: async () => ({
-                data: { statuses: (++statusCalls > 1 && request.liveStatuses) ? request.liveStatuses : (request.statuses ?? []) },
-            }),
+            getCombinedStatusForRef: async ({ per_page: perPage = 30, page = 1 }) => {
+                // Page 1 starts a new CI read; the second read is the live re-check.
+                if (page === 1) {
+                    statusCalls++;
+                }
+                const all = (statusCalls > 1 && request.liveStatuses) ? request.liveStatuses : (request.statuses ?? []);
+                const states = all.map(status => status.state);
+                const state = states.some(s => s === 'failure' || s === 'error') ? 'failure'
+                    : (states.length === 0 || states.some(s => s !== 'success')) ? 'pending' : 'success';
+                return {
+                    data: {
+                        state: request.combinedState ?? state,
+                        total_count: all.length,
+                        statuses: all.slice((page - 1) * perPage, page * perPage),
+                    },
+                };
+            },
         },
     };
     const paginate = async (route, params) => {
