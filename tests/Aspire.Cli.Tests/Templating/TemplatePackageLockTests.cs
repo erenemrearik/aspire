@@ -29,18 +29,14 @@ public class TemplatePackageLockTests
     }
 
     [Theory]
-    [InlineData("ts-starter")]
-    [InlineData("py-starter")]
-    [InlineData("java-starter")]
-    public void StarterFrontendPackageJson_UsesNpm10CompatibleBraceExpansionOverride(string templateName)
+    [InlineData("Aspire.Cli", "ts-starter")]
+    [InlineData("Aspire.Cli", "py-starter")]
+    [InlineData("Aspire.Cli", "java-starter")]
+    [InlineData("Aspire.ProjectTemplates", "aspire-ts-cs-starter")]
+    public void StarterFrontendPackageJson_UsesNpm10CompatibleBraceExpansionOverride(string projectName, string templateName)
     {
         var filePath = Path.Combine(
-            GetRepoRoot(),
-            "src",
-            "Aspire.Cli",
-            "Templating",
-            "Templates",
-            templateName,
+            GetTemplateDirectory(projectName, templateName),
             "frontend",
             "package.json");
 
@@ -56,20 +52,16 @@ public class TemplatePackageLockTests
     }
 
     [Theory]
-    [InlineData("ts-starter", "frontend")]
-    [InlineData("py-starter", "frontend")]
-    [InlineData("java-starter", "frontend")]
-    [InlineData("ts-starter", "")]
-    [InlineData("py-starter", "")]
-    public void StarterPackageLock_UsesPatchedBraceExpansion(string templateName, string subdirectory)
+    [InlineData("Aspire.Cli", "ts-starter", "frontend")]
+    [InlineData("Aspire.Cli", "py-starter", "frontend")]
+    [InlineData("Aspire.Cli", "java-starter", "frontend")]
+    [InlineData("Aspire.Cli", "ts-starter", "")]
+    [InlineData("Aspire.Cli", "py-starter", "")]
+    [InlineData("Aspire.ProjectTemplates", "aspire-ts-cs-starter", "frontend")]
+    public void StarterPackageLock_UsesPatchedBraceExpansion(string projectName, string templateName, string subdirectory)
     {
         var filePath = Path.Combine(
-            GetRepoRoot(),
-            "src",
-            "Aspire.Cli",
-            "Templating",
-            "Templates",
-            templateName,
+            GetTemplateDirectory(projectName, templateName),
             subdirectory,
             "package-lock.json");
 
@@ -197,6 +189,14 @@ public class TemplatePackageLockTests
 
         Assert.Equal(["registry.npmjs.org"], registryHosts);
     }
+
+    private static string GetTemplateDirectory(string projectName, string templateName)
+        => projectName switch
+        {
+            "Aspire.Cli" => Path.Combine(GetRepoRoot(), "src", projectName, "Templating", "Templates", templateName),
+            "Aspire.ProjectTemplates" => Path.Combine(GetRepoRoot(), "src", projectName, "templates", templateName),
+            _ => throw new ArgumentException($"Unexpected template project: {projectName}", nameof(projectName))
+        };
 
     private static string GetRepoRoot()
         => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
