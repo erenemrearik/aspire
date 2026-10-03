@@ -1352,6 +1352,31 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         };
     }
 
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData(true, "2026-08-01T00:00:00Z", true)]
+    [InlineData(false, "2026-08-01T00:00:00Z", false)]
+    [InlineData(null, "1900-01-01T00:00:00+00:00", false)]
+    public async Task LookupTreatsUnlistedNuGetVersionsAsWithoutPublishDate(bool? listed, string published, bool expectedCooldown)
+    {
+        var leaf = new JsonObject { ["published"] = published };
+        if (listed is not null)
+        {
+            leaf["listed"] = listed.Value;
+        }
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "lookup",
+            ["ecosystem"] = "nuget",
+            ["name"] = "Contoso.Lib",
+            ["version"] = "1.2.3",
+            ["now"] = Now,
+            ["responses"] = new JsonObject { ["https://api.nuget.org/v3/registration5-gz-semver2/contoso.lib/1.2.3.json"] = Response(leaf) },
+        });
+
+        Assert.Equal(expectedCooldown, result["value"]!["cooldown_satisfied"]!.GetValue<bool>());
+    }
+
     [Fact]
     [RequiresTools(["node"])]
     public async Task LookupReportsUnmirroredNuGetVersionAndRecentNpmVersion()

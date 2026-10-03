@@ -1604,7 +1604,13 @@ async function lookupPackageVersion(ecosystem, name, version, { fetchImpl = fetc
             const id = name.toLowerCase();
             const normalizedVersion = version.toLowerCase();
             const leaf = await fetchJson(fetchImpl, `https://api.nuget.org/v3/registration5-gz-semver2/${id}/${normalizedVersion}.json`);
-            publishedAt = leaf?.published ?? null;
+            // Unlisting a version rewrites `published` to the 1900-01-01 sentinel, which would
+            // look past any cooldown, so an unlisted version has no usable publish date:
+            //   { "listed": false, "published": "1900-01-01T00:00:00+00:00" }
+            // https://learn.microsoft.com/nuget/api/registration-base-url-resource#registration-leaf
+            const published = leaf?.published ?? null;
+            const unlisted = leaf?.listed === false || (published !== null && new Date(published).getUTCFullYear() <= 1900);
+            publishedAt = unlisted ? null : published;
             available = checkAvailability && nugetConfigText ? await isNuGetVersionAvailable(fetchImpl, nugetConfigText, id, normalizedVersion) : null;
             break;
         }
