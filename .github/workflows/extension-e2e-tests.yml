@@ -79,6 +79,7 @@ jobs:
     # application under a debugger, so it needs more than the shared budget.
     timeout-minutes: ${{ matrix.timeoutMinutes || 75 }}
     env:
+      NUGET_PACKAGES: ${{ matrix.name == 'Linux' && '/mnt/nuget/packages' || format('{0}/.nuget/packages', github.workspace) }}
       NPM_REGISTRY: https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/
       COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
     strategy:

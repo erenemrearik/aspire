@@ -48,6 +48,7 @@ jobs:
     name: ${{ inputs.testShortName }} (${{ inputs.os }})
     env:
       DOTNET_ROOT: ${{ github.workspace }}/.dotnet
+      NUGET_PACKAGES: ${{ contains(inputs.os, 'ubuntu') && '/mnt/nuget/packages' || format('{0}/.nuget/packages', github.workspace) }}
       # Disable MSBuild terminal logger via env var instead of -tl:false on the command line.
       # In MTP native runner mode, -tl:false is forwarded to the test host which doesn't recognize it.
       MSBUILDTERMINALLOGGER: "false"
@@ -398,7 +399,6 @@ jobs:
         env:
           ASPIRE__TEST__DCPLOGBASEPATH: ${{ github.workspace }}/testresults/dcp
           BUILT_NUGETS_PATH: ${{ github.workspace }}/artifacts/packages/Debug/Shipping
-          NUGET_PACKAGES: ${{ github.workspace }}/nuget-cache
           PLAYWRIGHT_INSTALLED: ${{ fromJson(inputs.properties).enablePlaywrightInstall != true && 'false' || 'true' }}
           TEST_LOG_PATH: ${{ github.workspace }}/artifacts/log/test-logs
           TestsRunningOutsideOfRepo: true
@@ -452,7 +452,6 @@ jobs:
         env:
           ASPIRE__TEST__DCPLOGBASEPATH: ${{ github.workspace }}/testresults/dcp
           BUILT_NUGETS_PATH: ${{ github.workspace }}/artifacts/packages/Debug/Shipping
-          NUGET_PACKAGES: ${{ github.workspace }}/nuget-cache
           PLAYWRIGHT_INSTALLED: ${{ fromJson(inputs.properties).enablePlaywrightInstall != true && 'false' || 'true' }}
           TEST_LOG_PATH: ${{ github.workspace }}/artifacts/log/test-logs
           TestsRunningOutsideOfRepo: true
@@ -514,10 +513,6 @@ jobs:
         id: run-tests-unix
         env:
           ASPIRE__TEST__DCPLOGBASEPATH: ${{ github.workspace }}/testresults/dcp
-          # During restore and build, we use -ci, which causes NUGET_PACKAGES to point to a local cache (Arcade behavior).
-          # In this step, we are not using Arcade, but want to make sure that MSBuild is able to evaluate correctly.
-          # So, we manually set NUGET_PACKAGES
-          NUGET_PACKAGES: ${{ github.workspace }}/.packages
           PLAYWRIGHT_INSTALLED: ${{ fromJson(inputs.properties).enablePlaywrightInstall != true && 'false' || 'true' }}
           TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: 'netaspireci.azurecr.io'
           # CLI E2E Dockerfiles consume this as a build arg to avoid overloaded default Ubuntu package servers.
@@ -580,7 +575,6 @@ jobs:
         shell: pwsh
         env:
           ASPIRE__TEST__DCPLOGBASEPATH: ${{ github.workspace }}/testresults/dcp
-          NUGET_PACKAGES: ${{ github.workspace }}/.packages
           PLAYWRIGHT_INSTALLED: ${{ fromJson(inputs.properties).enablePlaywrightInstall != true && 'false' || 'true' }}
           TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: 'netaspireci.azurecr.io'
           # Prevent the Roslyn compiler server (VBCSCompiler) from starting during tests.

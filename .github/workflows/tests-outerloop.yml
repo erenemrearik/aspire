@@ -54,6 +54,8 @@ jobs:
     needs: [outerloop_tests]
     if: ${{ failure() && github.event_name == 'schedule' && github.repository_owner == 'microsoft' }}
     runs-on: ubuntu-latest
+    env:
+      NUGET_PACKAGES: /mnt/nuget/packages
     permissions:
       contents: read   # checkout to require the local .js modules
       actions: read
@@ -114,4 +116,3 @@ jobs:
           script: |
             const reporter = require('./.github/workflows/report-specialized-test-failures.js');
             await require('./.github/workflows/specialized-test-failure-runner.js')({ github, context, core, reporter });
-

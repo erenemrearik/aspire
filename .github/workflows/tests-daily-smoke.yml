@@ -37,6 +37,8 @@ jobs:
     needs: build_cli_e2e_image
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      NUGET_PACKAGES: /mnt/nuget/packages
 
     steps:
       - name: Checkout

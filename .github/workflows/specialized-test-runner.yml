@@ -35,6 +35,8 @@ jobs:
     name: Generate test runsheet
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'microsoft' }}
+    env:
+      NUGET_PACKAGES: /mnt/nuget/packages
     outputs:
       runsheet: ${{ steps.inject_properties.outputs.runsheet }}
       requiresNugets: ${{ steps.check_nugets.outputs.requiresNugets }}

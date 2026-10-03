@@ -50,6 +50,7 @@ jobs:
     # CLI's IdentityChannelReader can return the channel verbatim, with no
     # separate parse of the version suffix at runtime.
     env:
+      NUGET_PACKAGES: ${{ matrix.targets.os == 'ubuntu-latest' && '/mnt/nuget/packages' || format('{0}/.nuget/packages', github.workspace) }}
       ASPIRE_CLI_CHANNEL: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/internal/release/')) && 'staging' || github.ref == 'refs/heads/main' && 'local' || 'daily' }}
 
     steps:

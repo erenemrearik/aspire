@@ -14,6 +14,11 @@ The CI test infrastructure uses a unified matrix generation system that:
 
 For how MTP diagnostic arguments (hang dump, crash dump, etc.) flow through this pipeline, see [MTP Args Pipeline](mtp-args-pipeline.md).
 
+GitHub Actions scripts that restore or consume NuGet packages use
+`/mnt/nuget/packages` on Linux and `${{ github.workspace }}/.nuget/packages` on
+Windows/macOS. Set `NUGET_PACKAGES` at job scope when restore, build, and test
+steps share the cache, or at step scope when only that step uses NuGet.
+
 ## Architecture
 
 ```text

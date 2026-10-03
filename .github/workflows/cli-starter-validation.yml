@@ -39,6 +39,7 @@ jobs:
     # collection, and artifact upload. Keep the job timeout above that aggregate budget.
     timeout-minutes: 45
     env:
+      NUGET_PACKAGES: ${{ contains(inputs.runner, 'ubuntu') && '/mnt/nuget/packages' || format('{0}/.nuget/packages', github.workspace) }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout PR head

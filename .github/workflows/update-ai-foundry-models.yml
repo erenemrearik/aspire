@@ -13,6 +13,8 @@ jobs:
   generate-and-pr:
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'microsoft' }}
+    env:
+      NUGET_PACKAGES: /mnt/nuget/packages
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
