@@ -75,6 +75,8 @@ docker build --quiet --tag "$WEB_IMAGE" --file "$WORK_ROOT/publish/web.Dockerfil
 docker network create "$TEST_NAME" > /dev/null
 docker run --detach --name "$TEST_NAME-api" --network "$TEST_NAME" --network-alias api \
     --env PORT=8000 --env HOST=0.0.0.0 "$API_IMAGE" > /dev/null
+docker cp "$WORK_ROOT/playground/NuxtApp/verify.mjs" "$TEST_NAME-api:/tmp/verify.mjs"
+docker exec "$TEST_NAME-api" node /tmp/verify.mjs health http://127.0.0.1:8000/health
 # Read the published reference rather than supplying a separate test-only URL.
 # Compose emits a quoted scalar, for example: NUXT_API_BASE: "http://api:8000".
 NUXT_API_BASE="$(node -e '

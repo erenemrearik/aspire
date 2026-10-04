@@ -747,6 +747,10 @@ public sealed class TestTriggerMapTests
             ["test:Aspire.Playground.Tests", "job:polyglot"]
         },
         {
+            "playground/NuxtApp/verify.mjs",
+            ["test:Aspire.Playground.Tests", "job:polyglot", "job:typescript-sdk"]
+        },
+        {
             ".gitignore",
             ["test:Infrastructure.Tests"]
         },

@@ -144,6 +144,19 @@ describe('Deno Dockerfile publishing', () => {
         ]);
     });
 
+    it('uses portable script paths in both cache commands and container entrypoints', async () => {
+        const { resource, stages } = createResource(true, false, {
+            scriptPath: 'src\\main.ts',
+        });
+
+        await publishAsDenoDockerFile({ resource, useExistingDockerfile: false });
+
+        expect(stages.build.run.mock.calls).toEqual([['deno cache src/main.ts']]);
+        expect(stages.runtime.entrypoint.mock.calls).toEqual([
+            [['deno', 'run', '--allow-net', '--allow-env', 'src/main.ts']],
+        ]);
+    });
+
     it('quotes cache and build arguments while preserving direct runtime permissions and arguments', async () => {
         const scriptPath = "src/it's main.ts";
         const { resource, stages } = createResource(true, true, {

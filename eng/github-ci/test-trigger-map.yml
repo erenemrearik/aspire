@@ -297,6 +297,7 @@ path_rules:
       - playground/TsIntegrationSpike/deno-api/**
       - playground/TsIntegrationSpike/deno-integration/**
       - playground/TsIntegrationSpike/kafka-integration/**
+      - playground/NuxtApp/verify.mjs
       - src/Aspire.Hosting.Nuxt/**
       - src/Aspire.Cli/Templating/Templates/ts-starter/**
       - .github/workflows/typescript-sdk-tests.yml

@@ -4,24 +4,39 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
+using System.Globalization;
+using System.Text;
 
 internal static class ProcessStartInfoHelper
 {
+    private const string CommandEnvironmentVariable = "ASPIRE_COMMAND_SHIM_PATH";
+    private const string ArgumentEnvironmentVariablePrefix = "ASPIRE_COMMAND_SHIM_ARGUMENT_";
+
     /// <summary>
     /// Configures an executable and its arguments, including Windows batch shims.
     /// </summary>
     public static void SetCommand(ProcessStartInfo startInfo, string command, IEnumerable<string> args, bool isWindows)
     {
-        // cmd.exe /c strips the outer quotes, so a batch command needs the shape:
-        // /c ""C:\Program Files\nodejs\npx.cmd" "--no-install" "tsx" "C:\my app\host.mts""
-        // ArgumentList's per-argument quoting cannot supply this outer command boundary.
-        // https://learn.microsoft.com/windows-server/administration/windows-commands/cmd
         if (isWindows && (command.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
                           command.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)))
         {
             startInfo.FileName = "cmd.exe";
-            startInfo.Arguments = @$"/c """"{command}"" {string.Join(" ", args.Select(a => @$"""{a}"""))}""";
+            startInfo.Environment[CommandEnvironmentVariable] = command;
+            var commandLine = new StringBuilder($"\"%{CommandEnvironmentVariable}%\"");
+            var index = 0;
+            foreach (var arg in args)
+            {
+                var variable = ArgumentEnvironmentVariablePrefix + index.ToString(CultureInfo.InvariantCulture);
+                startInfo.Environment[variable] = arg;
+                commandLine.Append(" \"%").Append(variable).Append("%\"");
+                index++;
+            }
+
+            // Expand child-only variables once so paths like C:\apps\%TEMP%\host.mts
+            // retain literal percent-delimited text. /V:OFF also preserves literal '!'.
+            // /S /C strips the outer quotes, leaving: "%ASPIRE_COMMAND_SHIM_PATH%" "%ASPIRE_COMMAND_SHIM_ARGUMENT_0%"
+            // https://learn.microsoft.com/windows-server/administration/windows-commands/cmd
+            startInfo.Arguments = $"/D /V:OFF /S /C \"{commandLine}\"";
         }
         else
         {

@@ -218,15 +218,21 @@ public class IntegrationHostLauncherTests
     [InlineData("npx.bat")]
     public void CreateProcessStartInfo_WindowsBatchShim_UsesOuterQuotedCommand(string shim)
     {
-        var command = $@"C:\Program Files\nodejs\{shim}";
-        var entryPoint = Path.GetFullPath(Path.Combine("integration packages", "host entry.mts"));
+        var command = $@"C:\Program Files\%TEMP%\nodejs\{shim}";
+        var entryPoint = Path.GetFullPath(Path.Combine("integration %TEMP%! packages", "host entry.mts"));
 
         var startInfo = IntegrationHostLauncher.CreateProcessStartInfo(
-            command, ["--no-install", "tsx", "{entryPoint}"], entryPoint, isWindows: true);
+            command, ["--no-install", "tsx", "{entryPoint}", "", "literal %PATH%! & value"], entryPoint, isWindows: true);
 
         Assert.Equal("cmd.exe", startInfo.FileName);
         Assert.Empty(startInfo.ArgumentList);
-        Assert.Equal($"/c \"\"{command}\" \"--no-install\" \"tsx\" \"{entryPoint}\"\"", startInfo.Arguments);
+        Assert.Equal(
+            "/D /V:OFF /S /C \"\"%ASPIRE_COMMAND_SHIM_PATH%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_0%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_1%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_2%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_3%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_4%\"\"",
+            startInfo.Arguments);
+        Assert.Equal(command, startInfo.Environment["ASPIRE_COMMAND_SHIM_PATH"]);
+        Assert.Equal(
+            ["--no-install", "tsx", entryPoint, "", "literal %PATH%! & value"],
+            Enumerable.Range(0, 5).Select(index => startInfo.Environment[$"ASPIRE_COMMAND_SHIM_ARGUMENT_{index}"]));
         Assert.False(startInfo.UseShellExecute);
         Assert.True(startInfo.RedirectStandardOutput);
         Assert.True(startInfo.RedirectStandardError);

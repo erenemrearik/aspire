@@ -27,19 +27,20 @@ if (mode === 'apphost') {
         await setTimeout(2000);
     }
     assert.ok(url, 'Nuxt and the backend did not become healthy within four minutes.');
-} else if (mode === 'url') {
+} else if (mode === 'url' || mode === 'health') {
     url = target;
 } else {
-    throw new Error('Usage: node verify.mjs apphost <apphost.mts> | url <http://host:port>');
+    throw new Error('Usage: node verify.mjs apphost <apphost.mts> | url <http://host:port> | health <http://host:port/health>');
 }
 
+const healthUrl = mode === 'health' ? url : `${url}/api/health`;
 const deadline = Date.now() + 60_000;
 let response;
 while (Date.now() < deadline) {
-    // A newly launched container can accept connections before Nitro is listening.
+    // A newly launched container can accept execs before its server is listening.
     // Retry only transport failures; HTTP error responses must fail verification.
     try {
-        response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(5000) });
+        response = await fetch(healthUrl, { signal: AbortSignal.timeout(5000) });
         break;
     } catch (error) {
         if (!(error instanceof TypeError) || Date.now() + 1000 >= deadline) {
@@ -48,15 +49,19 @@ while (Date.now() < deadline) {
         await setTimeout(1000);
     }
 }
-assert.ok(response, 'Nitro did not begin listening within one minute.');
+assert.ok(response, `Health endpoint ${healthUrl} did not begin listening within one minute.`);
 assert.equal(response.status, 200);
 assert.deepEqual(await response.json(), { status: 'ok' });
 
-const message = await fetch(`${url}/api/message`, { signal: AbortSignal.timeout(10_000) });
-assert.equal(message.status, 200);
-assert.deepEqual(await message.json(), { message: 'Hello from the Aspire backend' });
+if (mode === 'health') {
+    console.log('Verified healthy backend.');
+} else {
+    const message = await fetch(`${url}/api/message`, { signal: AbortSignal.timeout(10_000) });
+    assert.equal(message.status, 200);
+    assert.deepEqual(await message.json(), { message: 'Hello from the Aspire backend' });
 
-const page = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-assert.equal(page.status, 200);
-assert.match(await page.text(), /<p>Hello from the Aspire backend<\/p>/);
-console.log('Verified healthy Nuxt server, runtime service reference, and server-rendered backend response.');
+    const page = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /<p>Hello from the Aspire backend<\/p>/);
+    console.log('Verified healthy Nuxt server, runtime service reference, and server-rendered backend response.');
+}

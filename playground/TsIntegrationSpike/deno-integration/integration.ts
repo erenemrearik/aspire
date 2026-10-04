@@ -170,7 +170,8 @@ export const addDenoApp = AspireExport<AddDenoAppArgs, ExecutableResource>(
         const state: DenoAppState = {
             appHostDirectory,
             appDirectory,
-            scriptPath,
+            // Forward slashes work in Windows Deno and in the Linux deployment image.
+            scriptPath: scriptPath.replaceAll('\\', '/'),
             args: [...args],
             argsConfigured: args.length > 0,
             permissions: [...defaultPermissions],
@@ -189,7 +190,7 @@ export const addDenoApp = AspireExport<AddDenoAppArgs, ExecutableResource>(
         await deno.withEnvironment('DENO_ENV', 'development');
         await deno.withDeveloperCertificateTrust(true);
         await deno.withCertificateTrustEnvironment('DENO_CERT');
-        await deno.withExecutableDebugSupport('deno', scriptPath, {
+        await deno.withExecutableDebugSupport('deno', state.scriptPath, {
             runtimeExecutable: 'deno',
             launchMethod: 'direct',
         });
@@ -477,6 +478,7 @@ async function readState(store: SerializedAnnotationStore): Promise<DenoAppState
 {
     const state = await getAnnotation(store, denoAppStateAnnotation);
 
+    state.scriptPath = state.scriptPath.replaceAll('\\', '/');
     state.args ??= [];
     state.argsConfigured ??= state.args.length > 0;
     state.permissions ??= [...defaultPermissions];
