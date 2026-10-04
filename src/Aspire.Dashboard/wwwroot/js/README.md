@@ -18,7 +18,7 @@ If we ever want to show more chart types than those, we'll need to change the bu
 
 ## Hex1b web terminal
 
-`hex1b-web-terminal/` vendors the published `@hex1b/web-terminal` **0.171.0** release,
+`hex1b-web-terminal/` vendors the published `@hex1b/web-terminal` **0.172.0** release,
 paired with the Hex1b, Hex1b.McpServer, and Hex1b.Tool NuGet packages and the
 repository-local `hex1b` tool at the same version. The client and server use the evolving
 HWT1 presentation transport and must be updated together. Do not substitute a
@@ -194,12 +194,15 @@ The terminal uses Hex1b's default Canvas2D **overlay** scrollbar, not a native
 HTML scrollbar or a reserved gutter. The mount requests 3 CSS pixels of internal
 padding on every side. `createDefaultScrollbarRenderer` keeps the
 upstream capsule thumb, marker drawing, gestures, hit testing and auto-hide.
-The pinned renderer draws rectangular markers on a flat translucent track,
-with upstream marker navigation and a thumb focus outline.
+The renderer draws fixed-size circular markers behind the thumb, moving nearby
+marks aside so dense history does not obscure it. Painting and hit testing share
+the displaced geometry, including marker clicks, hover previews and wheel scrolling.
+The rounded track has a shared transparent-edge shadow around displaced marks;
+thumb motion is smooth between terminal rows, and the thumb has no focus outline.
 A scoped shadow-DOM override hides the track's DOM focus outline
 after pointer input, restoring the upstream `:focus-visible` outline on keyboard
 input without changing actual focus. The modality listeners are removed on disposal.
-The track explicitly uses the active-palette foreground/background blend at 35% opacity. The thumb
+The track uses Hex1b's active-palette foreground/background blend at 35% opacity. The thumb
 uses that palette's foreground, so it remains contrasting in either theme.
 Markers use the selected terminal palette's purple and red ANSI colors at full
 opacity, with system colors in forced-color mode. The track remains
@@ -221,9 +224,9 @@ positioning and tooltip lifetime.
 The existing HMP-to-HWT mirror has its own 10,000-row scrollback capacity.
 Hex1b now negotiates retained text and OSC 133 command-mark checkpoints by
 default, restoring producer-backed history and marks on late attachment and
-reconnect when both peers support them. Hex1b 0.171 retains at most 200 command
-marks per producer even when their backing text is still retained; older marks
-are evicted first. The built-in scrollbar exposes mark
+reconnect when both peers support them. Hex1b 0.172 retains command marks for the
+lifetime of their backing text by default, rather than evicting them after 200
+entries. Explicit producer capacity and transport limits still apply. The built-in scrollbar exposes mark
 navigation without a Dashboard mode chooser or custom tooltip UI. Marks follow
 retained content and disappear on eviction; unavailable marker rows are not row
 zero. Browser-owned bookmarks remain per-view and do not survive reconnect.

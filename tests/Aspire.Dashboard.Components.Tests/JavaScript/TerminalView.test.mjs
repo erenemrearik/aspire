@@ -604,20 +604,22 @@ test("palette, theme and contrast changes replace the complete overlay without r
     assert.equal(view.style["--terminal-background"], attempt.options.lightModePalette.background);
     const focusCalls = attempt.client.focusCalls;
     const selection = attempt.client.selection;
-    function paintedTrack() {
+    function paintedTrack(trackColor) {
         const painted = [];
         const context = {
             globalAlpha: 1,
             save() {},
             restore() {},
-            fillRect() { painted.push({ color: this.fillStyle, opacity: this.globalAlpha }); },
+            beginPath() {},
+            roundRect() {},
+            fill() { painted.push({ color: this.fillStyle, opacity: this.globalAlpha }); },
         };
         attempt.client.scrollbar.render({
             context, opacity: 1,
             track: { left: 0, top: 0, width: 8, height: 40 },
             thumb: { left: 0, top: 0, width: 0, height: 0 },
             markers: [],
-            colors: { track: "#202020" },
+            colors: { track: trackColor },
             interaction: { focused: false, dragging: false },
         });
         return painted;
@@ -628,7 +630,9 @@ test("palette, theme and contrast changes replace the complete overlay without r
         themeObservers[0].callback();
         assert.equal(attempt.client.colorMode, theme);
         assert.equal(view.style["--terminal-background"], palette.background);
-        assert.deepEqual(paintedTrack(), [{ color: theme === "dark" ? "#837f82" : "#848189", opacity: 0.35 }]);
+        // The upstream frame, not the snapshotted appearance, supplies the palette color.
+        const trackColor = theme === "dark" ? "#837f82" : "#848189";
+        assert.deepEqual(paintedTrack(trackColor), [{ color: trackColor, opacity: 0.35 }]);
     }
     for (const query of ["(forced-colors: active)", "(prefers-contrast: more)"]) {
         const previous = attempt.client.scrollbar;
@@ -639,11 +643,11 @@ test("palette, theme and contrast changes replace the complete overlay without r
         assert.equal(attempt.client.scrollbar.placement, "overlay");
         assert.equal(attempt.client.scrollbar.markers, true);
         assert.equal(attempt.client.colorMode, "light");
-        assert.deepEqual(paintedTrack(), [{ color: "rgb(100, 100, 100)", opacity: 1 }]);
+        assert.deepEqual(paintedTrack("#848189"), [{ color: "rgb(100, 100, 100)", opacity: 1 }]);
     }
     mediaQueries.get("(forced-colors: active)").matches = false;
     mediaQueries.get("(forced-colors: active)").dispatchEvent(new Event("change"));
-    assert.deepEqual(paintedTrack(), [{ color: "#848189", opacity: 1 }]);
+    assert.deepEqual(paintedTrack("#848189"), [{ color: "#848189", opacity: 1 }]);
     assert.equal(attempts.length, 1);
     assert.deepEqual(attempt.client.sizingCalls, []);
     assert.equal(attempt.client.selectionClears, 0);
@@ -2053,23 +2057,25 @@ test("frontend manifest, lockfile, minified bundle and backend use the exact pai
     const lockfile = JSON.parse(await readFile(new URL("package-lock.json", dashboard), "utf8"));
     const bundle = await readFile(new URL("dist/index.min.js", assets), "utf8");
     const version = manifest.dependencies["@hex1b/web-terminal"];
-    assert.equal(version, "0.171.0");
+    assert.equal(version, "0.172.0");
     assert.equal(bundle.split(/\r?\n/, 1)[0], `// @hex1b/web-terminal ${version}; minified with Terser. See ../LICENSE.`);
     assert.equal(lockfile.packages[""].dependencies["@hex1b/web-terminal"], version);
     assert.equal(lockfile.packages["node_modules/@hex1b/web-terminal"].version, version);
 
     // Central package rows have the form:
-    //   <PackageVersion Include="Hex1b" Version="0.171.0" />
-    // Match the exact Include value, not Hex1b.Tool or Hex1b.McpServer;
+    //   <PackageVersion Include="Hex1b" Version="0.172.0" />
+    // Match each exact Include value;
     // whitespace, attribute order and either XML quote style are allowed.
     const packages = await readFile(new URL("../../Directory.Packages.props", dashboard), "utf8");
-    const declarations = [...packages.matchAll(/<PackageVersion\b[^>]*\/>/g)]
-        .map(match => match[0])
-        .filter(declaration => /\bInclude\s*=\s*["']Hex1b["']/.test(declaration));
-    assert.equal(declarations.length, 1, "Expected exactly one central Hex1b library version.");
-    const backendVersion = declarations[0].match(/\bVersion\s*=\s*["']([^"']+)["']/);
-    assert.ok(backendVersion, "The paired Hex1b library must have an explicit central version.");
-    assert.equal(backendVersion[1], version);
+    const declarations = [...packages.matchAll(/<PackageVersion\b[^>]*\/>/g)].map(match => match[0]);
+    for (const packageName of ["Hex1b", "Hex1b.McpServer", "Hex1b.Tool"]) {
+        const pairedDeclarations = declarations.filter(declaration =>
+            declaration.match(/\bInclude\s*=\s*["']([^"']+)["']/)?.[1] === packageName);
+        assert.equal(pairedDeclarations.length, 1, `Expected exactly one central ${packageName} version.`);
+        const backendVersion = pairedDeclarations[0].match(/\bVersion\s*=\s*["']([^"']+)["']/);
+        assert.ok(backendVersion, `The paired ${packageName} package must have an explicit central version.`);
+        assert.equal(backendVersion[1], version);
+    }
 });
 
 test("checked-in deployment contains only the minified bundle, font and required licenses without npm installation", async () => {
