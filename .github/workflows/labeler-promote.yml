@@ -28,7 +28,7 @@ permissions: {}
 
 jobs:
   promote-issues:
-    if: ${{ github.repository == 'microsoft/aspire' && inputs.issues }}
+    if: ${{ inputs.issues }}
     runs-on: ubuntu-latest
     permissions:
       actions: write # The promotion action deletes the active GitHub Actions cache.
@@ -41,7 +41,7 @@ jobs:
           backup_key: ${{ inputs.backup_key }}
 
   promote-pulls:
-    if: ${{ github.repository == 'microsoft/aspire' && inputs.pulls }}
+    if: ${{ inputs.pulls }}
     runs-on: ubuntu-latest
     permissions:
       actions: write # The promotion action deletes the active GitHub Actions cache.

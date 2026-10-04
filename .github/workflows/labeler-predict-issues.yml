@@ -28,8 +28,8 @@ env:
 
 jobs:
   predict-issue-label:
-    # Run label prediction only in the source repository.
-    if: ${{ github.repository == 'microsoft/aspire' }}
+    # Do not automatically run the workflow on forks outside the 'dotnet' org
+    if: ${{ github.event_name == 'workflow_dispatch' || github.repository_owner == 'microsoft' }}
     runs-on: ubuntu-latest
     permissions:
       issues: write
