@@ -89,7 +89,7 @@ jobs:
   predict-pull-label:
     # The 'if' uses always() so this job runs even when poll-pull-requests is skipped
     # Do not automatically run the workflow on forks outside the 'dotnet' org
-    if: ${{ always() && (github.event_name == 'workflow_dispatch' || github.repository_owner == 'microsoft') }}
+    if: ${{ always() && github.repository == 'microsoft/aspire' }}
     needs: [poll-pull-requests]
     runs-on: ubuntu-latest
     permissions:

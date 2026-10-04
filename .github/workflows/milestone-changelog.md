@@ -318,7 +318,7 @@ jobs:
           name: changelog-data
           path: /tmp/gh-aw/
 
-if: github.repository_owner == 'microsoft' && needs.fetch-data.outputs.has-work == 'true'
+if: github.repository == 'microsoft/aspire' && needs.fetch-data.outputs.has-work == 'true'
 
 permissions:
   contents: read

@@ -476,7 +476,7 @@ jobs:
   cli_starter_validation_linux_x64:
     name: Aspire CLI Starter Validation (Ubuntu x64)
     needs: [setup_for_tests, build_packages, build_cli_archive_linux]
-    if: ${{ github.event_name == 'pull_request' && github.repository_owner == 'microsoft' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && github.repository == 'microsoft/aspire' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
     uses: ./.github/workflows/cli-starter-validation.yml
     with:
       runner: ubuntu-latest
@@ -490,7 +490,7 @@ jobs:
   cli_starter_validation_linux_arm64:
     name: Aspire CLI Starter Validation (Ubuntu ARM64)
     needs: [setup_for_tests, build_packages, build_cli_archive_linux_arm64]
-    if: ${{ github.event_name == 'pull_request' && github.repository_owner == 'microsoft' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && github.repository == 'microsoft/aspire' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
     uses: ./.github/workflows/cli-starter-validation.yml
     with:
       runner: ubuntu-24.04-arm
@@ -504,7 +504,7 @@ jobs:
   cli_starter_validation_windows_x64:
     name: Aspire CLI Starter Validation (Windows x64)
     needs: [setup_for_tests, build_packages, build_cli_archive_windows]
-    if: ${{ github.event_name == 'pull_request' && github.repository_owner == 'microsoft' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && github.repository == 'microsoft/aspire' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
     uses: ./.github/workflows/cli-starter-validation.yml
     with:
       runner: windows-latest
@@ -518,7 +518,7 @@ jobs:
   cli_starter_validation_windows_arm64:
     name: Aspire CLI Starter Validation (Windows ARM64)
     needs: [setup_for_tests, build_packages, build_cli_archive_windows_arm64]
-    if: ${{ github.event_name == 'pull_request' && github.repository_owner == 'microsoft' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && github.repository == 'microsoft/aspire' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
     uses: ./.github/workflows/cli-starter-validation.yml
     with:
       runner: windows-11-arm
@@ -532,7 +532,7 @@ jobs:
   cli_starter_validation_macos_x64:
     name: Aspire CLI Starter Validation (macOS x64)
     needs: [setup_for_tests, build_packages, build_cli_archive_macos_x64]
-    if: ${{ github.event_name == 'pull_request' && github.repository_owner == 'microsoft' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && github.repository == 'microsoft/aspire' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
     uses: ./.github/workflows/cli-starter-validation.yml
     with:
       runner: macos-15-intel
@@ -546,7 +546,7 @@ jobs:
   cli_starter_validation_macos_arm64:
     name: Aspire CLI Starter Validation (macOS ARM64)
     needs: [setup_for_tests, build_packages, build_cli_archive_macos]
-    if: ${{ github.event_name == 'pull_request' && github.repository_owner == 'microsoft' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && github.repository == 'microsoft/aspire' && needs.setup_for_tests.outputs.run_cli_starter_validation == 'true' }}
     uses: ./.github/workflows/cli-starter-validation.yml
     with:
       runner: macos-latest
@@ -712,7 +712,7 @@ jobs:
     uses: ./.github/workflows/typescript-api-compat.yml
 
   results:
-    if: ${{ always() && github.repository_owner == 'microsoft' }}
+    if: ${{ always() && github.repository == 'microsoft/aspire' }}
     runs-on: ubuntu-latest
     name: Final Test Results
     needs: [

@@ -37,6 +37,7 @@ concurrency:
 
 jobs:
   quarantine_tests:
+    if: ${{ github.repository == 'microsoft/aspire' }}
     uses: ./.github/workflows/specialized-test-runner.yml
     with:
       testRunnerName: "QuarantinedTestRunsheetBuilder"
@@ -55,7 +56,7 @@ jobs:
   report_infra_failure:
     name: Report infra failure
     needs: [quarantine_tests]
-    if: ${{ failure() && github.event_name == 'schedule' && github.repository_owner == 'microsoft' }}
+    if: ${{ failure() && github.event_name == 'schedule' && github.repository == 'microsoft/aspire' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read   # checkout to require the local .js modules
@@ -79,4 +80,3 @@ jobs:
           script: |
             const reporter = require('./.github/workflows/report-specialized-test-failures.js');
             await require('./.github/workflows/specialized-test-failure-runner.js')({ github, context, core, reporter });
-

@@ -23,7 +23,7 @@ jobs:
   prepare_for_ci:
     runs-on: ubuntu-latest
     name: Prepare for CI
-    if: ${{ github.repository_owner == 'microsoft' }}
+    if: ${{ github.repository == 'microsoft/aspire' }}
     outputs:
       skip_workflow: ${{ (steps.check_for_changes.outputs.no_changes == 'true' || steps.check_for_changes.outputs.only_changed == 'true') && 'true' || 'false' }}
       VERSION_SUFFIX_OVERRIDE: ${{ steps.compute_version_suffix.outputs.VERSION_SUFFIX_OVERRIDE }}
@@ -80,7 +80,7 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-    if: ${{ github.repository_owner == 'microsoft' && needs.prepare_for_ci.outputs.skip_workflow != 'true' }}
+    if: ${{ github.repository == 'microsoft/aspire' && needs.prepare_for_ci.outputs.skip_workflow != 'true' }}
     with:
       versionOverrideArg: ${{ needs.prepare_for_ci.outputs.VERSION_SUFFIX_OVERRIDE }}
       extensionVersionOverride: ${{ needs.prepare_for_ci.outputs.EXTENSION_VERSION_OVERRIDE }}
@@ -109,7 +109,7 @@ jobs:
     name: Stabilization Check
     runs-on: 8-core-ubuntu-latest
     needs: [prepare_for_ci]
-    if: ${{ github.repository_owner == 'microsoft' && needs.prepare_for_ci.outputs.skip_workflow != 'true' }}
+    if: ${{ github.repository == 'microsoft/aspire' && needs.prepare_for_ci.outputs.skip_workflow != 'true' }}
     steps:
       # The actual stabilization work only makes sense for pull_request events. On push
       # (including push to release branches with StabilizePackageVersion=true) the build is
@@ -185,7 +185,7 @@ jobs:
 
   # This job is used for branch protection. It fails if any of the dependent jobs failed
   results:
-    if: ${{ always() && github.repository_owner == 'microsoft' }}
+    if: ${{ always() && github.repository == 'microsoft/aspire' }}
     runs-on: ubuntu-latest
     name: Final Results
     needs: [prepare_for_ci, tests, stabilization_check]
@@ -220,7 +220,7 @@ jobs:
   ci_failure_tracker:
     name: Track CI Failure
     needs: [prepare_for_ci, tests, stabilization_check]
-    if: ${{ always() && github.event_name == 'push' && github.repository_owner == 'microsoft' }}
+    if: ${{ always() && github.event_name == 'push' && github.repository == 'microsoft/aspire' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read   # checkout to require the local .js modules

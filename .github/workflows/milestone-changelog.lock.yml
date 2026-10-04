@@ -340,7 +340,7 @@ jobs:
     needs:
       - activation
       - fetch-data
-    if: github.repository_owner == 'microsoft' && needs.fetch-data.outputs.has-work == 'true'
+    if: github.repository == 'microsoft/aspire' && needs.fetch-data.outputs.has-work == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
