@@ -37,6 +37,11 @@
         <target state="new">Terminal disconnected. The last output has been preserved.</target>
         <note />
       </trans-unit>
+      <trans-unit id="TerminalDisconnectedWithExitCode">
+        <source>Terminal disconnected (exit code {0}). The last output has been preserved.</source>
+        <target state="new">Terminal disconnected (exit code {0}). The last output has been preserved.</target>
+        <note />
+      </trans-unit>
       <trans-unit id="TerminalDismissError">
         <source>Dismiss</source>
         <target state="new">Dismiss</target>
@@ -210,6 +215,11 @@
       <trans-unit id="TerminalShowDisconnectedBanner">
         <source>Terminal disconnected. Show recovery actions</source>
         <target state="new">Terminal disconnected. Show recovery actions</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="TerminalShowDisconnectedBannerWithExitCode">
+        <source>Terminal disconnected (exit code {0}). Show recovery actions</source>
+        <target state="new">Terminal disconnected (exit code {0}). Show recovery actions</target>
         <note />
       </trans-unit>
       <trans-unit id="TerminalShowOutput">

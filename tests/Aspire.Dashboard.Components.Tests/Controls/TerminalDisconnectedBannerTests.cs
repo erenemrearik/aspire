@@ -9,6 +9,7 @@ using Aspire.Dashboard.Model;
 using Aspire.Dashboard.Tests.Shared;
 using Aspire.Tests.Shared.DashboardModel;
 using Bunit;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -19,6 +20,38 @@ namespace Aspire.Dashboard.Components.Tests.Controls;
 [UseCulture("en-US")]
 public class TerminalDisconnectedBannerTests : DashboardTestContext
 {
+    [Theory]
+    [InlineData("0", "Terminal disconnected (exit code 0). The last output has been preserved.", "Terminal disconnected (exit code 0). Show recovery actions")]
+    [InlineData("42", "Terminal disconnected (exit code 42). The last output has been preserved.", "Terminal disconnected (exit code 42). Show recovery actions")]
+    [InlineData("-1", "Terminal disconnected (exit code -1). The last output has been preserved.", "Terminal disconnected (exit code -1). Show recovery actions")]
+    [InlineData(null, "Terminal disconnected. The last output has been preserved.", "Terminal disconnected. Show recovery actions")]
+    public async Task Message_TracksReportedExitCodeAndClearsWhenResourceIsRemoved(string? exitCode, string message, string label)
+    {
+        var updates = Channel.CreateUnbounded<IReadOnlyList<ResourceViewModelChange>>();
+        var initial = ModelTestHelpers.CreateResource(resourceName: "shell");
+        var client = new TestDashboardClient(isEnabled: true, initialResources: [initial], resourceChannelProvider: () => updates);
+        TerminalSetupHelpers.SetupTerminalComponents(this, client);
+        var cut = Render<TerminalDisconnectedBanner>(builder => builder.Add(p => p.ResourceName, "shell"));
+        cut.WaitForAssertion(() => Assert.Equal(1, client.ResourceSubscriptionCount));
+        Assert.Equal("Terminal disconnected. The last output has been preserved.", cut.Find("[role=status]").TextContent);
+
+        var resource = ModelTestHelpers.CreateResource(resourceName: "shell", state: KnownResourceState.Finished, properties: exitCode is null ? [] : new()
+        {
+            [KnownProperties.Resource.ExitCode] = new(KnownProperties.Resource.ExitCode, Value.ForString(exitCode),
+                isValueSensitive: false, knownProperty: null, sortOrder: 0, displayName: null, isHighlighted: false)
+        });
+        await updates.Writer.WriteAsync([new(ResourceViewModelChangeType.Upsert, resource)]);
+        cut.WaitForAssertion(() => Assert.Equal(message, cut.Find("[role=status]").TextContent));
+        await cut.Find(".terminal-show-output").ClickAsync(new());
+        Assert.Equal(label, cut.Find(".terminal-show-banner").GetAttribute("aria-label"));
+        Assert.Equal(label, cut.Find(".terminal-show-banner").GetAttribute("title"));
+
+        await updates.Writer.WriteAsync([new(ResourceViewModelChangeType.Delete, resource)]);
+        cut.WaitForAssertion(() => Assert.Equal("Terminal disconnected. Show recovery actions", cut.Find(".terminal-show-banner").GetAttribute("aria-label")));
+        await cut.Find(".terminal-show-banner").ClickAsync(new());
+        Assert.Equal("Terminal disconnected. The last output has been preserved.", cut.Find("[role=status]").TextContent);
+    }
+
     [Theory]
     [InlineData(CommandViewModel.StartCommand, ResourceCommandResponseKind.Succeeded)]
     [InlineData(CommandViewModel.RestartCommand, ResourceCommandResponseKind.Succeeded)]

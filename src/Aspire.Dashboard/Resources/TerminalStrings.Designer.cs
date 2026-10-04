@@ -187,6 +187,12 @@ namespace Aspire.Dashboard.Resources {
             }
         }
 
+        public static string TerminalDisconnectedWithExitCode {
+            get {
+                return ResourceManager.GetString("TerminalDisconnectedWithExitCode", resourceCulture);
+            }
+        }
+
         public static string TerminalRestartResource {
             get {
                 return ResourceManager.GetString("TerminalRestartResource", resourceCulture);
@@ -208,6 +214,12 @@ namespace Aspire.Dashboard.Resources {
         public static string TerminalShowDisconnectedBanner {
             get {
                 return ResourceManager.GetString("TerminalShowDisconnectedBanner", resourceCulture);
+            }
+        }
+
+        public static string TerminalShowDisconnectedBannerWithExitCode {
+            get {
+                return ResourceManager.GetString("TerminalShowDisconnectedBannerWithExitCode", resourceCulture);
             }
         }
 

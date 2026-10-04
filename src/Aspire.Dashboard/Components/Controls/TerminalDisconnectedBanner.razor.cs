@@ -55,6 +55,16 @@ public sealed partial class TerminalDisconnectedBanner : ComponentBase, IAsyncDi
 
     private ResourceViewModel? Resource => ResourceName is not null ? _resources.GetValueOrDefault(ResourceName) : null;
 
+    private int? ExitCode => Resource is { } resource && resource.TryGetExitCode(out var exitCode) ? exitCode : null;
+
+    private string Message => ExitCode is { } exitCode
+        ? Loc[nameof(Resources.TerminalStrings.TerminalDisconnectedWithExitCode), exitCode].Value
+        : Loc[nameof(Resources.TerminalStrings.TerminalDisconnectedMessage)].Value;
+
+    private string ShowBannerLabel => ExitCode is { } exitCode
+        ? Loc[nameof(Resources.TerminalStrings.TerminalShowDisconnectedBannerWithExitCode), exitCode].Value
+        : Loc[nameof(Resources.TerminalStrings.TerminalShowDisconnectedBanner)].Value;
+
     private CommandViewModel? RestartCommand
     {
         get

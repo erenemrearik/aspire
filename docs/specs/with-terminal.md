@@ -331,7 +331,10 @@ producer as ended.
 The browser enables Hex1b's `preserveOnDisconnect` option to retain the last
 received screen, including Sixel and Kitty graphics. Disconnected views dim
 their output and show a localized banner over the retained screen. Resource
-terminals offer **Restart resource** using the resource's advertised Restart
+terminal banners include the exit code when reported in the resource protocol;
+an absent code is not treated as success. Docked-terminal completion does not
+currently expose the workload exit code through the pinned Hex1b adapter.
+Resource terminals offer **Restart resource** using the resource's advertised Restart
 or Start command, with the usual command availability, confirmation and error
 reporting. Docked terminals offer **Close tab** through the existing dock close
 action. Other surfaces show the disconnected message without a close-tab action.
