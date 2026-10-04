@@ -33,6 +33,7 @@ internal sealed class IntegrationHostTestConnection : IDisposable
     {
         var (serverStream, hostStream) = FullDuplexStream.CreatePair();
         ServerRpc = new JsonRpc(new HeaderDelimitedMessageHandler(serverStream, serverStream, new SystemTextJsonFormatter()));
+        CallbackInvoker.SetConnection(ServerRpc);
         _hostRpc = new JsonRpc(new HeaderDelimitedMessageHandler(hostStream, hostStream, new SystemTextJsonFormatter()));
         _hostRpc.SynchronizationContext = null;
         _hostRpc.AddLocalRpcMethod("getCapabilities", getCapabilities);
@@ -45,6 +46,7 @@ internal sealed class IntegrationHostTestConnection : IDisposable
     }
 
     public JsonRpc ServerRpc { get; }
+    public JsonRpcCallbackInvoker CallbackInvoker { get; } = new();
 
     public void Dispose()
     {

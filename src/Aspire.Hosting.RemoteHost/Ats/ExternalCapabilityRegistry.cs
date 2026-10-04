@@ -26,6 +26,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
 
     private volatile FrozenDictionary<string, ExternalCapabilityRegistration> _capabilities = FrozenDictionary<string, ExternalCapabilityRegistration>.Empty;
     private readonly ConcurrentDictionary<JsonRpc, byte> _integrationHosts = new();
+    private readonly ConcurrentDictionary<JsonRpc, JsonRpcCallbackInvoker> _integrationCallbackInvokers = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonRpc>> _pendingRegistrations = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<JsonRpc, byte> _unavailableHosts = new();
     private readonly ConcurrentDictionary<string, (JsonRpcCallbackInvoker Invoker, string CallbackId)> _callbackOwners = new(StringComparer.Ordinal);
@@ -79,7 +80,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     internal void ForgetHostRegistration(string registrationId)
         => _pendingRegistrations.TryRemove(registrationId, out _);
 
-    public void AddIntegrationHost(string registrationId, JsonRpc clientRpc)
+    public void AddIntegrationHost(string registrationId, JsonRpc clientRpc, JsonRpcCallbackInvoker callbackInvoker)
     {
         if (!_pendingRegistrations.TryRemove(registrationId, out var registration))
         {
@@ -88,8 +89,12 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
 
         try
         {
-            AddIntegrationHost(clientRpc);
-            registration.SetResult(clientRpc);
+            lock (_registrationGate)
+            {
+                AddIntegrationHost(clientRpc);
+                _integrationCallbackInvokers[clientRpc] = callbackInvoker;
+                registration.SetResult(clientRpc);
+            }
         }
         catch (Exception ex)
         {
@@ -98,8 +103,11 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
         }
     }
 
-    internal void MarkHostUnavailable(JsonRpc clientRpc)
+    internal bool MarkHostUnavailable(JsonRpc clientRpc)
     {
+        var hasCallbacks = _integrationCallbackInvokers.TryGetValue(clientRpc, out var invoker) &&
+            invoker.StopAcceptingCallbacks();
+
         // Keep projection metadata for already-generated SDKs, but never route a new
         // invocation to a disconnected host or replay calls that may have side effects.
         if (_capabilities.Values.Any(cap => ReferenceEquals(cap.ClientRpc, clientRpc)))
@@ -108,6 +116,8 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
         }
         _integrationHosts.TryRemove(clientRpc, out _);
         clientRpc.Dispose();
+
+        return hasCallbacks;
     }
 
     /// <summary>
@@ -244,6 +254,13 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
 
     internal async Task ReplaceHostAsync(JsonRpc previous, JsonRpc replacement, TimeSpan timeout, CancellationToken cancellationToken)
     {
+        if (_integrationCallbackInvokers.TryGetValue(previous, out var invoker) && invoker.StopAcceptingCallbacks())
+        {
+            throw new InvalidOperationException(
+                "The integration host contributed callbacks to the resource model. " +
+                "Restart the AppHost session to rebuild those callbacks before using the integration.");
+        }
+
         using var discoveryCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
         List<ExternalCapabilityRegistration> discovered;
         try
@@ -291,6 +308,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
             }
             _capabilities = updated.ToFrozenDictionary(StringComparer.Ordinal);
             _unavailableHosts.TryRemove(previous, out _);
+            _integrationCallbackInvokers.TryRemove(previous, out _);
         }
     }
 
@@ -367,6 +385,13 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
 
         if (_unavailableHosts.ContainsKey(registration.ClientRpc))
         {
+            if (_integrationCallbackInvokers.TryGetValue(registration.ClientRpc, out var invoker) && invoker.StopAcceptingCallbacks())
+            {
+                throw new InvalidOperationException(
+                    $"The integration host providing '{capabilityId}' contributed callbacks to the resource model. " +
+                    "Restart the AppHost session to rebuild those callbacks before using the integration.");
+            }
+
             throw new InvalidOperationException(
                 $"The integration host providing '{capabilityId}' is restarting. Retry after it has registered again.");
         }
@@ -486,6 +511,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     public void Dispose()
     {
         Stop();
+        _integrationCallbackInvokers.Clear();
         _shutdown.Dispose();
         _hostRegisteredSignal.Dispose();
     }

@@ -23,7 +23,7 @@ internal static class IntegrationHostLifetimeTestHelper
             Path.Combine(directory, "integration", "processes.jsonl"),
             Path.Combine(evidence.FullName, "processes.jsonl"),
             overwrite: true);
-        if (target is "server" or "cli" or "crashloop")
+        if (target is "server" or "cli" or "crashloop" or "callback")
         {
             File.Copy(Path.Combine(directory, "restart.log"), Path.Combine(evidence.FullName, "restart.log"), overwrite: true);
         }
@@ -31,7 +31,7 @@ internal static class IntegrationHostLifetimeTestHelper
         return evidence.FullName;
     }
 
-    internal static void WriteFixture(string directory, string repoRoot)
+    internal static void WriteFixture(string directory, string repoRoot, bool integrationOwnedCallback)
     {
         var integration = Directory.CreateDirectory(Path.Combine(directory, "integration"));
         File.Copy(
@@ -52,20 +52,23 @@ internal static class IntegrationHostLifetimeTestHelper
               }
             }
             """);
-        File.WriteAllText(Path.Combine(directory, "apphost.mts"), """
-            import * as fs from 'node:fs';
-            import { createBuilder } from './.aspire/modules/aspire.mjs';
-
-            fs.writeFileSync('guest.pid', String(process.pid));
-            const builder = await createBuilder();
+        var probeSource = integrationOwnedCallback ? "await builder.integrationOwnedProbe();" : """
             const probe = await builder.addParameter('probe');
-            // Keep the callback in the guest. Host-local closures are not reconstructed
-            // after a restart; this command dispatches through the rediscovered capability.
+            // Keep this callback in the guest so host-only recovery can rediscover
+            // the integration without recreating the resource model.
             await probe.withCommand('probe', 'Probe integration host', async () => {
                 const generation = await builder.integrationGeneration();
                 fs.writeFileSync('probe-result', generation);
                 return { success: true };
             });
+            """;
+        File.WriteAllText(Path.Combine(directory, "apphost.mts"), $$"""
+            import * as fs from 'node:fs';
+            import { createBuilder } from './.aspire/modules/aspire.mjs';
+
+            fs.writeFileSync('guest.pid', String(process.pid));
+            const builder = await createBuilder();
+            {{probeSource}}
             await builder.build().run();
             """);
         File.WriteAllText(Path.Combine(directory, "process-control.mjs"), ControlSource);
@@ -146,9 +149,30 @@ internal static class IntegrationHostLifetimeTestHelper
             }
         }, async () => `generation-${generation}`);
 
+        const integrationOwnedProbe = AspireExport<{ builder: DistributedApplicationBuilder }, string>({
+            id: 'e2e.lifetime/ownedProbe',
+            method: 'integrationOwnedProbe',
+            description: 'Attaches an integration-owned deferred resource command',
+            projection: {
+                capabilityKind: 'Method',
+                targetTypeId: builderType.typeId,
+                targetType: builderType,
+                targetParameterName: 'builder',
+                returnType: { typeId: 'string', category: 'Primitive' },
+                parameters: []
+            }
+        }, async ({ builder }) => {
+            const probe = await builder.addParameter('probe');
+            await probe.withCommand('probe', 'Probe integration-owned callback', async () => {
+                fs.writeFileSync('../probe-result', `generation-${generation}`);
+                return { success: true };
+            });
+            return `generation-${generation}`;
+        });
+
         await runIntegrationHost({
             packageName: '@e2e/lifetime',
-            integrations: [defineIntegration({ name: 'LifetimeIntegration', capabilities: [integrationGeneration] })]
+            integrations: [defineIntegration({ name: 'LifetimeIntegration', capabilities: [integrationGeneration, integrationOwnedProbe] })]
         });
         """;
 
@@ -222,6 +246,14 @@ internal static class IntegrationHostLifetimeTestHelper
                 assert.ok(log.includes('Integration host recovery failed; the AppHost session was stopped.'));
                 assert.equal(records().filter(record => record.generation > snapshot().generation).length, 3);
                 fs.unlinkSync('integration/crash-loop');
+                break;
+            }
+            case 'callbacks': {
+                const log = fs.readFileSync('session.log', 'utf8');
+                assert.ok(log.includes('owns callbacks that cannot be restored by restarting the host.'));
+                assert.ok(log.includes('Stopping the AppHost session. Restart it to rebuild the resource model.'));
+                assert.ok(log.includes('Integration host recovery failed; the AppHost session was stopped.'));
+                assert.equal(records().filter(record => record.generation > snapshot().generation).length, 0);
                 break;
             }
             case 'recovered': {

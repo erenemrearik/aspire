@@ -33,6 +33,10 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
     [CaptureWorkspaceOnFailure]
     public Task CrashLoop_SurfacesExhaustedRecoveryAndAllowsExplicitRestart() => RunScenarioAsync("crashloop");
 
+    [Fact]
+    [CaptureWorkspaceOnFailure]
+    public Task CallbackOwnerCrash_StopsSessionAndRebuildsCallbacksOnExplicitRestart() => RunScenarioAsync("callback");
+
     private async Task RunScenarioAsync(string target)
     {
         var repoRoot = CliE2ETestHelpers.GetRepoRoot();
@@ -48,7 +52,7 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
         await auto.PrepareDockerEnvironmentAsync(counter, workspace, enableDcpDiagnostics: true);
         await auto.InstallAspireCliAsync(strategy, counter);
         await auto.RunCommandAsync("aspire init --language typescript --non-interactive", counter, TimeSpan.FromMinutes(3));
-        IntegrationHostLifetimeTestHelper.WriteFixture(workspace.WorkspaceRoot.FullName, repoRoot);
+        IntegrationHostLifetimeTestHelper.WriteFixture(workspace.WorkspaceRoot.FullName, repoRoot, target == "callback");
         await auto.RunCommandAsync("aspire restore --non-interactive", counter, TimeSpan.FromMinutes(3));
 
         // A foreground run launched in the test shell's background retains the real
@@ -69,13 +73,14 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
         {
             await auto.RunCommandAsync("node process-control.mjs block", counter, TimeSpan.FromSeconds(75));
         }
+        var killTarget = target == "callback" ? "runtime" : target;
         await auto.RunCommandAsync(
-            target == "crashloop" ? "node process-control.mjs crashloop" : $"node process-control.mjs kill {target}",
+            target == "crashloop" ? "node process-control.mjs crashloop" : $"node process-control.mjs kill {killTarget}",
             counter);
-        if (target is "server" or "cli" or "crashloop")
+        if (target is "server" or "cli" or "crashloop" or "callback")
         {
             await auto.RunCommandAsync("node process-control.mjs stopped", counter, TimeSpan.FromSeconds(75));
-            if (target is "server" or "crashloop")
+            if (target is "server" or "crashloop" or "callback")
             {
                 // Owner death stops the session, rather than replaying AppHost model
                 // construction. Users must see the failure and can explicitly restart.
@@ -87,6 +92,10 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
             if (target is "crashloop")
             {
                 await auto.RunCommandAsync("node process-control.mjs exhausted", counter);
+            }
+            if (target is "callback")
+            {
+                await auto.RunCommandAsync("node process-control.mjs callbacks", counter);
             }
             await auto.RunCommandAsync("aspire start --non-interactive > restart.log 2>&1", counter, TimeSpan.FromMinutes(3));
         }

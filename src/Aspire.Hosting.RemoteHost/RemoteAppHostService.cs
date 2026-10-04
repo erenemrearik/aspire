@@ -204,7 +204,7 @@ internal sealed class RemoteAppHostService
             throw new InvalidOperationException("An integration host must register on an active RPC connection.");
         }
 
-        _externalCapabilityRegistry.AddIntegrationHost(registrationId, _clientRpc);
+        _externalCapabilityRegistry.AddIntegrationHost(registrationId, _clientRpc, _callbackInvoker);
         return true;
     }
 

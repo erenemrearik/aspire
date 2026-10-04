@@ -54,6 +54,48 @@ public class CallbackProxyTests
         Assert.Same(result1, result2);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CreateProxy_RetiringConnectionRejectsNewAndCachedCallbacks(bool createdCallback)
+    {
+        var invoker = new JsonRpcCallbackInvoker();
+        using var factory = CreateFactory(invoker);
+        if (createdCallback)
+        {
+            Assert.IsType<Action>(factory.CreateProxy("callback", typeof(Action)));
+        }
+
+        Assert.Equal(createdCallback, invoker.StopAcceptingCallbacks());
+        Assert.Equal(createdCallback, invoker.StopAcceptingCallbacks());
+        Assert.Throws<ObjectDisposedException>(() => factory.CreateProxy("callback", typeof(Action)));
+    }
+
+    [Fact]
+    public async Task CreateProxy_ConcurrentRetirementCannotMissAnAcceptedCallback()
+    {
+        for (var attempt = 0; attempt < 32; attempt++)
+        {
+            var invoker = new JsonRpcCallbackInvoker();
+            using var factory = CreateFactory(invoker);
+            var creation = Task.Run(() =>
+            {
+                try
+                {
+                    Assert.IsType<Action>(factory.CreateProxy("callback", typeof(Action)));
+                    return true;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return false;
+                }
+            });
+            var retirement = Task.Run(invoker.StopAcceptingCallbacks);
+
+            Assert.Equal(await creation, await retirement);
+        }
+    }
+
     [Fact]
     public async Task InvokedProxy_CallsCallbackInvoker()
     {

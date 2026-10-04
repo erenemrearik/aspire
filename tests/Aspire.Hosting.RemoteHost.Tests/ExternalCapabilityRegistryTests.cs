@@ -20,11 +20,11 @@ public class ExternalCapabilityRegistryTests
         using var connection = new IntegrationHostTestConnection(CreateCapabilities("test.external/value"));
         var registration = registry.ExpectHostRegistration("attempt");
 
-        Assert.Throws<InvalidOperationException>(() => registry.AddIntegrationHost("unknown", connection.ServerRpc));
+        Assert.Throws<InvalidOperationException>(() => registry.AddIntegrationHost("unknown", connection.ServerRpc, connection.CallbackInvoker));
         Assert.False(registration.IsCompleted);
-        registry.AddIntegrationHost("attempt", connection.ServerRpc);
+        registry.AddIntegrationHost("attempt", connection.ServerRpc, connection.CallbackInvoker);
         Assert.Same(connection.ServerRpc, await registration);
-        Assert.Throws<InvalidOperationException>(() => registry.AddIntegrationHost("attempt", connection.ServerRpc));
+        Assert.Throws<InvalidOperationException>(() => registry.AddIntegrationHost("attempt", connection.ServerRpc, connection.CallbackInvoker));
         Assert.Equal(1, await registry.WaitForHostsAsync(1, TimeSpan.Zero, TestContext.Current.CancellationToken));
         Assert.Equal(0, await registry.WaitForHostsAsync(1, TimeSpan.Zero, TestContext.Current.CancellationToken));
     }
@@ -38,10 +38,53 @@ public class ExternalCapabilityRegistryTests
         registry.ForgetHostRegistration("old");
         var replacement = registry.ExpectHostRegistration("replacement");
 
-        Assert.Throws<InvalidOperationException>(() => registry.AddIntegrationHost("old", connection.ServerRpc));
+        Assert.Throws<InvalidOperationException>(() => registry.AddIntegrationHost("old", connection.ServerRpc, connection.CallbackInvoker));
         Assert.False(replacement.IsCompleted);
-        registry.AddIntegrationHost("replacement", connection.ServerRpc);
+        registry.AddIntegrationHost("replacement", connection.ServerRpc, connection.CallbackInvoker);
         Assert.Same(connection.ServerRpc, await replacement);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplaceHostAsync_RequiresSessionRestartForCallbackOwners(bool ownsCallbacks)
+    {
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        using var original = new IntegrationHostTestConnection(CreateCapabilities("test.external/value"));
+        var registration = registry.ExpectHostRegistration("original");
+        registry.AddIntegrationHost("original", original.ServerRpc, original.CallbackInvoker);
+        Assert.Same(original.ServerRpc, await registration);
+        await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        if (ownsCallbacks)
+        {
+            original.CallbackInvoker.RegisterCallback();
+        }
+
+        Assert.Equal(ownsCallbacks, registry.MarkHostUnavailable(original.ServerRpc));
+        Assert.Equal(ownsCallbacks, registry.MarkHostUnavailable(original.ServerRpc));
+        Assert.Throws<ObjectDisposedException>(original.CallbackInvoker.RegisterCallback);
+        using var replacement = new IntegrationHostTestConnection(CreateCapabilities("test.external/value"));
+        registry.AddIntegrationHost(replacement.ServerRpc);
+        if (ownsCallbacks)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.ReplaceHostAsync(
+                original.ServerRpc, replacement.ServerRpc, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            Assert.Equal(
+                "The integration host contributed callbacks to the resource model. " +
+                "Restart the AppHost session to rebuild those callbacks before using the integration.",
+                error.Message);
+            var unavailable = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.TryInvokeAsync("test.external/value", null));
+            Assert.Equal(
+                "The integration host providing 'test.external/value' contributed callbacks to the resource model. " +
+                "Restart the AppHost session to rebuild those callbacks before using the integration.",
+                unavailable.Message);
+        }
+        else
+        {
+            await registry.ReplaceHostAsync(
+                original.ServerRpc, replacement.ServerRpc, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        }
+        Assert.Equal("test.external/value", Assert.Single(registry.AugmentContext(CreateContext()).Capabilities).CapabilityId);
     }
 
     [Fact]

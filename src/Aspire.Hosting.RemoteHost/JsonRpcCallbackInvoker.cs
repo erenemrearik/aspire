@@ -14,6 +14,29 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker
     private static readonly TimeSpan s_callbackTimeout = TimeSpan.FromSeconds(60);
 
     private JsonRpc? _clientRpc;
+    private readonly object _callbackGate = new();
+    private bool _acceptingCallbacks = true;
+    private bool _hasCallbacks;
+
+    internal void RegisterCallback()
+    {
+        lock (_callbackGate)
+        {
+            ObjectDisposedException.ThrowIf(!_acceptingCallbacks, this);
+            _hasCallbacks = true;
+        }
+    }
+
+    internal bool StopAcceptingCallbacks()
+    {
+        lock (_callbackGate)
+        {
+            // Serialize retirement with proxy creation. A late RPC must not attach
+            // a callback from a dead host after its supervisor decides it can recover.
+            _acceptingCallbacks = false;
+            return _hasCallbacks;
+        }
+    }
 
     /// <summary>
     /// Sets the JSON-RPC connection to use for invoking callbacks.

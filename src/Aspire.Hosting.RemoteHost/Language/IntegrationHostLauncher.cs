@@ -149,6 +149,7 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
                 Exception failure;
                 long? healthySince = null;
                 var wasStable = false;
+                var hasCallbacks = false;
                 try
                 {
                     process = Launch(descriptor, registrationId);
@@ -217,7 +218,7 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
                     }
                     if (connection is not null)
                     {
-                        _externalCapabilityRegistry.MarkHostUnavailable(connection);
+                        hasCallbacks = _externalCapabilityRegistry.MarkHostUnavailable(connection);
                     }
                     if (process is not null)
                     {
@@ -231,6 +232,20 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
                     return;
                 }
                 cancellationToken.ThrowIfCancellationRequested();
+
+                if (hasCallbacks)
+                {
+                    var callbackFailure = new InvalidOperationException(
+                        $"Integration host '{descriptor.PackageName}' owns callbacks that cannot be restored by restarting the host. " +
+                        "Restart the AppHost session to rebuild the resource model.", failure);
+                    _logger.LogError(callbackFailure,
+                        "Integration host '{Name}' owns callbacks that cannot be restored by restarting the host. " +
+                        "Stopping the AppHost session. Restart it to rebuild the resource model.",
+                        descriptor.PackageName);
+                    Interlocked.CompareExchange(ref _failure, callbackFailure, null);
+                    _lifetime.StopApplication();
+                    return;
+                }
 
                 // Count fast crash loops against the same budget. A single successful
                 // registration is not evidence that the replacement is healthy.
