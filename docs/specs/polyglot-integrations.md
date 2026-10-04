@@ -264,6 +264,10 @@ The guardian's server-liveness monitor runs in a separate process, so a blocked 
 
 Application executables and containers created through the hosting model belong to DCP, not to the integration host's process scope. Container deletion is performed through the container runtime. Explicitly persistent containers can intentionally survive a session and are not accidental orphans.
 
+CLI end-to-end coverage in `IntegrationHostLifetimeTests` kills the runtime, its npm/tsx wrapper, the guardian, the AppHost server, and the owning CLI. It records kernel process identities, checks that old scopes and workers are reaped, preserves diagnostics, and invokes a resource command through the rediscovered integration. Guardian and owner-death cases also block the runtime's event loop to rule out cooperative shutdown as the only cleanup mechanism. Runtime-scope failures recover automatically; server or CLI death ends the session and requires an explicit `aspire start`.
+
+Crash-loop coverage verifies the three-attempt budget, original runtime diagnostics, a nonzero CLI exit, and explicit restart after the fault is removed. Each scenario retains its own terminal recording, process ledger, session log, and resource-command output under `TestResults/recordings/aspire-cli-e2e/`, including successful runs.
+
 ---
 
 ## Architecture

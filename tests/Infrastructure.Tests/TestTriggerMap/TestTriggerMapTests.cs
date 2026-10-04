@@ -724,7 +724,7 @@ public sealed class TestTriggerMapTests
         },
         {
             "playground/TsIntegrationSpike/kafka-integration/host-runtime.ts",
-            ["test:Aspire.Playground.Tests", "job:polyglot", "job:typescript-sdk"]
+            ["test:Aspire.Playground.Tests", "test:Aspire.Cli.EndToEnd.Tests", "job:polyglot", "job:typescript-sdk"]
         },
         {
             "playground/TsIntegrationSpike/aspire.config.json",

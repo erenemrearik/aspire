@@ -279,6 +279,10 @@ path_rules:
     targets: [job:polyglot]
     reason: polyglot fixtures, TypeScript integration playgrounds, and validation workflow inputs
   - paths:
+      - playground/TsIntegrationSpike/kafka-integration/host-runtime.ts
+    targets: [test:Aspire.Cli.EndToEnd.Tests]
+    reason: integration-host lifetime e2e copies this runtime into its test integration
+  - paths:
       - src/Aspire.Hosting.Blazor/Aspire.Hosting.Blazor.csproj
       - src/Aspire.Hosting.Blazor/BlazorGatewayExtensions.cs
       - src/Aspire.Hosting.Blazor/buildTransitive/**
