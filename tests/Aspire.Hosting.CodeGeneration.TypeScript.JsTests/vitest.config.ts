@@ -8,6 +8,7 @@ export default defineConfig({
         alias: {
             '@aspire/transport': path.resolve(resources, 'transport.mts'),
             '@aspire/base': path.resolve(resources, 'base.mts'),
+            './aspire.mjs': path.resolve(resources, 'base.mts'),
             // Integration playgrounds normally import a restored SDK. Exercise their
             // host protocol without running CLI codegen; tests register the handle types they use.
             '../.aspire/modules/base.mjs': path.resolve(resources, 'base.mts'),

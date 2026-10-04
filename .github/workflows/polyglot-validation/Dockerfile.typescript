@@ -52,7 +52,8 @@ COPY setup-local-cli.sh /scripts/setup-local-cli.sh
 COPY test-typescript.sh /scripts/test-typescript.sh
 COPY test-typescript-playground.sh /scripts/test-typescript-playground.sh
 COPY test-typescript-integrations.sh /scripts/test-typescript-integrations.sh
-RUN chmod +x /scripts/setup-local-cli.sh /scripts/test-typescript.sh /scripts/test-typescript-playground.sh /scripts/test-typescript-integrations.sh
+COPY test-nuxt-integration.sh /scripts/test-nuxt-integration.sh
+RUN chmod +x /scripts/setup-local-cli.sh /scripts/test-typescript.sh /scripts/test-typescript-playground.sh /scripts/test-typescript-integrations.sh /scripts/test-nuxt-integration.sh
 
 # Entrypoint: Set up Aspire CLI and run validation
 # Bundle extraction happens lazily on first command that needs the layout
@@ -61,5 +62,6 @@ ENTRYPOINT ["/bin/bash", "-c", "\
     /scripts/setup-local-cli.sh && \
     /scripts/test-typescript.sh && \
     /scripts/test-typescript-playground.sh && \
-    /scripts/test-typescript-integrations.sh /workspace \
+    /scripts/test-typescript-integrations.sh /workspace && \
+    /scripts/test-nuxt-integration.sh /workspace \
 "]

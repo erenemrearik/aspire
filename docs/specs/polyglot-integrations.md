@@ -146,6 +146,10 @@ public static IResourceBuilder<KafkaResource> AddKafka(
 
 Both helpers **live in the generated `.aspire/modules/base.mts`** emitted by the TypeScript code generator — integration authors import them from the same place they import `DistributedApplicationBuilder`, `ContainerResource`, and the rest of the typed surface. No framework dependency, no hand-written helper package.
 
+The generated SDK also emits `integration-host.mts`. An integration entry point imports `runIntegrationHost` from `./.aspire/modules/integration-host.mjs` and supplies its package name and `defineIntegration` definitions. The runtime registers generated handle factories, authenticates, registers with the launch identity, advertises metadata, dispatches capabilities, and relays callbacks. Authors do not copy socket or authentication code into their packages.
+
+The preview [`@aspire/nuxt`](../../src/Aspire.Hosting.Nuxt/README.md) demonstrates a packable TypeScript-authored hosting integration, not just a protocol fixture. Its compiled npm package includes its generated core SDK and contributes `addNuxtApp` and `withNuxtReference` to the consumer's SDK. [`playground/NuxtApp`](../../playground/NuxtApp) exercises a real Nuxt application, deferred backend endpoint injection into runtime configuration, and standalone Nitro publishing. CI installs the packed tarball into a separate consumer, verifies healthy development workloads and server-rendered backend data, then builds and runs the generated production images.
+
 ```ts
 import type { DistributedApplicationBuilder, ContainerResource } from '../.aspire/modules/aspire.mjs';
 import { AspireExport, defineIntegration, type AspireTypeRef } from '../.aspire/modules/base.mjs';

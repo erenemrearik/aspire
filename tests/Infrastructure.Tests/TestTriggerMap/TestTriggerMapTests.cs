@@ -739,6 +739,14 @@ public sealed class TestTriggerMapTests
             ["test:Aspire.Playground.Tests", "job:polyglot"]
         },
         {
+            "src/Aspire.Hosting.Nuxt/src/integration.ts",
+            ["job:polyglot", "job:typescript-sdk"]
+        },
+        {
+            "playground/NuxtApp/web/app/app.vue",
+            ["test:Aspire.Playground.Tests", "job:polyglot"]
+        },
+        {
             ".gitignore",
             ["test:Infrastructure.Tests"]
         },

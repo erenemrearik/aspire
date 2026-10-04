@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AspireExport, defineIntegration } from '@aspire/base';
 import { Handle, registerHandleWrapper } from '@aspire/transport';
-import { runIntegrationHost } from '../../../playground/TsIntegrationSpike/kafka-integration/host-runtime.js';
+import { runIntegrationHost } from '../../../src/Aspire.Hosting.CodeGeneration.TypeScript/Resources/integration-host.mts';
 
 const { onRequest, sendRequest } = vi.hoisted(() => ({
     onRequest: vi.fn(),
@@ -90,5 +90,31 @@ describe('integration host callback relay', () => {
         expect((result as CallbackResource).name()).toBe('callback-resource');
         expect((result as CallbackResource).handle.toJSON()).toEqual(handle);
         expect(sendRequest).toHaveBeenCalledWith('invokeGuestCallback', 'guest-callback', {});
+    });
+
+    it.each([
+        ['authentication', 'Integration host authentication failed.'],
+        ['registration', 'Integration host registration was rejected.'],
+        ['duplicate', 'Duplicate integration capability: test/duplicate'],
+    ])('rejects failed %s instead of advertising a usable host', async (failure, expectedError) => {
+        vi.stubEnv('REMOTE_APP_HOST_SOCKET_PATH', 'integration-test-socket');
+        vi.stubEnv('ASPIRE_REMOTE_APPHOST_TOKEN', 'integration-test-token');
+        vi.stubEnv('ASPIRE_INTEGRATION_HOST_REGISTRATION_ID', 'integration-test-registration');
+        vi.spyOn(process, 'on').mockReturnValue(process);
+        vi.spyOn(console, 'log').mockImplementation(() => {});
+        sendRequest.mockImplementation(async (method: string) =>
+            !(method === 'authenticate' && failure === 'authentication') &&
+            !(method === 'registerAsIntegrationHost' && failure === 'registration'));
+        const capability = AspireExport(
+            { id: 'test/duplicate', method: 'duplicate', description: 'Test duplicate exports' },
+            async () => {});
+
+        await expect(runIntegrationHost({
+            packageName: 'test-host',
+            integrations: [defineIntegration({
+                name: 'test',
+                capabilities: failure === 'duplicate' ? [capability, capability] : [],
+            })],
+        })).rejects.toThrow(expectedError);
     });
 });

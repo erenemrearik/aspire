@@ -64,6 +64,7 @@ public class AtsTypeScriptCodeGeneratorTests
         // would have to be regenerated on every change to the source resource.
         Assert.Equal(EmbeddedResources.Read("base.mts"), files["base.mts"]);
         Assert.Equal(EmbeddedResources.Read("transport.mts"), files["transport.mts"]);
+        Assert.Equal(EmbeddedResources.Read("integration-host.mts"), files["integration-host.mts"]);
     }
 
     [Fact]
