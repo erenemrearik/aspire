@@ -230,6 +230,12 @@ zero. Browser-owned bookmarks remain per-view and do not survive reconnect.
 
 ### View lifecycle
 
+Resource rows use **Terminal** as their output shortcut when a live terminal is
+defined; other resources and historical runs retain **Console logs**. Both actions
+remain available in the resource menu, including on mobile. Resource graph and
+details menus also offer Terminal, while the Terminal page keeps Console logs as
+the alternate output view. Links preserve the selected resource replica.
+
 Each reconnect aborts the previous mount and creates a new client. Mounting is
 deferred while initially hidden; once connected, changing the Console/Terminal
 view retains the client, selection, and producer-backed history. Disposal closes
