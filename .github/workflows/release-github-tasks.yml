@@ -97,6 +97,7 @@ jobs:
   # `skip_*` inputs so partial-failure re-runs still behave the same way.
   release:
     name: Release Tasks
+    if: ${{ github.repository == 'microsoft/aspire' }}
     runs-on: ubuntu-latest
     # Authorization uses github.token; release operations use the App token.
     permissions:
