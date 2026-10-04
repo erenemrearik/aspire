@@ -255,12 +255,14 @@ jobs:
 
   build_packages:
     name: Build packages
+    if: ${{ github.repository == 'microsoft/aspire' }}
     uses: ./.github/workflows/build-packages.yml
     with:
       versionOverrideArg: ${{ inputs.versionOverrideArg }}
 
   build_cli_archive_linux:
     name: Build native CLI archive (Linux)
+    if: ${{ github.repository == 'microsoft/aspire' }}
     uses: ./.github/workflows/build-cli-native-archives.yml
     with:
       versionOverrideArg: ${{ inputs.versionOverrideArg }}
@@ -268,6 +270,7 @@ jobs:
 
   build_cli_archive_linux_arm64:
     name: Build native CLI archive (Linux ARM64)
+    if: ${{ github.repository == 'microsoft/aspire' }}
     uses: ./.github/workflows/build-cli-native-archives.yml
     with:
       versionOverrideArg: ${{ inputs.versionOverrideArg }}
@@ -279,6 +282,7 @@ jobs:
   # without waiting for the slower Windows/macOS builds.
   build_cli_archive_windows:
     name: Build native CLI archive (Windows)
+    if: ${{ github.repository == 'microsoft/aspire' }}
     uses: ./.github/workflows/build-cli-native-archives.yml
     with:
       versionOverrideArg: ${{ inputs.versionOverrideArg }}
@@ -286,6 +290,7 @@ jobs:
 
   build_cli_archive_windows_arm64:
     name: Build native CLI archive (Windows ARM64)
+    if: ${{ github.repository == 'microsoft/aspire' }}
     uses: ./.github/workflows/build-cli-native-archives.yml
     with:
       versionOverrideArg: ${{ inputs.versionOverrideArg }}
@@ -294,6 +299,7 @@ jobs:
 
   build_cli_archive_macos:
     name: Build native CLI archive (macOS)
+    if: ${{ github.repository == 'microsoft/aspire' }}
     uses: ./.github/workflows/build-cli-native-archives.yml
     with:
       versionOverrideArg: ${{ inputs.versionOverrideArg }}
@@ -301,6 +307,7 @@ jobs:
 
   build_cli_archive_macos_x64:
     name: Build native CLI archive (macOS x64)
+    if: ${{ github.repository == 'microsoft/aspire' }}
     uses: ./.github/workflows/build-cli-native-archives.yml
     with:
       versionOverrideArg: ${{ inputs.versionOverrideArg }}
