@@ -109,10 +109,14 @@ data-access boundaries. Storage accounts created by Aspire enable SMB OAuth and 
 key authentication. Existing storage accounts and file shares are not modified and must already
 meet those authentication requirements.
 
-Azure infrastructure deployments are incremental. Removing a persistent volume or retargeting
-it to another storage account does not remove its previous managed identity or role assignment.
-Remove those resources explicitly, or run `aspire destroy` when the application owns the
-deployment resource group.
+Kubernetes does not allow the backing source of a deployed persistent volume to be changed in
+place. To move a workload to another file share, create a persistent-volume resource with a
+different name, migrate the data, and update the workload to use the new volume.
+
+Azure infrastructure deployments are incremental. Removing a persistent volume or one of its
+workload bindings does not remove previously provisioned managed identities, role assignments,
+or federated credentials. Remove those resources explicitly, or run `aspire destroy` when the
+application owns the deployment resource group.
 
 ## Additional documentation
 

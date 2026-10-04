@@ -100,9 +100,15 @@ public static class AzureKubernetesPersistentVolumeExtensions
     /// those settings configured.
     /// </para>
     /// <para>
-    /// Azure infrastructure deployments are incremental. Removing the persistent volume or
-    /// retargeting it to another storage account does not delete the previously provisioned
-    /// identity or role assignment. Remove those resources explicitly, or use
+    /// Kubernetes does not allow the backing source of a deployed persistent volume to be
+    /// changed in place. To move a workload to another file share, create a persistent-volume
+    /// resource with a different name, migrate the data, and update the workload to use the new
+    /// volume.
+    /// </para>
+    /// <para>
+    /// Azure infrastructure deployments are incremental. Removing a persistent volume or one
+    /// of its workload bindings does not delete previously provisioned identities, role
+    /// assignments, or federated credentials. Remove those resources explicitly, or use
     /// <c>aspire destroy</c> when the deployment resource group is owned by the application.
     /// </para>
     /// </remarks>
