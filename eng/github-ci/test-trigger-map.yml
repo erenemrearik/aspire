@@ -272,10 +272,12 @@ path_rules:
   # narrow sub-paths, non-compiled baselines) remain here.
   - paths:
       - tests/PolyglotAppHosts/**
+      - playground/TsIntegrationSpike/**
+      - playground/TsKafkaLib/**
       - .github/workflows/polyglot-validation/**
       - .github/workflows/polyglot-validation.yml
     targets: [job:polyglot]
-    reason: polyglot fixtures + workflow; the typesystem/SDK/CLI/codegen production projects are in affected_project_rules
+    reason: polyglot fixtures, TypeScript integration playgrounds, and validation workflow inputs
   - paths:
       - src/Aspire.Hosting.Blazor/Aspire.Hosting.Blazor.csproj
       - src/Aspire.Hosting.Blazor/BlazorGatewayExtensions.cs

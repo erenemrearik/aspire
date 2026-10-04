@@ -13,6 +13,171 @@ namespace Aspire.Hosting.RemoteHost.Tests;
 
 public class ExternalCapabilityRegistryTests
 {
+    [Fact]
+    public async Task Registration_RequiresTheExpectedAttemptAndRejectsDuplicates()
+    {
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        using var connection = new IntegrationHostTestConnection(CreateCapabilities("test.external/value"));
+        var registration = registry.ExpectHostRegistration("attempt");
+
+        Assert.Throws<InvalidOperationException>(() => registry.AddIntegrationHost("unknown", connection.ServerRpc));
+        Assert.False(registration.IsCompleted);
+        registry.AddIntegrationHost("attempt", connection.ServerRpc);
+        Assert.Same(connection.ServerRpc, await registration);
+        Assert.Throws<InvalidOperationException>(() => registry.AddIntegrationHost("attempt", connection.ServerRpc));
+        Assert.Equal(1, await registry.WaitForHostsAsync(1, TimeSpan.Zero, TestContext.Current.CancellationToken));
+        Assert.Equal(0, await registry.WaitForHostsAsync(1, TimeSpan.Zero, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Registration_ExpiredAttemptCannotRegisterForItsReplacement()
+    {
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        using var connection = new IntegrationHostTestConnection(CreateCapabilities("test.external/value"));
+        _ = registry.ExpectHostRegistration("old");
+        registry.ForgetHostRegistration("old");
+        var replacement = registry.ExpectHostRegistration("replacement");
+
+        Assert.Throws<InvalidOperationException>(() => registry.AddIntegrationHost("old", connection.ServerRpc));
+        Assert.False(replacement.IsCompleted);
+        registry.AddIntegrationHost("replacement", connection.ServerRpc);
+        Assert.Same(connection.ServerRpc, await replacement);
+    }
+
+    [Fact]
+    public async Task ReplaceHostAsync_RediscoveryRoutesOnlyTheRecoveredHostsCapabilities()
+    {
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        using var original = new IntegrationHostTestConnection(CreateCapabilities("test.external/value"),
+            (_, _) => Task.FromResult<JsonNode?>(JsonValue.Create("original")));
+        using var other = new IntegrationHostTestConnection(CreateCapabilities("test.external/other"),
+            (_, _) => Task.FromResult<JsonNode?>(JsonValue.Create("other")));
+        using var replacement = new IntegrationHostTestConnection(CreateCapabilities("test.external/value"),
+            (_, _) => Task.FromResult<JsonNode?>(JsonValue.Create("replacement")));
+        registry.AddIntegrationHost(original.ServerRpc);
+        registry.AddIntegrationHost(other.ServerRpc);
+        await registry.InitializeAllHostsAsync(2, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        registry.MarkHostUnavailable(original.ServerRpc);
+
+        var unavailable = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => registry.TryInvokeAsync("test.external/value", null));
+        Assert.Equal("The integration host providing 'test.external/value' is restarting. Retry after it has registered again.", unavailable.Message);
+        registry.AddIntegrationHost(replacement.ServerRpc);
+        await registry.ReplaceHostAsync(original.ServerRpc, replacement.ServerRpc, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.Equal("replacement", (await registry.TryInvokeAsync("test.external/value", null)).Result!.GetValue<string>());
+        Assert.Equal("other", (await registry.TryInvokeAsync("test.external/other", null)).Result!.GetValue<string>());
+        Assert.Collection(registry.AugmentContext(CreateContext()).Capabilities,
+            cap => Assert.Equal("test.external/other", cap.CapabilityId),
+            cap => Assert.Equal("test.external/value", cap.CapabilityId));
+    }
+
+    [Theory]
+    [InlineData("test.external/different", "externalMethod", "string")]
+    [InlineData("test.external/value", "differentMethod", "string")]
+    [InlineData("test.external/value", "externalMethod", "int")]
+    public async Task ReplaceHostAsync_RejectsChangedProjectionWithoutPublishing(string id, string method, string typeId)
+    {
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        using var original = new IntegrationHostTestConnection(CreateCapabilities("test.external/value"));
+        using var replacement = new IntegrationHostTestConnection(JsonSerializer.SerializeToElement(new
+        {
+            capabilities = new[] { new { id, method, returnType = new { typeId, category = "Primitive" } } }
+        }));
+        registry.AddIntegrationHost(original.ServerRpc);
+        await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        registry.MarkHostUnavailable(original.ServerRpc);
+        registry.AddIntegrationHost(replacement.ServerRpc);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.ReplaceHostAsync(
+            original.ServerRpc, replacement.ServerRpc, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+
+        Assert.StartsWith("The restarted integration host changed its capability signatures.", error.Message);
+        var capability = Assert.Single(registry.AugmentContext(CreateContext()).Capabilities);
+        Assert.Equal("test.external/value", capability.CapabilityId);
+        Assert.Equal("externalMethod", capability.MethodName);
+        Assert.Equal("string", capability.ReturnType!.TypeId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => registry.TryInvokeAsync("test.external/value", null));
+    }
+
+    [Fact]
+    public async Task ReplaceHostAsync_TimesOutWithoutChangingThePublishedMetadata()
+    {
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        using var original = new IntegrationHostTestConnection(CreateCapabilities("test.external/value"));
+        var response = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var replacement = new IntegrationHostTestConnection(_ => response.Task);
+        registry.AddIntegrationHost(original.ServerRpc);
+        await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        registry.MarkHostUnavailable(original.ServerRpc);
+        try
+        {
+            await Assert.ThrowsAsync<TimeoutException>(() => registry.ReplaceHostAsync(
+                original.ServerRpc, replacement.ServerRpc, TimeSpan.Zero, TestContext.Current.CancellationToken));
+            Assert.Equal("test.external/value", Assert.Single(registry.AugmentContext(CreateContext()).Capabilities).CapabilityId);
+        }
+        finally
+        {
+            response.TrySetResult(CreateCapabilities("test.external/value"));
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceHostAsync_ConcurrentRecoveriesPreserveBothHosts()
+    {
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        using var first = new IntegrationHostTestConnection(CreateCapabilities("test.external/first"));
+        using var second = new IntegrationHostTestConnection(CreateCapabilities("test.external/second"));
+        using var firstReplacement = new IntegrationHostTestConnection(CreateCapabilities("test.external/first"),
+            (_, _) => Task.FromResult<JsonNode?>(JsonValue.Create("first-replacement")));
+        using var secondReplacement = new IntegrationHostTestConnection(CreateCapabilities("test.external/second"),
+            (_, _) => Task.FromResult<JsonNode?>(JsonValue.Create("second-replacement")));
+        registry.AddIntegrationHost(first.ServerRpc);
+        registry.AddIntegrationHost(second.ServerRpc);
+        await registry.InitializeAllHostsAsync(2, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        registry.MarkHostUnavailable(first.ServerRpc);
+        registry.MarkHostUnavailable(second.ServerRpc);
+        registry.AddIntegrationHost(firstReplacement.ServerRpc);
+        registry.AddIntegrationHost(secondReplacement.ServerRpc);
+
+        await Task.WhenAll(
+            registry.ReplaceHostAsync(first.ServerRpc, firstReplacement.ServerRpc, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken),
+            registry.ReplaceHostAsync(second.ServerRpc, secondReplacement.ServerRpc, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+
+        Assert.Equal("first-replacement", (await registry.TryInvokeAsync("test.external/first", null)).Result!.GetValue<string>());
+        Assert.Equal("second-replacement", (await registry.TryInvokeAsync("test.external/second", null)).Result!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Stop_CancelsPendingInvocationAndRemovesItsCallbackOwner()
+    {
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        var request = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var response = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var connection = new IntegrationHostTestConnection(CreateCallbackCapabilities(), (_, args) =>
+        {
+            request.TrySetResult(args!["configure"]!.GetValue<string>());
+            return response.Task;
+        });
+        registry.AddIntegrationHost(connection.ServerRpc);
+        await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        var invocation = registry.TryInvokeAsync("test.external/callback",
+            new JsonObject { ["configure"] = "guest_callback" }, new JsonRpcCallbackInvoker());
+        try
+        {
+            var relayId = await request.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            registry.Stop();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                invocation.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            Assert.Null(registry.ResolveCallbackOwner(relayId));
+        }
+        finally
+        {
+            response.TrySetResult(null);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -30,7 +195,7 @@ public class ExternalCapabilityRegistryTests
         });
         var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         registry.AddIntegrationHost(connection.ServerRpc);
-        await registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         var firstOwner = new JsonRpcCallbackInvoker();
         var secondOwner = sameGuest ? firstOwner : new JsonRpcCallbackInvoker();
@@ -77,7 +242,7 @@ public class ExternalCapabilityRegistryTests
         });
         var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         registry.AddIntegrationHost(connection.ServerRpc);
-        await registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         await Assert.ThrowsAsync<RemoteInvocationException>(() => registry.TryInvokeAsync(
             "test.external/callback",
@@ -103,7 +268,7 @@ public class ExternalCapabilityRegistryTests
         registry.AddIntegrationHost(connection.ServerRpc);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
 
-        var initialization = registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(30), cancellation.Token);
+        var initialization = registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(30), cancellation.Token);
         try
         {
             await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
@@ -134,7 +299,7 @@ public class ExternalCapabilityRegistryTests
             // An already-expired timeout makes this deterministic without a clock or
             // sleeps. The RPC response cannot win the race because its task stays pending.
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                registry.InitializeAllHostsAsync(TimeSpan.Zero, TestContext.Current.CancellationToken)
+                registry.InitializeAllHostsAsync(1, TimeSpan.Zero, TestContext.Current.CancellationToken)
                     .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 
             Assert.IsType<TimeoutException>(exception.InnerException);
@@ -145,6 +310,25 @@ public class ExternalCapabilityRegistryTests
         finally
         {
             response.TrySetResult(CreateCapabilities("test.external/pending"));
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAllHostsAsync_RejectsMalformedCapabilityPayloads()
+    {
+        foreach (var json in new[] { "null", "{}", "{\"capabilities\":null}", "{\"capabilities\":{}}", "{\"capabilities\":42}" })
+        {
+            using var payload = JsonDocument.Parse(json);
+            using var connection = new IntegrationHostTestConnection(payload.RootElement);
+            using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+            registry.AddIntegrationHost(connection.ServerRpc);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+
+            Assert.IsType<JsonException>(exception.InnerException);
+            var augmentationException = Assert.Throws<InvalidOperationException>(() => registry.AugmentContext(CreateContext()));
+            Assert.Same(exception, augmentationException.InnerException);
         }
     }
 
@@ -160,7 +344,7 @@ public class ExternalCapabilityRegistryTests
         registry.AddIntegrationHost(successfulConnection.ServerRpc);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            registry.InitializeAllHostsAsync(2, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 
         Assert.IsType<RemoteInvocationException>(exception.InnerException);
         Assert.False(registry.IsRegistered("test.external/partial"));
@@ -186,7 +370,7 @@ public class ExternalCapabilityRegistryTests
         }
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            registry.InitializeAllHostsAsync(differentHosts ? 2 : 1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 
         Assert.Contains("Capability ID 'test.external/shared' is provided by multiple external registrations", exception.Message);
         Assert.False(registry.IsRegistered("test.external/first"));
@@ -206,11 +390,11 @@ public class ExternalCapabilityRegistryTests
             CreateCapabilities("test.external/new", "test.external/existing"));
         var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         registry.AddIntegrationHost(firstConnection.ServerRpc);
-        await registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         registry.AddIntegrationHost(secondConnection.ServerRpc);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            registry.InitializeAllHostsAsync(2, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 
         Assert.True(registry.IsRegistered("test.external/existing"));
         Assert.False(registry.IsRegistered("test.external/new"));
@@ -227,7 +411,7 @@ public class ExternalCapabilityRegistryTests
         using var connection = new IntegrationHostTestConnection(payload);
         var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         registry.AddIntegrationHost(connection.ServerRpc);
-        await registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         var managedCapability = new AtsCapabilityInfo
         {
             CapabilityId = "test.managed/shared",
@@ -253,7 +437,7 @@ public class ExternalCapabilityRegistryTests
         var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         registry.AddIntegrationHost(firstConnection.ServerRpc);
         registry.AddIntegrationHost(secondConnection.ServerRpc);
-        await registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await registry.InitializeAllHostsAsync(2, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         var managedCapability = new AtsCapabilityInfo
         {
             CapabilityId = "test.managed/z",
@@ -289,7 +473,7 @@ public class ExternalCapabilityRegistryTests
         using var connection = new IntegrationHostTestConnection(payload.RootElement);
         var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         registry.AddIntegrationHost(connection.ServerRpc);
-        await registry.InitializeAllHostsAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         var context = new AtsContext
         {

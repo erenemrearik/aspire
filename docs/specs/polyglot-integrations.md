@@ -237,20 +237,32 @@ Three components participate in every AppHost run. Their responsibilities are de
 
 - Scans loaded .NET assemblies for `[AspireExport]` and related type exports. Same as today.
 - **Reads non-.NET integrations** from its own `appsettings.json`, under an `IntegrationHosts` section the CLI writes during server-project generation. Each entry carries a `Language`, `PackageName`, and `HostEntryPoint` path. No runtime RPC call; no manifest walk.
-- **Spawns integration host processes itself** — the symmetric counterpart to loading a .NET integration into an in-process load context. For each listed host, the server looks up the language's provider, probes its optional JSON `GetIntegrationHostSpec()` hook to get the `execute` command template, substitutes `{entryPoint}`, starts the process, passes `REMOTE_APP_HOST_SOCKET_PATH` + the auth token via env, captures stdout/stderr into server logs, and holds the `Process` handle in its own registry.
+- **Spawns and supervises integration host processes itself**. For each listed host, the server probes the language provider's `GetIntegrationHostSpec()` hook, substitutes `{entryPoint}`, and starts an isolated guardian using its own server executable. The guardian launches the runtime and monitors the server's PID and start time independently of integration code. The server passes the socket path, auth token, and a fresh `ASPIRE_INTEGRATION_HOST_REGISTRATION_ID` for each launch attempt; captures stdout/stderr into server logs; and owns the guardian's process scope.
 - Accepts inbound connections from the hosts it spawned, registers each via a per-host signal (`registerAsIntegrationHost`), waits for every expected host to register (per-host timeout), runs the metadata gathering phase (`getCapabilities` on every registered host), merges capabilities into `AtsContext`, then unblocks codegen.
 - Routes runtime calls from the guest AppHost through `CapabilityDispatcher` — a direct method call for a .NET integration, a JSON-RPC forward for an out-of-process integration host. One dispatch path, two delivery mechanisms decided by the target.
-- Tears down every integration host process it spawned when the server itself stops — same shutdown hook that disposes .NET integration load contexts.
+- Restarts a host that exits or disconnects after discovery, then rediscovers its capabilities. Replacement capability IDs and projection signatures must match the generated SDK; descriptions can change. Calls already in flight fail and are never replayed, because they may have mutated resources. Calls during recovery explicitly report that the integration is restarting.
+- Recovery preserves server-owned handles, not process-local state. Integrations must rebuild their own runtime state during startup. Captured host-side closures registered before a crash are not transparently rebound to the replacement process.
+- Handles use opaque, cryptographically random 128-bit IDs. Passing a handle delegates access to that object across RPC connections; an authenticated integration cannot enumerate other connections' objects by guessing sequential IDs. This is a capability boundary, not a sandbox for integration code running locally.
+- Allows three recovery attempts with 1-, 2-, and 4-second backoff. A replacement must remain healthy for one minute before its restart budget resets, preventing rapid crash loops from retrying indefinitely. Exhausted recovery or failed process cleanup stops the session and surfaces a server failure to the CLI.
+- Tears down every integration host scope when the server stops: closes RPC connections, cancels pending invocations, allows five seconds for graceful exit, then terminates remaining processes and waits for exit and diagnostic-stream completion before releasing handles. A replacement is never started before the previous scope has been cleaned up.
 
 **Integration host** — a thin runtime process per language, loaded like a .NET assembly would be.
 
 - Started by the server (not the CLI) with the socket path and auth token in its environment.
-- Connects back to the server over the provided socket, authenticates, calls `registerAsIntegrationHost` with its host identity and the integration IDs it owns.
+- Connects back to the server over the provided socket, authenticates, and calls `registerAsIntegrationHost(registrationId)` with the attempt identity supplied in its environment. Unknown, expired, and duplicate attempt identities are rejected.
 - Answers `getCapabilities` with the full set of capabilities its loaded integrations provide.
 - Handles inbound `handleExternalCapability` calls at runtime and dispatches to the right integration function.
 - Exits when the server closes its connection or the host process receives a shutdown signal from the server.
 
 **The symmetry with .NET is the whole point.** For a .NET integration, the server loads the assembly into a dedicated `AssemblyLoadContext`, scans it for `[AspireExport]`, holds references to the resulting capability handlers, calls them via direct method invocation, and disposes the load context when it stops. For a TypeScript integration, the server detects the package, spawns a Node process as the "load context", scans it via `getCapabilities`, holds a `JsonRpc` reference, calls handlers via `handleExternalCapability`, and terminates the process when it stops. Same lifecycle hooks, same ownership, same mental model — only the execution environment differs.
+
+### Process containment
+
+Ownership is not the same as the OS parent tree. On Unix, the guardian establishes a new session and process group before launching the runtime. Both the guardian and the server can terminate that group even if an npm wrapper has already exited and its descendants have been reparented. On Windows, the guardian enrolls itself in a kill-on-close job before spawning the runtime; descendants inherit the job without a breakaway allowance. Killing the guardian therefore tears down its workers as well.
+
+The guardian's server-liveness monitor runs in a separate process, so a blocked integration event loop cannot prevent cleanup after server death. Socket-close and signal handlers in the host runtime are cooperative graceful-shutdown mechanisms, not the sole orphan protection. Host-created workers must remain inside their process scope; intentionally escaping containment is unsupported.
+
+Application executables and containers created through the hosting model belong to DCP, not to the integration host's process scope. Container deletion is performed through the container runtime. Explicitly persistent containers can intentionally survive a session and are not accidental orphans.
 
 ---
 
@@ -378,7 +390,7 @@ Process grouping — collapsing multiple integrations into a single host process
 
 Consequences for the registry and dispatcher that are already in place:
 
-- **Registration is signalled per host.** `registerAsIntegrationHost` carries host identity and the integration IDs the host owns. The registry routes dispatched calls to the right host when the same method name appears under different integrations.
+- **Registration is signalled per attempt.** `registerAsIntegrationHost(registrationId)` carries the server-issued launch identity. Capability discovery supplies the integration capability IDs. A late connection from an expired attempt cannot satisfy a replacement's registration.
 - **Startup is parallel.** The server launches hosts concurrently and waits on a counting semaphore that releases once per registration, with per-host timeouts, rather than a blind fixed delay.
 - **Failures are isolated.** A host that fails to start or register fails fast for its own integrations without taking down the other hosts; the server surfaces per-host errors through the same diagnostics channel it uses for .NET integration load failures (exit watcher, piped stdio tagged `IntegrationHost[<name>]`, registration-timeout error with an actionable message).
 
@@ -484,7 +496,7 @@ the current TypeScript AppHost layout. They inherit the executing CLI's SDK vers
 and channel instead of pinning an older PR build. Run them with this spike's CLI;
 a stock CLI does not understand npm integration-host declarations.
 
-The CLI restores integration-host npm dependencies before starting an AppHost server.
+The CLI generates the core SDK before restoring integration-host npm dependencies.
 For npm integrations, `aspire restore`, `aspire run`, and `aspire publish` use
 two separately disposed `IAppHostServerSession` instances:
 the first explicitly disables integration-host startup using the internal
@@ -492,10 +504,17 @@ the first explicitly disables integration-host startup using the internal
 installs the AppHost's dependencies. This
 must happen before the second session: the generated transport imports packages
 such as `vscode-jsonrpc` from the AppHost's `node_modules`, not the integration
-host's dependencies. The second session starts those hosts and generates the
+host's dependencies. Only after that core SDK exists does the CLI run integration-host
+`npm install`, so `prepare` and `postinstall` scripts can compile their ATS imports.
+The second session starts those hosts and generates the
 combined SDK. A failed dependency installation aborts before the second session.
 Run and publish then continue without reinstalling AppHost dependencies. Each
 session uses the current `Create`/`StartAsync` lifecycle and propagates cancellation.
+
+CI's TypeScript polyglot validation restores and typechecks both
+`playground/TsIntegrationSpike` and `playground/TsKafkaLib`, including the reusable
+library's independent SDK and its consumer's generated API. Validation uses temporary
+copies so restore does not change the checked-in inputs.
 
 In repository mode, `IntegrationHosts` participates in the AppHost server scaffold
 fingerprint along with `AtsAssemblies`. An unchanged host configuration preserves
@@ -505,13 +524,13 @@ integrations are restored from local projects or npm hosts.
 
 ### Server startup
 
-1. CLI parses `aspire.config.json`, resolves each `PackageEntry` to an `IntegrationReference`, and runs per-source restore — `dotnet build` on the generated server csproj for NuGet and project references, `npm install` (and future `pip install`, etc.) for non-.NET integration hosts so their dependencies are on disk before the server starts.
+1. CLI parses `aspire.config.json`, resolves each `PackageEntry` to an `IntegrationReference`, and prepares the managed server and its .NET integrations. For npm hosts, it first generates the core SDK and installs the AppHost's dependencies, then runs integration-host `npm install` so lifecycle scripts can compile their ATS imports before the final server starts.
 2. CLI writes the AppHost server's `appsettings.json` with two sections: `AtsAssemblies` (for CLR reflection) and `IntegrationHosts` (one entry per non-.NET integration, carrying `Language`, `PackageName`, `HostEntryPoint`).
 3. CLI starts the AppHost server process. The server reads `appsettings.json` and runs its integration-listing phase:
    - CLR assembly scanning populates `.NET` integrations into an in-process `AssemblyLoadContext`.
    - For each `IntegrationHosts` entry, the server looks up the language via `LanguageSupportResolver.GetLanguageSupport(language)` and reflectively probes its optional JSON `GetIntegrationHostSpec()` hook for the `execute` command template. A provider without the hook, or returning JSON null, can't host integrations, and startup fails with a clear diagnostic.
-4. The server spawns each integration host process directly, substituting `{entryPoint}` into the command args, passing `REMOTE_APP_HOST_SOCKET_PATH` and the auth token via env vars. It captures stdout/stderr into its own logs and holds the `Process` handles in its internal registry — the same way it holds references to .NET integration load contexts.
-5. Each spawned host connects back over the socket, authenticates, and calls `registerAsIntegrationHost`. The server waits on a counting-semaphore signal released once per registration, allowing up to two minutes per host for cold runtime startup. A timeout or early process exit fails startup instead of freezing an incomplete SDK.
+4. The server starts an isolated guardian for each integration host, substituting `{entryPoint}` into the runtime command args and passing the socket path, auth token, and fresh launch registration identity through the environment. The guardian launches the runtime; the server owns its process scope and captures its diagnostics.
+5. Each spawned host connects back, authenticates, and calls `registerAsIntegrationHost(registrationId)`. The server waits for every expected registration, allowing up to two minutes per host for cold runtime startup. A timeout or early process exit fails startup instead of freezing an incomplete SDK.
 6. Phase 1 gather: the server calls `getCapabilities` on every registered host (and on the in-process .NET "host" directly) and merges the results into `AtsContext`. Discovery has a two-minute per-host timeout; failed discovery also fails startup and blocks code generation.
 7. Phase 2 codegen runs over the merged context and produces the guest-language SDK (`.aspire/modules/`). The readiness gate ensures codegen never runs before every expected host has registered.
 8. The server signals ready. The CLI invokes the guest AppHost.

@@ -22,7 +22,7 @@ public sealed class JsonRpcAuthenticationTests(ITestOutputHelper outputHelper)
     {
         { "cancelToken", ["ct_missing"] },
         { "invokeCapability", ["test-capability", null] },
-        { "registerAsIntegrationHost", [] },
+        { "registerAsIntegrationHost", ["registration"] },
         { "invokeGuestCallback", ["callback", null] },
         { "getCapabilities", [] },
         { "generateCode", ["TypeScript"] },

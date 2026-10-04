@@ -195,24 +195,18 @@ internal sealed class RemoteAppHostService
     /// The engine will later call getCapabilities on it to discover capabilities.
     /// </summary>
     [JsonRpcMethod("registerAsIntegrationHost")]
-    public bool RegisterAsIntegrationHost()
+    public bool RegisterAsIntegrationHost(string registrationId)
     {
         _authenticationState.ThrowIfNotAuthenticated();
 
         if (_clientRpc is null)
         {
-            return false;
+            throw new InvalidOperationException("An integration host must register on an active RPC connection.");
         }
 
-        _externalCapabilityRegistry.AddIntegrationHost(_clientRpc);
+        _externalCapabilityRegistry.AddIntegrationHost(registrationId, _clientRpc);
         return true;
     }
-
-    // initializeIntegrationHosts RPC removed: the AppHost server now reads its IntegrationHosts
-    // list from appsettings.json (written by the CLI's csproj generation step) and the
-    // IntegrationHostLauncher's StartAsync spawns + initializes them as part of server boot,
-    // before any guest connects. Symmetric with how .NET integrations are loaded — the server
-    // gets its full integration set from its own startup config, not from a runtime RPC.
 
     /// <summary>
     /// Invokes a guest-owned callback on behalf of an integration host.

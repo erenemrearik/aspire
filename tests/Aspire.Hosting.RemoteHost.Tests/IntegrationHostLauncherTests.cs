@@ -1,13 +1,13 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Diagnostics;
 using System.Text.Json;
 using Aspire.Hosting.RemoteHost.Ats;
 using Aspire.Hosting.RemoteHost.Language;
+using Aspire.TypeSystem;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting.Internal;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -28,6 +28,7 @@ public class IntegrationHostLauncherTests
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
             new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance),
             configuration,
+            new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance),
             NullLogger<IntegrationHostLauncher>.Instance);
 
         await launcher.StartAsync(TestContext.Current.CancellationToken);
@@ -47,6 +48,7 @@ public class IntegrationHostLauncherTests
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
             new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance),
             configuration,
+            new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance),
             NullLogger<IntegrationHostLauncher>.Instance);
 
         var startupException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -64,7 +66,8 @@ public class IntegrationHostLauncherTests
         var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         var launcher = new IntegrationHostLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
-            registry, new ConfigurationBuilder().Build(), NullLogger<IntegrationHostLauncher>.Instance);
+            registry, new ConfigurationBuilder().Build(),
+            new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance), NullLogger<IntegrationHostLauncher>.Instance);
         var discoveryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var firstConnection = new IntegrationHostTestConnection(_ =>
         {
@@ -94,7 +97,8 @@ public class IntegrationHostLauncherTests
         var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         var launcher = new IntegrationHostLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
-            registry, new ConfigurationBuilder().Build(), NullLogger<IntegrationHostLauncher>.Instance);
+            registry, new ConfigurationBuilder().Build(),
+            new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance), NullLogger<IntegrationHostLauncher>.Instance);
         using var connection = new IntegrationHostTestConnection(
             JsonSerializer.SerializeToElement(new[] { new { id = "test/partial" } }));
         registry.AddIntegrationHost(connection.ServerRpc);
@@ -107,13 +111,43 @@ public class IntegrationHostLauncherTests
     }
 
     [Fact]
+    public async Task InitializeHostsAsync_DisconnectedRegistrationCannotPublishPartialCapabilities()
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        await using var launcher = new IntegrationHostLauncher(
+            new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
+            registry, new ConfigurationBuilder().Build(),
+            new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance), NullLogger<IntegrationHostLauncher>.Instance);
+        using var connection = new IntegrationHostTestConnection(
+            JsonSerializer.SerializeToElement(new[] { new { id = "test/partial" } }));
+        registry.AddIntegrationHost(connection.ServerRpc);
+        registry.MarkHostUnavailable(connection.ServerRpc);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            launcher.InitializeHostsAsync(1, TimeSpan.Zero, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+
+        Assert.Equal("Only 0 of 1 integration hosts remain connected for capability discovery.", exception.Message);
+        Assert.Throws<InvalidOperationException>(() => registry.AugmentContext(new AtsContext
+        {
+            Capabilities = [],
+            HandleTypes = [],
+            DtoTypes = [],
+            EnumTypes = [],
+            ExportedValues = [],
+            Diagnostics = []
+        }));
+    }
+
+    [Fact]
     public async Task InitializeHostsAsync_CancellationStopsWaitingForRegistration()
     {
         using var services = new ServiceCollection().BuildServiceProvider();
         var launcher = new IntegrationHostLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
             new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance),
-            new ConfigurationBuilder().Build(), NullLogger<IntegrationHostLauncher>.Instance);
+            new ConfigurationBuilder().Build(),
+            new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance), NullLogger<IntegrationHostLauncher>.Instance);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
 
         var initialization = launcher.InitializeHostsAsync(
@@ -122,29 +156,6 @@ public class IntegrationHostLauncherTests
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => initialization);
-    }
-
-    [Fact]
-    public void LogProcessExit_AfterShutdownDisposesProcess_DoesNotThrow()
-    {
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var resolver = new LanguageSupportResolver(
-            services, () => [], NullLogger<LanguageSupportResolver>.Instance);
-        var logger = new RecordingLogger<IntegrationHostLauncher>();
-        var launcher = new IntegrationHostLauncher(
-            resolver,
-            new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance),
-            new ConfigurationBuilder().Build(),
-            logger);
-        using var process = new Process();
-        process.Dispose();
-
-        launcher.LogProcessExit(process, 42, "test-integration", "host.mts");
-
-        var entry = Assert.Single(logger.Entries);
-        Assert.Equal(LogLevel.Debug, entry.Level);
-        Assert.Equal("Exit observer for integration host 'test-integration' (PID 42) stopped.", entry.Message);
-        Assert.IsAssignableFrom<InvalidOperationException>(entry.Exception);
     }
 
     [Fact]

@@ -51,10 +51,10 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
 {
     const log = (message: string) => console.log(`[${host.packageName}] ${message}`);
     const socketPath = process.env.REMOTE_APP_HOST_SOCKET_PATH;
+    const registrationId = process.env.ASPIRE_INTEGRATION_HOST_REGISTRATION_ID;
 
-    if (!socketPath) {
-        console.error("ERROR: REMOTE_APP_HOST_SOCKET_PATH not set");
-        console.error("Start the AppHost Server first, then set the env var.");
+    if (!socketPath || !registrationId) {
+        console.error("ERROR: Integration hosts must be launched by the AppHost server.");
         process.exit(1);
     }
 
@@ -65,6 +65,10 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
     log(`Connecting to engine: ${connectPath}`);
 
     const socket = net.createConnection(connectPath);
+    socket.on('close', () => {
+        log("Engine disconnected, shutting down");
+        process.exit(0);
+    });
     await new Promise<void>((resolve, reject) => {
         socket.once('connect', resolve);
         socket.once('error', reject);
@@ -75,6 +79,15 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
         new StreamMessageWriter(socket),
         undefined,
         { cancellationStrategy: undefined });
+
+    const shutdown = () => {
+        log("Shutting down");
+        connection.dispose();
+        socket.destroy();
+        process.exit(0);
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
 
     connection.onError(error => {
         console.error(`[${host.packageName}] Connection error:`, error);
@@ -218,20 +231,8 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
         };
     });
 
-    await connection.sendRequest<boolean>('registerAsIntegrationHost');
+    await connection.sendRequest<boolean>('registerAsIntegrationHost', registrationId);
     log(`Registered integrations: ${host.integrations.map(integration => integration.name).join(', ')}`);
-
-    process.on('SIGINT', () => {
-        log("Shutting down");
-        connection.dispose();
-        socket.destroy();
-        process.exit(0);
-    });
-
-    socket.on('close', () => {
-        log("Engine disconnected, shutting down");
-        process.exit(0);
-    });
 }
 
 function isRemoteHandle(value: unknown): value is RemoteHandle

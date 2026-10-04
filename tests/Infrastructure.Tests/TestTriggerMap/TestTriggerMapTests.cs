@@ -716,15 +716,27 @@ public sealed class TestTriggerMapTests
         },
         {
             "playground/TsIntegrationSpike/deno-api/deno.json",
-            ["test:Aspire.Playground.Tests", "job:typescript-sdk"]
+            ["test:Aspire.Playground.Tests", "job:polyglot", "job:typescript-sdk"]
         },
         {
             "playground/TsIntegrationSpike/deno-integration/integration.ts",
-            ["test:Aspire.Playground.Tests", "job:typescript-sdk"]
+            ["test:Aspire.Playground.Tests", "job:polyglot", "job:typescript-sdk"]
         },
         {
             "playground/TsIntegrationSpike/kafka-integration/host-runtime.ts",
-            ["test:Aspire.Playground.Tests", "job:typescript-sdk"]
+            ["test:Aspire.Playground.Tests", "job:polyglot", "job:typescript-sdk"]
+        },
+        {
+            "playground/TsIntegrationSpike/aspire.config.json",
+            ["test:Aspire.Playground.Tests", "job:polyglot"]
+        },
+        {
+            "playground/TsKafkaLib/packages/aspire-kafka/src/index.ts",
+            ["test:Aspire.Playground.Tests", "job:polyglot"]
+        },
+        {
+            "playground/TsKafkaLib/app/tsconfig.json",
+            ["test:Aspire.Playground.Tests", "job:polyglot"]
         },
         {
             ".gitignore",

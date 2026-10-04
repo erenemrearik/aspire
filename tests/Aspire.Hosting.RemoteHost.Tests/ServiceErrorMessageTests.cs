@@ -158,6 +158,8 @@ public class ServiceErrorMessageTests
             languageResolver,
             externalCapabilityRegistry,
             configuration,
+            new Microsoft.Extensions.Hosting.Internal.ApplicationLifetime(
+                NullLogger<Microsoft.Extensions.Hosting.Internal.ApplicationLifetime>.Instance),
             NullLogger<IntegrationHostLauncher>.Instance);
         launcher.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
         return launcher;

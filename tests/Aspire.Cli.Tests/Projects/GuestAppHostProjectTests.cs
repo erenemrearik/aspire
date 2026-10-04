@@ -62,7 +62,7 @@ public class GuestAppHostProjectTests : IDisposable
     [InlineData("publish", 0, 0)]
     [InlineData("publish", 4, 0)]
     [InlineData("publish", 0, 3)]
-    public async Task NpmIntegrationHosts_BootstrapBeforeFinalServer(string operation, int hostInstallExitCode, int guestInstallExitCode)
+    public async Task NpmIntegrationHosts_GenerateCoreSdkBeforeLifecycleScriptsAndFinalServer(string operation, int hostInstallExitCode, int guestInstallExitCode)
     {
         var root = _workspace.WorkspaceRoot;
         var appDirectory = root.CreateSubdirectory("app");
@@ -81,11 +81,13 @@ public class GuestAppHostProjectTests : IDisposable
         ProcessTestHelpers.CreateScript(
             binDirectory, "npm",
             $$"""
+            test -f ../app/.aspire/modules/aspire.mts || exit 91
             printf installed > installed.txt
             exit {{hostInstallExitCode}}
             """,
             $$"""
             @echo off
+            if not exist ..\app\.aspire\modules\aspire.mts exit /b 91
             > installed.txt echo installed
             exit /b {{hostInstallExitCode}}
             """);
@@ -107,7 +109,7 @@ public class GuestAppHostProjectTests : IDisposable
 
         var sessionCount = 0;
         var generationCount = 0;
-        var hostRestoredBeforeBootstrap = false;
+        var hostRestoredBeforeBootstrap = true;
         var bootstrapCompletedBeforeFinalServer = false;
         FakeAppHostServerSession? bootstrapSession = null;
         var rpcClient = new FakeAppHostRpcClient
@@ -146,7 +148,8 @@ public class GuestAppHostProjectTests : IDisposable
                 }
 
                 bootstrapCompletedBeforeFinalServer = bootstrapSession?.HasServerExited == true
-                    && File.Exists(Path.Combine(appDirectory.FullName, "app-installed.txt"));
+                    && File.Exists(Path.Combine(appDirectory.FullName, "app-installed.txt"))
+                    && File.Exists(Path.Combine(integrationDirectory.FullName, "installed.txt"));
                 return operation == "restore"
                     ? new FakeAppHostServerSession(rpcClient)
                     : new FakeAppHostServerSession
@@ -195,8 +198,9 @@ public class GuestAppHostProjectTests : IDisposable
         }
 
         var installsSucceeded = hostInstallExitCode == 0 && guestInstallExitCode == 0;
-        Assert.Equal(hostInstallExitCode != 0 ? 0 : guestInstallExitCode != 0 ? 1 : 2, sessionCount);
-        Assert.Equal(hostInstallExitCode == 0, hostRestoredBeforeBootstrap);
+        Assert.Equal(installsSucceeded ? 2 : 1, sessionCount);
+        Assert.False(hostRestoredBeforeBootstrap);
+        Assert.Equal(guestInstallExitCode == 0, File.Exists(Path.Combine(integrationDirectory.FullName, "installed.txt")));
         Assert.Equal(installsSucceeded, bootstrapCompletedBeforeFinalServer);
         var environments = sessionFactory.CreatedSessionEnvironments.ToArray();
         Assert.Equal(sessionCount, environments.Length);

@@ -33,14 +33,22 @@ public static class RemoteHostServer
     /// <returns>A task that completes when the server has stopped.</returns>
     public static async Task RunAsync(string[] args)
     {
+        if (IntegrationHostSupervisor.IsSupervisor)
+        {
+            await IntegrationHostSupervisor.RunAsync().ConfigureAwait(false);
+            return;
+        }
+
         var builder = CreateBuilder(args);
         using var host = builder.Build();
         var profilingTelemetry = host.Services.GetRequiredService<RemoteHostProfilingTelemetry>();
+        var integrationHostLauncher = host.Services.GetRequiredService<IntegrationHostLauncher>();
 
         using var activity = profilingTelemetry.StartRemoteHostRun();
         try
         {
             await host.RunAsync().ConfigureAwait(false);
+            integrationHostLauncher.ThrowIfFailed();
         }
         catch (Exception ex)
         {
@@ -91,6 +99,7 @@ public static class RemoteHostServer
         // Handles must be shared across guest and integration-host connections so external
         // capabilities can resolve handles created by the originating guest. The tradeoff is
         // that handle cleanup happens when the server shuts down instead of per connection.
+        // IDs are unguessable capability tokens; relaying a handle delegates access to it.
         services.AddSingleton<HandleRegistry>();
 
         // Scoped services

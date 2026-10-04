@@ -322,21 +322,9 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             return false;
         }
 
-        // Step 2: Restore integration host dependencies before code generation. The AppHost
-        // server spawns npm integration hosts during startup so their capabilities can be
-        // merged into ATS; starting it before `npm install` leaves the generated SDK without
-        // those external methods.
-        if (!await RestoreIntegrationHostDependenciesAsync(integrations, cancellationToken))
-        {
-            _interactionService.DisplayError(
-                "Failed to restore one or more integration host packages. " +
-                "Aborting before generating SDK code.");
-            return false;
-        }
-
         var hasNpmIntegrationHosts = integrations.Any(integration => integration.Source == IntegrationSource.Npm);
 
-        // Step 3: Generate SDK code via RPC.
+        // Step 2: Generate SDK code via RPC.
         // This must happen before guest AppHost dependency installation because the
         // generated code directory (.aspire/modules) may not exist yet and dependency
         // files reference it.
@@ -351,13 +339,20 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             treatMissingJavaScriptToolAsWarning: !hasNpmIntegrationHosts,
             cancellationToken);
 
+        // npm lifecycle scripts can compile the host's ATS imports. Generate the
+        // core SDK and install its transport dependencies before running those scripts.
+        if (hasNpmIntegrationHosts && installResult != 0)
+        {
+            return false;
+        }
+        if (!await RestoreIntegrationHostDependenciesAsync(integrations, cancellationToken))
+        {
+            _interactionService.DisplayError("Failed to restore one or more integration host packages.");
+            return false;
+        }
+
         if (hasNpmIntegrationHosts)
         {
-            if (installResult != 0)
-            {
-                return false;
-            }
-
             // npm integration hosts are themselves TypeScript programs that import the
             // generated .aspire/modules SDK in order to call ATS primitives. On a clean restore
             // there is no SDK yet, so the first pass bootstraps the core SDK and installs
@@ -571,26 +566,6 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             // Check if hot reload (watch mode) is enabled
             var enableHotReload = _features.IsFeatureEnabled(KnownFeatures.DefaultWatchEnabled, defaultValue: false);
 
-            // Restore integration host dependencies BEFORE launching the AppHost server.
-            // Symmetric with how the .NET integration restore happens via `dotnet build` on
-            // the AppHost server csproj above: the CLI prepares all dependencies during its
-            // restore phase, then the server is launched and just consumes what's already on
-            // disk. For npm-based integration hosts that means running `npm install` in each
-            // host's directory.
-            //
-            // If any install fails, abort before launching the server — it's much better to
-            // fail loudly here than to spawn a host with missing modules and chase a cryptic
-            // "builder.<method> is not a function" error in the consumer apphost later.
-            if (!await RestoreIntegrationHostDependenciesAsync(integrations, cancellationToken))
-            {
-                _interactionService.DisplayError(
-                    "Failed to restore one or more integration host packages. " +
-                    "Aborting before launching the AppHost server. " +
-                    "Look for [GuestAppHostProject] log lines above for the failing command and exit code.");
-                context.BuildCompletionSource?.TrySetResult(false);
-                return CliExitCodes.FailedToBuildArtifacts;
-            }
-
             var environmentVariables = CreateGuestEnvironmentVariables(
                 context.EnvironmentVariables,
                 launchProfileEnvironmentVariables,
@@ -615,6 +590,15 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
                     context.BuildCompletionSource?.TrySetResult(false);
                     return bootstrapResult;
                 }
+            }
+
+            // Host lifecycle scripts need the bootstrap SDK, but the final server
+            // must not start until all integration dependencies are installed.
+            if (!await RestoreIntegrationHostDependenciesAsync(integrations, cancellationToken))
+            {
+                _interactionService.DisplayError("Failed to restore one or more integration host packages.");
+                context.BuildCompletionSource?.TrySetResult(false);
+                return CliExitCodes.FailedToBuildArtifacts;
             }
 
             // Step 4: Start the AppHost server process. The linked stop CTS is the only termination
@@ -1352,14 +1336,6 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             // Pass synthetic UserSecretsId so AppHost Server can read secrets set via 'aspire secret'
             launchSettingsEnvVars[KnownConfigNames.AspireUserSecretsId] = UserSecretsPathHelper.ComputeSyntheticUserSecretsId(appHostFile.FullName);
 
-            if (!await RestoreIntegrationHostDependenciesAsync(integrations, cancellationToken))
-            {
-                _interactionService.DisplayError("Failed to restore one or more integration host packages.");
-                context.BackchannelCompletionSource?.TrySetException(
-                    new InvalidOperationException("Failed to restore integration host dependencies."));
-                return CliExitCodes.FailedToBuildArtifacts;
-            }
-
             var environmentVariables = CreateGuestEnvironmentVariables(
                 context.EnvironmentVariables,
                 launchProfileEnvironmentVariables,
@@ -1385,6 +1361,14 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
                         new InvalidOperationException($"Failed to install {DisplayName} dependencies."));
                     return bootstrapResult;
                 }
+            }
+
+            if (!await RestoreIntegrationHostDependenciesAsync(integrations, cancellationToken))
+            {
+                _interactionService.DisplayError("Failed to restore one or more integration host packages.");
+                context.BackchannelCompletionSource?.TrySetException(
+                    new InvalidOperationException("Failed to restore integration host dependencies."));
+                return CliExitCodes.FailedToBuildArtifacts;
             }
 
             // Step 2: Start the AppHost server process(it opens the backchannel for progress reporting)

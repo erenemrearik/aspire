@@ -247,7 +247,10 @@ public class ApiReferenceExportTests
         var externalCapabilityRegistry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         var languageResolver = new LanguageSupportResolver(services, loader, NullLogger<LanguageSupportResolver>.Instance);
         var integrationHostLauncher = new IntegrationHostLauncher(
-            languageResolver, externalCapabilityRegistry, configuration, NullLogger<IntegrationHostLauncher>.Instance);
+            languageResolver, externalCapabilityRegistry, configuration,
+            new Microsoft.Extensions.Hosting.Internal.ApplicationLifetime(
+                NullLogger<Microsoft.Extensions.Hosting.Internal.ApplicationLifetime>.Instance),
+            NullLogger<IntegrationHostLauncher>.Instance);
         integrationHostLauncher.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
 
         return new CodeGenerationService(

@@ -499,11 +499,11 @@ public static IResourceBuilder<RedisResource> AddRedis(
 
 Handles are opaque references to .NET objects. They carry an ATS type ID for identification.
 
-**Format:** Handle ID is an instance number. Type is provided separately.
+**Format:** Handle IDs are opaque, cryptographically random 128-bit tokens. Type is provided separately. Passing a handle delegates access to its object; clients must not interpret IDs or assume they are sequential.
 
 ```json
 {
-    "$handle": "42",
+    "$handle": "e69a6f159467fe4c9c2c8a2f170d6860",
     "$type": "Aspire.Hosting.Redis/Aspire.Hosting.ApplicationModel.RedisResource"
 }
 ```
@@ -907,7 +907,7 @@ Fields starting with `$` are reserved for ATS protocol metadata:
 
 | Field | Purpose |
 |-------|---------|
-| `$handle` | Handle instance ID |
+| `$handle` | Opaque object-access token |
 | `$type` | ATS type ID |
 | `$error` | Error response |
 | `$expr` | Reference expression |

@@ -17,7 +17,7 @@ namespace Aspire.Hosting.RemoteHost.Ats;
 /// The engine calls getCapabilities on each integration host to populate this registry.
 /// Scoped CapabilityDispatchers check this registry as a fallback.
 /// </summary>
-internal sealed class ExternalCapabilityRegistry
+internal sealed class ExternalCapabilityRegistry : IDisposable
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -25,9 +25,13 @@ internal sealed class ExternalCapabilityRegistry
     };
 
     private volatile FrozenDictionary<string, ExternalCapabilityRegistration> _capabilities = FrozenDictionary<string, ExternalCapabilityRegistration>.Empty;
-    private readonly ConcurrentBag<JsonRpc> _integrationHosts = new();
+    private readonly ConcurrentDictionary<JsonRpc, byte> _integrationHosts = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonRpc>> _pendingRegistrations = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<JsonRpc, byte> _unavailableHosts = new();
     private readonly ConcurrentDictionary<string, (JsonRpcCallbackInvoker Invoker, string CallbackId)> _callbackOwners = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _hostRegisteredSignal = new(initialCount: 0);
+    private readonly CancellationTokenSource _shutdown = new();
+    private readonly object _registrationGate = new();
     private readonly ILogger<ExternalCapabilityRegistry> _logger;
     private InvalidOperationException? _initializationException;
 
@@ -48,15 +52,67 @@ internal sealed class ExternalCapabilityRegistry
     /// </summary>
     public void AddIntegrationHost(JsonRpc clientRpc)
     {
-        _integrationHosts.Add(clientRpc);
-        _logger.LogInformation("Integration host connected ({RpcHash}), total: {Count}",
-            clientRpc.GetHashCode(), _integrationHosts.Count);
-        _hostRegisteredSignal.Release();
+        lock (_registrationGate)
+        {
+            _shutdown.Token.ThrowIfCancellationRequested();
+            if (!_integrationHosts.TryAdd(clientRpc, 0))
+            {
+                throw new InvalidOperationException("This connection is already registered as an integration host.");
+            }
+            _logger.LogInformation("Integration host connected ({RpcHash}), total: {Count}",
+                clientRpc.GetHashCode(), _integrationHosts.Count);
+            _hostRegisteredSignal.Release();
+        }
+    }
+
+    internal Task<JsonRpc> ExpectHostRegistration(string registrationId)
+    {
+        var registration = new TaskCompletionSource<JsonRpc>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_pendingRegistrations.TryAdd(registrationId, registration))
+        {
+            throw new InvalidOperationException($"Integration host registration '{registrationId}' is already pending.");
+        }
+
+        return registration.Task;
+    }
+
+    internal void ForgetHostRegistration(string registrationId)
+        => _pendingRegistrations.TryRemove(registrationId, out _);
+
+    public void AddIntegrationHost(string registrationId, JsonRpc clientRpc)
+    {
+        if (!_pendingRegistrations.TryRemove(registrationId, out var registration))
+        {
+            throw new InvalidOperationException("The integration host registration is unknown or has already been consumed.");
+        }
+
+        try
+        {
+            AddIntegrationHost(clientRpc);
+            registration.SetResult(clientRpc);
+        }
+        catch (Exception ex)
+        {
+            registration.TrySetException(ex);
+            throw;
+        }
+    }
+
+    internal void MarkHostUnavailable(JsonRpc clientRpc)
+    {
+        // Keep projection metadata for already-generated SDKs, but never route a new
+        // invocation to a disconnected host or replay calls that may have side effects.
+        if (_capabilities.Values.Any(cap => ReferenceEquals(cap.ClientRpc, clientRpc)))
+        {
+            _unavailableHosts.TryAdd(clientRpc, 0);
+        }
+        _integrationHosts.TryRemove(clientRpc, out _);
+        clientRpc.Dispose();
     }
 
     /// <summary>
     /// Waits for the next <paramref name="expectedCount"/> integration host registrations
-    /// (each via <see cref="AddIntegrationHost"/>), with a per-host timeout. Returns the
+    /// (each via <see cref="AddIntegrationHost(JsonRpc)"/>), with a per-host timeout. Returns the
     /// number of registrations actually consumed before the timeout fired.
     /// Cancellation propagates to the caller.
     ///
@@ -98,12 +154,22 @@ internal sealed class ExternalCapabilityRegistry
     /// Calls getCapabilities on all connected integration hosts with a per-host timeout,
     /// then publishes the validated registrations before codegen.
     /// </summary>
-    public async Task InitializeAllHostsAsync(TimeSpan timeoutPerHost, CancellationToken cancellationToken)
+    public async Task InitializeAllHostsAsync(int expectedCount, TimeSpan timeoutPerHost, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Initializing {Count} integration host(s)...", _integrationHosts.Count);
+        var hosts = _integrationHosts.Keys.ToArray();
+        // A consumed registration signal does not guarantee that its connection
+        // survived until discovery. Never publish a partial SDK after early exit.
+        if (hosts.Length != expectedCount)
+        {
+            _initializationException = new InvalidOperationException(
+                $"Only {hosts.Length} of {expectedCount} integration hosts remain connected for capability discovery.");
+            _logger.LogError(_initializationException, "Integration host capability discovery failed.");
+            throw _initializationException;
+        }
+        _logger.LogInformation("Initializing {Count} integration host(s)...", hosts.Length);
         var capabilities = new Dictionary<string, ExternalCapabilityRegistration>(StringComparer.Ordinal);
 
-        foreach (var host in _integrationHosts)
+        foreach (var host in hosts)
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var discoveryCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -120,7 +186,8 @@ internal sealed class ExternalCapabilityRegistry
                 {
                     CapabilityId = cap.Id,
                     ClientRpc = host,
-                    ProjectedCapability = TryCreateProjectedCapability(cap)
+                    ProjectedCapability = TryCreateProjectedCapability(cap),
+                    Signature = CreateSignature(cap)
                 }).ToList();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -162,7 +229,10 @@ internal sealed class ExternalCapabilityRegistry
         cancellationToken.ThrowIfCancellationRequested();
         // Publish only after validating the entire set, so collisions cannot leave a
         // partially registered SDK or choose a host based on connection enumeration order.
-        _capabilities = capabilities.ToFrozenDictionary(StringComparer.Ordinal);
+        lock (_registrationGate)
+        {
+            _capabilities = capabilities.ToFrozenDictionary(StringComparer.Ordinal);
+        }
         _initializationException = null;
         foreach (var capabilityId in _capabilities.Keys.Order(StringComparer.Ordinal))
         {
@@ -170,6 +240,58 @@ internal sealed class ExternalCapabilityRegistry
         }
 
         _logger.LogInformation("Integration hosts initialized. External capabilities: {Count}", _capabilities.Count);
+    }
+
+    internal async Task ReplaceHostAsync(JsonRpc previous, JsonRpc replacement, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var discoveryCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        List<ExternalCapabilityRegistration> discovered;
+        try
+        {
+            var payload = await replacement.InvokeWithCancellationAsync<JsonElement>(
+                "getCapabilities", Array.Empty<object>(), discoveryCancellation.Token)
+                .WaitAsync(timeout, discoveryCancellation.Token).ConfigureAwait(false);
+            discovered = ReadCapabilities(payload).Select(cap => new ExternalCapabilityRegistration
+            {
+                CapabilityId = cap.Id,
+                ClientRpc = replacement,
+                ProjectedCapability = TryCreateProjectedCapability(cap),
+                Signature = CreateSignature(cap)
+            }).ToList();
+        }
+        finally
+        {
+            discoveryCancellation.Cancel();
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_registrationGate)
+        {
+            _shutdown.Token.ThrowIfCancellationRequested();
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = _capabilities;
+            var owned = current.Values.Where(cap => ReferenceEquals(cap.ClientRpc, previous))
+                .ToDictionary(cap => cap.CapabilityId, StringComparer.Ordinal);
+            if (discovered.Count != owned.Count ||
+                discovered.Select(cap => cap.CapabilityId).Distinct(StringComparer.Ordinal).Count() != discovered.Count ||
+                discovered.Any(cap => !owned.TryGetValue(cap.CapabilityId, out var original) ||
+                    !JsonElement.DeepEquals(original.Signature, cap.Signature)))
+            {
+                throw new InvalidOperationException(
+                    "The restarted integration host changed its capability signatures. " +
+                    "Restart the AppHost session and regenerate its SDK before using the changed integration.");
+            }
+
+            // Publish the complete replacement atomically. Other hosts can recover concurrently,
+            // and callers must never observe a mixture of old and new connections for one host.
+            var updated = current.ToDictionary();
+            foreach (var registration in discovered)
+            {
+                updated[registration.CapabilityId] = registration;
+            }
+            _capabilities = updated.ToFrozenDictionary(StringComparer.Ordinal);
+            _unavailableHosts.TryRemove(previous, out _);
+        }
     }
 
     public AtsContext AugmentContext(AtsContext context)
@@ -243,6 +365,12 @@ internal sealed class ExternalCapabilityRegistry
             return (false, null);
         }
 
+        if (_unavailableHosts.ContainsKey(registration.ClientRpc))
+        {
+            throw new InvalidOperationException(
+                $"The integration host providing '{capabilityId}' is restarting. Retry after it has registered again.");
+        }
+
         _logger.LogDebug("Forwarding capability {CapabilityId} to integration host", capabilityId);
 
         // Callback IDs belong to a guest connection, not the singleton registry. Give
@@ -256,7 +384,7 @@ internal sealed class ExternalCapabilityRegistry
             var rawResult = await registration.ClientRpc.InvokeWithCancellationAsync<object?>(
                 "handleExternalCapability",
                 new object?[] { capabilityId, forwardedArgs },
-                CancellationToken.None).ConfigureAwait(false);
+                _shutdown.Token).WaitAsync(_shutdown.Token).ConfigureAwait(false);
 
             // SystemTextJsonFormatter returns JsonElement for object?
             JsonNode? result;
@@ -338,20 +466,60 @@ internal sealed class ExternalCapabilityRegistry
     /// </summary>
     public bool IsRegistered(string capabilityId) => _capabilities.ContainsKey(capabilityId);
 
+    internal void Stop()
+    {
+        lock (_registrationGate)
+        {
+            _shutdown.Cancel();
+            foreach (var host in _integrationHosts.Keys)
+            {
+                MarkHostUnavailable(host);
+            }
+            foreach (var registration in _pendingRegistrations.Values)
+            {
+                registration.TrySetCanceled(_shutdown.Token);
+            }
+            _pendingRegistrations.Clear();
+        }
+    }
+
+    public void Dispose()
+    {
+        Stop();
+        _shutdown.Dispose();
+        _hostRegisteredSignal.Dispose();
+    }
+
+    private static JsonElement CreateSignature(ExternalCapabilityProjection capability)
+        => JsonSerializer.SerializeToElement(new
+        {
+            capability.Id,
+            capability.Method,
+            capability.CapabilityKind,
+            capability.Parameters,
+            capability.ReturnType,
+            capability.TargetTypeId,
+            capability.TargetType,
+            capability.TargetParameterName,
+            capability.ReturnsBuilder,
+            capability.OwningTypeName,
+            capability.ExpandedTargetTypes
+        }, s_jsonOptions);
+
     private static IReadOnlyList<ExternalCapabilityProjection> ReadCapabilities(JsonElement payload)
     {
-        if (payload.ValueKind == JsonValueKind.Array)
-        {
-            return JsonSerializer.Deserialize<List<ExternalCapabilityProjection>>(payload.GetRawText(), s_jsonOptions) ?? [];
-        }
-
         if (payload.ValueKind == JsonValueKind.Object &&
             payload.TryGetProperty("capabilities", out var capabilitiesElement))
         {
-            return JsonSerializer.Deserialize<List<ExternalCapabilityProjection>>(capabilitiesElement.GetRawText(), s_jsonOptions) ?? [];
+            payload = capabilitiesElement;
+        }
+        if (payload.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("Integration host capabilities must be an array or an object containing a 'capabilities' array.");
         }
 
-        return [];
+        return JsonSerializer.Deserialize<List<ExternalCapabilityProjection>>(payload.GetRawText(), s_jsonOptions)
+            ?? throw new JsonException("Integration host capabilities must not be null.");
     }
 
     private static AtsCapabilityInfo? TryCreateProjectedCapability(ExternalCapabilityProjection capability)
@@ -421,6 +589,7 @@ internal sealed class ExternalCapabilityRegistry
     {
         public required string CapabilityId { get; init; }
         public required JsonRpc ClientRpc { get; init; }
+        public required JsonElement Signature { get; init; }
         public AtsCapabilityInfo? ProjectedCapability { get; init; }
     }
 

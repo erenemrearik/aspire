@@ -1,82 +1,78 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using Aspire.Hosting.RemoteHost.Ats;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using StreamJsonRpc;
 
 namespace Aspire.Hosting.RemoteHost.Language;
 
 /// <summary>
-/// Spawns and supervises integration host processes, on behalf of the AppHost server.
-///
-/// This is the server-side counterpart to how <c>AssemblyLoadContext</c> owns a .NET
-/// integration's lifetime: the server discovers the integration, spawns the process
-/// that hosts it, captures its stdio into server logs, holds its <see cref="Process"/>
-/// handle, and terminates it when the server itself stops. The CLI is not involved in
-/// integration host lifetime — it tells the server about npm/python/etc. integrations
-/// the same way it tells the server about .NET integrations: via the appsettings.json
-/// the AppHost server csproj is built and run with.
-///
-/// At <see cref="StartAsync"/> time the launcher reads the <c>IntegrationHosts</c> array
-/// from <see cref="IConfiguration"/> (populated by the CLI's csproj generation step),
-/// spawns the hosts, waits for them to register, then drives the existing
-/// <see cref="ExternalCapabilityRegistry.InitializeAllHostsAsync"/> phase so the
-/// projection context is populated before any guest connects.
+/// Owns integration-host startup, recovery, diagnostics, and shutdown for the AppHost server.
 /// </summary>
-internal sealed class IntegrationHostLauncher : IHostedService
+internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
 {
+    internal const string RegistrationIdVariable = "ASPIRE_INTEGRATION_HOST_REGISTRATION_ID";
+    private static readonly TimeSpan s_perHostRegistrationTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan s_perHostDiscoveryTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan s_stableHostPeriod = TimeSpan.FromMinutes(1);
+    private const int MaxRestartAttempts = 3;
     private readonly LanguageSupportResolver _languageResolver;
     private readonly ExternalCapabilityRegistry _externalCapabilityRegistry;
     private readonly IConfiguration _configuration;
+    private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<IntegrationHostLauncher> _logger;
-    private readonly ConcurrentBag<Process> _spawnedProcesses = new();
+    private readonly CancellationTokenSource _shutdown = new();
+    private readonly List<Task> _supervisors = [];
+    private readonly object _lifetimeGate = new();
     private readonly TaskCompletionSource<bool> _readyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<Exception> _startupFailure = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task? _startTask;
+    private Task? _stopTask;
+    private Exception? _failure;
 
     public IntegrationHostLauncher(
         LanguageSupportResolver languageResolver,
         ExternalCapabilityRegistry externalCapabilityRegistry,
         IConfiguration configuration,
+        IHostApplicationLifetime lifetime,
         ILogger<IntegrationHostLauncher> logger)
     {
         _languageResolver = languageResolver;
         _externalCapabilityRegistry = externalCapabilityRegistry;
         _configuration = configuration;
+        _lifetime = lifetime;
         _logger = logger;
     }
 
-    /// <summary>
-    /// Awaitable that completes once <see cref="StartAsync"/> has finished spawning and
-    /// initializing every integration host listed in <c>appsettings.json</c>. Anything
-    /// downstream that needs the integration hosts' capabilities to be present in the
-    /// registry — code generation, getCapabilities, capability dispatch — must await
-    /// this first.
-    /// </summary>
     public Task ReadyAsync(CancellationToken cancellationToken = default)
+        => _readyTcs.Task.WaitAsync(cancellationToken);
+
+    internal void ThrowIfFailed()
     {
-        if (_readyTcs.Task.IsCompleted || !cancellationToken.CanBeCanceled)
+        if (Volatile.Read(ref _failure) is { } failure)
         {
-            return _readyTcs.Task;
+            throw new InvalidOperationException("Integration host recovery failed; the AppHost session was stopped.", failure);
         }
-        return _readyTcs.Task.WaitAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Allows cold language-runtime startup while bounding unresponsive integration hosts.
-    /// </summary>
-    private static readonly TimeSpan s_perHostRegistrationTimeout = TimeSpan.FromMinutes(2);
-    private static readonly TimeSpan s_perHostDiscoveryTimeout = TimeSpan.FromMinutes(2);
-
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
     {
+        lock (_lifetimeGate)
+        {
+            return _startTask ??= StartCoreAsync(cancellationToken);
+        }
+    }
+
+    private async Task StartCoreAsync(CancellationToken cancellationToken)
+    {
+        using var initializationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
         try
         {
-            // The CLI first generates the managed SDK that integration hosts themselves import.
-            // Only that explicit bootstrap pass may omit configured integrations.
+            initializationCancellation.Token.ThrowIfCancellationRequested();
             if (_configuration.GetValue<bool>(KnownConfigNames.IntegrationHostBootstrap))
             {
                 _logger.LogDebug("Skipping integration hosts while bootstrapping the managed SDK.");
@@ -85,45 +81,31 @@ internal sealed class IntegrationHostLauncher : IHostedService
             }
 
             var descriptors = ReadDescriptorsFromConfiguration();
-            if (descriptors.Count == 0)
+            foreach (var descriptor in descriptors)
             {
-                _readyTcs.TrySetResult(true);
-                return;
+                _supervisors.Add(SuperviseHostAsync(descriptor, _shutdown.Token));
             }
 
-            _logger.LogInformation("Spawning {Count} integration host(s) from server config.", descriptors.Count);
-            Launch(descriptors);
-
-            using var initializationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            try
+            var initialization = InitializeHostsAsync(
+                descriptors.Count, s_perHostRegistrationTimeout, s_perHostDiscoveryTimeout, initializationCancellation.Token);
+            if (await Task.WhenAny(initialization, _startupFailure.Task).ConfigureAwait(false) == _startupFailure.Task)
             {
-                var initialization = InitializeHostsAsync(
-                    descriptors.Count, s_perHostRegistrationTimeout, s_perHostDiscoveryTimeout, initializationCancellation.Token);
-                if (await Task.WhenAny(initialization, _startupFailure.Task).ConfigureAwait(false) == _startupFailure.Task)
-                {
-                    initializationCancellation.Cancel();
-                    // Observe the losing task; the child's startup failure is the error reported below.
-                    await initialization.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-                    throw await _startupFailure.Task.ConfigureAwait(false);
-                }
-
-                await initialization.ConfigureAwait(false);
-                if (_startupFailure.Task.IsCompleted)
-                {
-                    throw await _startupFailure.Task.ConfigureAwait(false);
-                }
-            }
-            finally
-            {
-                // Cancel pending registration/discovery if a child exits before becoming ready.
                 initializationCancellation.Cancel();
+                await initialization.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                throw await _startupFailure.Task.ConfigureAwait(false);
+            }
+
+            await initialization.ConfigureAwait(false);
+            if (_startupFailure.Task.IsCompleted)
+            {
+                throw await _startupFailure.Task.ConfigureAwait(false);
             }
 
             _readyTcs.TrySetResult(true);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (initializationCancellation.IsCancellationRequested)
         {
-            _readyTcs.TrySetCanceled(cancellationToken);
+            _readyTcs.TrySetCanceled(initializationCancellation.Token);
             await StopAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
@@ -138,8 +120,8 @@ internal sealed class IntegrationHostLauncher : IHostedService
 
     internal async Task InitializeHostsAsync(int expectedCount, TimeSpan registrationTimeout, TimeSpan discoveryTimeout, CancellationToken cancellationToken)
     {
-        var registered = await _externalCapabilityRegistry
-            .WaitForHostsAsync(expectedCount, registrationTimeout, cancellationToken).ConfigureAwait(false);
+        var registered = await _externalCapabilityRegistry.WaitForHostsAsync(
+            expectedCount, registrationTimeout, cancellationToken).ConfigureAwait(false);
         if (registered != expectedCount)
         {
             throw new TimeoutException(
@@ -147,14 +129,163 @@ internal sealed class IntegrationHostLauncher : IHostedService
                 "SDK generation was stopped because required integrations are unavailable. Check the integration host startup logs.");
         }
 
-        await _externalCapabilityRegistry.InitializeAllHostsAsync(discoveryTimeout, cancellationToken).ConfigureAwait(false);
+        await _externalCapabilityRegistry.InitializeAllHostsAsync(expectedCount, discoveryTimeout, cancellationToken).ConfigureAwait(false);
     }
+
+    private async Task SuperviseHostAsync(IntegrationHostDescriptor descriptor, CancellationToken cancellationToken)
+    {
+        JsonRpc? previousConnection = null;
+        var restartAttempts = 0;
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var registrationId = Guid.NewGuid().ToString("N");
+                var registration = _externalCapabilityRegistry.ExpectHostRegistration(registrationId);
+                using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                JsonRpc? connection = null;
+                IntegrationHostProcess? process = null;
+                Exception failure;
+                long? healthySince = null;
+                var wasStable = false;
+                try
+                {
+                    process = Launch(descriptor, registrationId);
+                    var registered = registration.WaitAsync(s_perHostRegistrationTimeout, attemptCancellation.Token);
+                    if (await Task.WhenAny(registered, process.Exit).ConfigureAwait(false) == process.Exit)
+                    {
+                        throw CreateExitException(descriptor, process, await process.Exit.ConfigureAwait(false));
+                    }
+                    connection = await registered.ConfigureAwait(false);
+
+                    if (previousConnection is null)
+                    {
+                        // Remember the connection as soon as it registers. Readiness and
+                        // disconnect callbacks can race; recovery still needs its published
+                        // registrations even if this supervisor resumes after the guest.
+                        previousConnection = connection;
+                        var ready = _readyTcs.Task.WaitAsync(cancellationToken);
+                        if (await Task.WhenAny(ready, process.Exit, connection.Completion).ConfigureAwait(false) != ready &&
+                            !_readyTcs.Task.IsCompletedSuccessfully)
+                        {
+                            throw new InvalidOperationException(
+                                $"Integration host '{descriptor.PackageName}' disconnected during startup. Check its stdout/stderr.");
+                        }
+                        await ready.ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await _externalCapabilityRegistry.ReplaceHostAsync(
+                            previousConnection, connection, s_perHostDiscoveryTimeout, cancellationToken).ConfigureAwait(false);
+                        _logger.LogInformation(
+                            "Integration host '{Name}' recovered after restart attempt {Attempt}; capabilities rediscovered.",
+                            descriptor.PackageName, restartAttempts);
+                    }
+                    previousConnection = connection;
+                    healthySince = Stopwatch.GetTimestamp();
+
+                    await Task.WhenAny(process.Exit, connection.Completion).WaitAsync(cancellationToken).ConfigureAwait(false);
+                    if (process.Exit.IsCompleted)
+                    {
+                        throw CreateExitException(descriptor, process, await process.Exit.ConfigureAwait(false));
+                    }
+
+                    throw new InvalidOperationException(
+                        $"Integration host '{descriptor.PackageName}' disconnected from the AppHost server.");
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                    if (!_readyTcs.Task.IsCompletedSuccessfully)
+                    {
+                        _startupFailure.TrySetResult(ex);
+                    }
+                    wasStable = healthySince is { } timestamp && Stopwatch.GetElapsedTime(timestamp) >= s_stableHostPeriod;
+                }
+                finally
+                {
+                    attemptCancellation.Cancel();
+                    _externalCapabilityRegistry.ForgetHostRegistration(registrationId);
+                    if (connection is null && registration.IsCompletedSuccessfully)
+                    {
+                        connection = registration.Result;
+                    }
+                    if (connection is not null)
+                    {
+                        _externalCapabilityRegistry.MarkHostUnavailable(connection);
+                    }
+                    if (process is not null)
+                    {
+                        await process.DisposeAsync().ConfigureAwait(false);
+                    }
+                }
+
+                if (!_readyTcs.Task.IsCompletedSuccessfully)
+                {
+                    _startupFailure.TrySetResult(failure);
+                    return;
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Count fast crash loops against the same budget. A single successful
+                // registration is not evidence that the replacement is healthy.
+                if (wasStable)
+                {
+                    restartAttempts = 0;
+                }
+                if (restartAttempts == MaxRestartAttempts)
+                {
+                    _logger.LogError(failure,
+                        "Integration host '{Name}' failed after {Attempts} restart attempts. Stopping the AppHost session.",
+                        descriptor.PackageName, restartAttempts);
+                    Interlocked.CompareExchange(ref _failure, failure, null);
+                    _lifetime.StopApplication();
+                    return;
+                }
+
+                restartAttempts++;
+                var delay = TimeSpan.FromSeconds(1 << (restartAttempts - 1));
+                _logger.LogWarning(failure,
+                    "Integration host '{Name}' is unavailable. Restart attempt {Attempt}/{Maximum} in {Delay}.",
+                    descriptor.PackageName, restartAttempts, MaxRestartAttempts, delay);
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            // Do not start a replacement if cleanup could not establish that the old
+            // process scope stopped. That would leave multiple owners mutating the model.
+            _logger.LogError(ex, "Integration host supervision failed for '{Name}'.", descriptor.PackageName);
+            if (!_readyTcs.Task.IsCompletedSuccessfully)
+            {
+                _startupFailure.TrySetResult(ex);
+            }
+            else
+            {
+                Interlocked.CompareExchange(ref _failure, ex, null);
+                _lifetime.StopApplication();
+            }
+        }
+    }
+
+    private static InvalidOperationException CreateExitException(
+        IntegrationHostDescriptor descriptor, IntegrationHostProcess process, int exitCode)
+        => new(
+            $"Integration host supervisor for '{descriptor.PackageName}' (PID {process.ProcessId}, entry '{descriptor.HostEntryPoint}') " +
+            $"exited with code {exitCode}. Check IntegrationHost[{descriptor.PackageName}] diagnostics for the runtime's original exit code and stderr.");
 
     private List<IntegrationHostDescriptor> ReadDescriptorsFromConfiguration()
     {
-        var section = _configuration.GetSection("IntegrationHosts");
         var result = new List<IntegrationHostDescriptor>();
-        foreach (var entry in section.GetChildren())
+        foreach (var entry in _configuration.GetSection("IntegrationHosts").GetChildren())
         {
             var language = entry["Language"];
             var packageName = entry["PackageName"];
@@ -175,25 +306,15 @@ internal sealed class IntegrationHostLauncher : IHostedService
             {
                 Language = language,
                 PackageName = packageName,
-                HostEntryPoint = hostEntryPoint,
+                HostEntryPoint = hostEntryPoint
             });
         }
+
         return result;
     }
 
-    /// <summary>
-    /// Launches an integration host process for each descriptor. Each host inherits
-    /// <c>REMOTE_APP_HOST_SOCKET_PATH</c> and <c>ASPIRE_REMOTE_APPHOST_TOKEN</c> via env
-    /// and is expected to connect back, authenticate, and call
-    /// <c>registerAsIntegrationHost</c> on its own JSON-RPC connection.
-    /// </summary>
-    private void Launch(IReadOnlyList<IntegrationHostDescriptor> descriptors)
+    private IntegrationHostProcess Launch(IntegrationHostDescriptor descriptor, string registrationId)
     {
-        if (descriptors.Count == 0)
-        {
-            return;
-        }
-
         var socketPath = _configuration["REMOTE_APP_HOST_SOCKET_PATH"];
         if (string.IsNullOrEmpty(socketPath))
         {
@@ -201,161 +322,34 @@ internal sealed class IntegrationHostLauncher : IHostedService
                 "REMOTE_APP_HOST_SOCKET_PATH is not set on the server; cannot spawn integration hosts.");
         }
 
+        var languageSupport = _languageResolver.GetLanguageSupport(descriptor.Language);
+        var hostSpec = languageSupport is null ? null : LanguageService.GetIntegrationHostSpec(languageSupport);
+        if (hostSpec is null)
+        {
+            throw new InvalidOperationException(
+                $"Language '{descriptor.Language}' does not provide an integration host for '{descriptor.PackageName}'.");
+        }
+
+        // Dependency restore belongs to the CLI's restore phase, not to runtime recovery.
+        var command = PathLookupHelper.FindFullPathFromPath(hostSpec.Execute.Command) ?? hostSpec.Execute.Command;
+        var startInfo = CreateProcessStartInfo(command, hostSpec.Execute.Args, descriptor.HostEntryPoint, OperatingSystem.IsWindows());
+        startInfo.Environment["REMOTE_APP_HOST_SOCKET_PATH"] = socketPath;
+        startInfo.Environment[RegistrationIdVariable] = registrationId;
         var token = _configuration[KnownConfigNames.RemoteAppHostToken];
-
-        foreach (var descriptor in descriptors)
+        if (!string.IsNullOrEmpty(token))
         {
-            var languageSupport = _languageResolver.GetLanguageSupport(descriptor.Language);
-            var hostSpec = languageSupport is null ? null : LanguageService.GetIntegrationHostSpec(languageSupport);
-            if (hostSpec is null)
-            {
-                throw new InvalidOperationException(
-                    $"Language '{descriptor.Language}' does not provide an integration host for '{descriptor.PackageName}'.");
-            }
-
-            // Note: dependency restore for the integration host (e.g. `npm install` for TS)
-            // is run by the CLI during its restore phase — symmetric with how the CLI runs
-            // `dotnet build` on the AppHost server csproj before launching it. By the time
-            // we get here the host's deps are already present on disk.
-
-            var command = hostSpec.Execute.Command;
-
-            // On Windows, executables shipped via npm are .cmd shims (e.g. npx.cmd) — Process.Start
-            // cannot find them by bare name without shell execution. Resolve to the full path via
-            // PATH lookup with PATHEXT expansion before spawning.
-            var resolvedCommand = PathLookupHelper.FindFullPathFromPath(command) ?? command;
-            if (!ReferenceEquals(resolvedCommand, command))
-            {
-                _logger.LogDebug("Resolved integration host command '{Command}' to '{ResolvedCommand}'.", command, resolvedCommand);
-            }
-
-            var psi = CreateProcessStartInfo(resolvedCommand, hostSpec.Execute.Args, descriptor.HostEntryPoint, OperatingSystem.IsWindows());
-            var hostDir = psi.WorkingDirectory;
-            var args = psi.ArgumentList.Count > 0 ? string.Join(" ", psi.ArgumentList) : psi.Arguments;
-
-            psi.Environment["REMOTE_APP_HOST_SOCKET_PATH"] = socketPath;
-            if (!string.IsNullOrEmpty(token))
-            {
-                psi.Environment[KnownConfigNames.RemoteAppHostToken] = token;
-            }
-
-            _logger.LogInformation(
-                "Spawning integration host '{Name}' [{Language}]: {Command} {Args} (cwd: {HostDir})",
-                descriptor.PackageName, descriptor.Language, command, args, hostDir);
-
-            Process? hostProcess;
-            try
-            {
-                hostProcess = Process.Start(psi);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(
-                    ex,
-                    "Failed to spawn integration host '{Name}' [{Language}]. " +
-                    "Tried command '{Command}' with args '{Args}' in '{HostDir}'. " +
-                    "Verify the host runtime is installed (e.g. node/npm on PATH for typescript/nodejs) " +
-                    "and that '{HostEntryPoint}' exists. " +
-                    "Did you run `aspire restore` after installing the integration?",
-                    descriptor.PackageName, descriptor.Language, resolvedCommand, args, hostDir, descriptor.HostEntryPoint);
-                throw;
-            }
-
-            if (hostProcess is null)
-            {
-                throw new InvalidOperationException(
-                    $"Could not start integration host '{descriptor.PackageName}' [{descriptor.Language}] using '{resolvedCommand}'.");
-            }
-
-            _spawnedProcesses.Add(hostProcess);
-            _logger.LogInformation(
-                "Started integration host '{Name}' [{Language}] (PID {Pid})",
-                descriptor.PackageName, descriptor.Language, hostProcess.Id);
-
-            // Watch for unexpected early exit so users get an actionable diagnostic instead of
-            // a silent missing-capability later. If the host exits during the registration
-            // window (even with exit code zero), fail startup — the host's
-            // registerAsIntegrationHost call may never have happened, which
-            // would otherwise just look like a slow timeout from WaitForHostsAsync.
-            var processId = hostProcess.Id;
-            hostProcess.Exited += (_, _) => LogProcessExit(hostProcess, processId, descriptor.PackageName, descriptor.HostEntryPoint);
-            hostProcess.EnableRaisingEvents = true;
-
-            // Pipe the host's stdout into server logs at Information, stderr at Warning.
-            // Tagged IntegrationHost[Name] so the user can find the host's own diagnostics
-            // when chasing a failure.
-            var packageName = descriptor.PackageName;
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    string? line;
-                    while ((line = await hostProcess.StandardOutput.ReadLineAsync().ConfigureAwait(false)) is not null)
-                    {
-                        _logger.LogInformation("IntegrationHost[{Name}]: {Line}", packageName, line);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "stdout reader for integration host '{Name}' stopped.", packageName);
-                }
-            });
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    string? line;
-                    while ((line = await hostProcess.StandardError.ReadLineAsync().ConfigureAwait(false)) is not null)
-                    {
-                        _logger.LogWarning("IntegrationHost[{Name}]: {Line}", packageName, line);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "stderr reader for integration host '{Name}' stopped.", packageName);
-                }
-            });
+            startInfo.Environment[KnownConfigNames.RemoteAppHostToken] = token;
         }
+
+        _logger.LogInformation(
+            "Launching integration host '{Name}' [{Language}]: {Command} (entry: {EntryPoint}, cwd: {Directory}).",
+            descriptor.PackageName, descriptor.Language, command, descriptor.HostEntryPoint, startInfo.WorkingDirectory);
+        var process = IntegrationHostProcess.Start(IntegrationHostSupervisor.CreateStartInfo(startInfo), _logger, descriptor.PackageName);
+        _logger.LogInformation("Started integration host supervisor '{Name}' (PID {Pid}).", descriptor.PackageName, process.ProcessId);
+
+        return process;
     }
 
-    internal void LogProcessExit(Process process, int processId, string packageName, string entryPoint)
-    {
-        try
-        {
-            var exitCode = process.ExitCode;
-            if (!_readyTcs.Task.IsCompleted)
-            {
-                _startupFailure.TrySetResult(new InvalidOperationException(
-                    $"Integration host '{packageName}' (PID {processId}, entry '{entryPoint}') exited with code {exitCode} during startup. " +
-                    "Check its stdout/stderr for the startup failure."));
-            }
-
-            if (exitCode != 0)
-            {
-                _logger.LogError(
-                    "Integration host '{Name}' (PID {Pid}, entry '{EntryPoint}') exited unexpectedly with code {ExitCode}. " +
-                    "This usually means the host's own startup code threw before it could call registerAsIntegrationHost. " +
-                    "Look for IntegrationHost[{Name}] lines above this for the host's own stdout/stderr.",
-                    packageName, processId, entryPoint, exitCode, packageName);
-            }
-            else
-            {
-                _logger.LogDebug(
-                    "Integration host '{Name}' (PID {Pid}) exited cleanly with code 0.",
-                    packageName, processId);
-            }
-        }
-        catch (InvalidOperationException ex)
-        {
-            // StopAsync can dispose the process after its Exited event has been queued.
-            // An exception escaping that ThreadPool callback would terminate the server.
-            _logger.LogDebug(ex, "Exit observer for integration host '{Name}' (PID {Pid}) stopped.", packageName, processId);
-        }
-    }
-
-    /// <summary>
-    /// Creates launch settings preserving the argument boundaries declared by the language provider.
-    /// </summary>
     internal static ProcessStartInfo CreateProcessStartInfo(string command, IReadOnlyList<string> argumentTemplates, string entryPoint, bool isWindows)
     {
         var startInfo = new ProcessStartInfo
@@ -363,12 +357,10 @@ internal sealed class IntegrationHostLauncher : IHostedService
             WorkingDirectory = Path.GetDirectoryName(entryPoint)!,
             UseShellExecute = false,
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardError = true
         };
-
         ProcessStartInfoHelper.SetCommand(
-            startInfo,
-            command,
+            startInfo, command,
             argumentTemplates.Select(argument => argument.Replace("{entryPoint}", entryPoint)),
             isWindows);
 
@@ -377,54 +369,33 @@ internal sealed class IntegrationHostLauncher : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        while (_spawnedProcesses.TryTake(out var process))
+        lock (_lifetimeGate)
         {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    _logger.LogDebug("Terminating integration host process (PID {Pid}).", process.Id);
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Error terminating integration host process (PID {Pid}).", process.Id);
-            }
-            finally
-            {
-                try
-                {
-                    process.Dispose();
-                }
-                catch
-                {
-                    // ignore
-                }
-            }
+            return _stopTask ??= StopCoreAsync();
         }
+    }
 
-        return Task.CompletedTask;
+    private async Task StopCoreAsync()
+    {
+        _shutdown.Cancel();
+        _readyTcs.TrySetCanceled(_shutdown.Token);
+        _externalCapabilityRegistry.Stop();
+        await Task.WhenAll(_supervisors).ConfigureAwait(false);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync(CancellationToken.None).ConfigureAwait(false);
+        _shutdown.Dispose();
     }
 }
 
 /// <summary>
-/// Minimal per-integration descriptor the AppHost server reads from its own
-/// <c>appsettings.json</c> (under the <c>IntegrationHosts</c> section). The CLI's
-/// csproj generation step writes this section from the integrations it parsed
-/// from <c>aspire.config.json</c>. The server resolves <see cref="Language"/> to
-/// an <see cref="Aspire.TypeSystem.ILanguageSupport"/> at launch time and calls
-/// <see cref="LanguageService.GetIntegrationHostSpec"/> to
-/// discover how to spawn the host.
+/// Identifies an integration host configured by the AppHost server.
 /// </summary>
 internal sealed class IntegrationHostDescriptor
 {
-    /// <summary>The language the host runtime targets (e.g. <c>"typescript/nodejs"</c>).</summary>
     public required string Language { get; init; }
-
-    /// <summary>The package name, used for logging and diagnostics.</summary>
     public required string PackageName { get; init; }
-
-    /// <summary>Absolute path to the host entry point file (e.g. the integration's <c>host.ts</c>).</summary>
     public required string HostEntryPoint { get; init; }
 }
