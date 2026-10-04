@@ -48,8 +48,8 @@ env:
 
 jobs:
   poll-pull-requests:
-    # Run on schedule trigger or workflow_dispatch without PR numbers, within the 'dotnet' org
-    if: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pulls == '')) && github.repository_owner == 'dotnet' }}
+    # Poll on schedule or when manually dispatched without a PR number.
+    if: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pulls == '')) && github.repository == 'microsoft/aspire' }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
