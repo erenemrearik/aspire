@@ -43,6 +43,7 @@ on:
 jobs:
 
   test:
+    if: ${{ github.repository == 'microsoft/aspire' }}
     runs-on: ${{ inputs.os }}
     timeout-minutes: 60
     name: ${{ inputs.testShortName }} (${{ inputs.os }})

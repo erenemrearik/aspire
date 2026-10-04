@@ -54,6 +54,7 @@ on:
 
 jobs:
   fetch-data:
+    if: github.repository == 'microsoft/aspire'
     runs-on: ubuntu-latest
     permissions:
       contents: read

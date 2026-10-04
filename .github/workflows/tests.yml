@@ -18,6 +18,7 @@ permissions:
 jobs:
   setup_for_tests:
     name: Setup for tests
+    if: ${{ github.repository == 'microsoft/aspire' }}
     runs-on: ubuntu-latest
     # This job checks out and runs PR-authored code (SelectTests, the test build), so it is kept at
     # contents:read with no pull-requests:write. The selection comment is posted from the
