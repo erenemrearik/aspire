@@ -91,6 +91,10 @@ public sealed class ContainerImageDestinationReference : IExpressionValue, IValu
         }
         if (registry.Repository is { ValueExpression.Length: > 0 })
         {
+            // This Aspire manifest expression does not conditionally omit the separator when a
+            // repository parameter resolves to empty. That can produce endpoint//tools:tag,
+            // unlike GetValueAsync. Manifest consumers must supply a non-empty namespace,
+            // omit the registry repository, or configure an explicit publication repository.
             return ReferenceExpression.Create($"{registry.Endpoint}/{registry.Repository}/{Resource.Name.ToLowerInvariant()}:{publication.Tag}");
         }
 
