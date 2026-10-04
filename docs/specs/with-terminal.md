@@ -341,14 +341,15 @@ it does not lock the terminal, its creator's automation, or other viewers.
 ### Browser requirements and package pairing
 
 The dashboard uses `@hex1b/web-terminal` and the `Hex1b` NuGet package at
-exactly `0.171.0`. HWT1 is experimental state transfer
+exactly `0.172.0`. HWT1 is experimental state transfer
 between these paired packages, not a stable wire contract implemented by
 Aspire. Upgrade both together. The vendored runtime consists of one bundled
 JavaScript file for the client and both workers, a font, and two licenses.
 Worker roles use fragments on the bundled file URL rather than separate worker
 modules; the dashboard references the standalone vendored bundle for both.
-The 0.171 producer retains at most 200 command marks even when older backing
-text is still present; scrollback text is retained independently.
+The 0.172 producer retains command marks for the lifetime of their backing text
+by default, rather than evicting them after 200 entries. Explicit producer
+capacity and transport limits still apply.
 
 The dashboard uses the package's automatic renderer selection: WebGPU is
 preferred, with WebGL2 used when WebGPU capabilities or device acquisition are
