@@ -381,7 +381,7 @@
     CapabilityId: Aspire.Hosting/withContainerBuildOptions,
     MethodName: withContainerBuildOptions,
     TargetType: {
-      TypeId: Aspire.Hosting/Aspire.Hosting.ApplicationModel.IResource,
+      TypeId: Aspire.Hosting/Aspire.Hosting.ApplicationModel.IComputeResource,
       IsInterface: true
     },
     ExpandedTargetTypes: [

@@ -1478,7 +1478,7 @@ type Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource interface {
 	WithContainerFilesCallback(destinationPath string, callback func(arg1 ContainerFileSystemCallbackContext, arg2 *CancellationToken) []ContainerFileSystemItem, options ...*ContainerFilesOptions) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithContainerName(name string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithContainerNetworkAlias(alias string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
-	WithContainerRegistry(registry Resource) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
+	WithContainerRegistry(registry IContainerRegistry) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithContainerRuntimeArgs(args []string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithCorrelationId(correlationId string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithCreatedAt(createdAt string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
@@ -2177,7 +2177,7 @@ func (s *aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource) WithContainerN
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource) WithContainerRegistry(registry Resource) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource {
+func (s *aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource) WithContainerRegistry(registry IContainerRegistry) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -3698,7 +3698,7 @@ type CSharpAppResource interface {
 	WithComputeEnvironment(computeEnvironmentResource ComputeEnvironmentResource) CSharpAppResource
 	WithConfig(config *TestConfigDto) CSharpAppResource
 	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) CSharpAppResource
-	WithContainerRegistry(registry Resource) CSharpAppResource
+	WithContainerRegistry(registry IContainerRegistry) CSharpAppResource
 	WithCorrelationId(correlationId string) CSharpAppResource
 	WithCreatedAt(createdAt string) CSharpAppResource
 	WithDependency(dependency ResourceWithConnectionString) CSharpAppResource
@@ -4272,7 +4272,7 @@ func (s *cSharpAppResource) WithContainerBuildOptions(callback func(arg Containe
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *cSharpAppResource) WithContainerRegistry(registry Resource) CSharpAppResource {
+func (s *cSharpAppResource) WithContainerRegistry(registry IContainerRegistry) CSharpAppResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -6238,6 +6238,22 @@ func newContainerFileSystemItemFromHandle(h *handle, c *client) ContainerFileSys
 	return &containerFileSystemItem{resourceBuilderBase: newResourceBuilderBase(h, c)}
 }
 
+// ContainerImageDestinationReference is the public interface for handle type ContainerImageDestinationReference.
+type ContainerImageDestinationReference interface {
+	handleReference
+	Err() error
+}
+
+// containerImageDestinationReference is the unexported impl of ContainerImageDestinationReference.
+type containerImageDestinationReference struct {
+	*resourceBuilderBase
+}
+
+// newContainerImageDestinationReferenceFromHandle wraps an existing handle as ContainerImageDestinationReference.
+func newContainerImageDestinationReferenceFromHandle(h *handle, c *client) ContainerImageDestinationReference {
+	return &containerImageDestinationReference{resourceBuilderBase: newResourceBuilderBase(h, c)}
+}
+
 // ContainerImagePushOptions is the public interface for handle type ContainerImagePushOptions.
 type ContainerImagePushOptions interface {
 	handleReference
@@ -6432,6 +6448,1011 @@ func (s *containerImageReference) ValueExpression() (string, error) {
 	return decodeAs[string](result)
 }
 
+// ContainerImageResource is the public interface for handle type ContainerImageResource.
+type ContainerImageResource interface {
+	handleReference
+	CreateExecutionConfiguration() ExecutionConfigurationBuilder
+	ExcludeFromManifest() ContainerImageResource
+	ExcludeFromMcp() ContainerImageResource
+	GetImageReference(registry IContainerRegistry) ContainerImageDestinationReference
+	GetResourceName() (string, error)
+	OnBeforeResourceStarted(callback func(arg BeforeResourceStartedEvent)) ContainerImageResource
+	OnInitializeResource(callback func(arg InitializeResourceEvent)) ContainerImageResource
+	OnResourceReady(callback func(arg ResourceReadyEvent)) ContainerImageResource
+	OnResourceStopped(callback func(arg ResourceStoppedEvent)) ContainerImageResource
+	SubscribeHttpsEndpointsUpdate(callback func(obj HttpsEndpointUpdateCallbackContext)) ContainerImageResource
+	TestWaitFor(dependency Resource) ContainerImageResource
+	WithCancellableOperation(operation func(arg *CancellationToken)) ContainerImageResource
+	WithChildRelationship(child Resource) ContainerImageResource
+	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ContainerImageResource
+	WithConfig(config *TestConfigDto) ContainerImageResource
+	WithContainerRegistry(registry IContainerRegistry) ContainerImageResource
+	WithCorrelationId(correlationId string) ContainerImageResource
+	WithCreatedAt(createdAt string) ContainerImageResource
+	WithDependency(dependency ResourceWithConnectionString) ContainerImageResource
+	WithDockerfileBaseImage(options ...*WithDockerfileBaseImageOptions) ContainerImageResource
+	WithEndpoints(endpoints []string) ContainerImageResource
+	WithExplicitStart() ContainerImageResource
+	WithHealthCheck(key string) ContainerImageResource
+	WithHidden() ContainerImageResource
+	WithHiddenOnCompletion(options ...*WithHiddenOnCompletionOptions) ContainerImageResource
+	WithIconName(iconName string, options ...*WithIconNameOptions) ContainerImageResource
+	WithLifetimeOf(sourceBuilder Resource) ContainerImageResource
+	WithMergeEndpoint(endpointName string, port float64) ContainerImageResource
+	WithMergeEndpointScheme(endpointName string, port float64, scheme string) ContainerImageResource
+	WithMergeLabel(label string) ContainerImageResource
+	WithMergeLabelCategorized(label string, category string) ContainerImageResource
+	WithMergeLogging(logLevel string, options ...*WithMergeLoggingOptions) ContainerImageResource
+	WithMergeLoggingPath(logLevel string, logPath string, options ...*WithMergeLoggingPathOptions) ContainerImageResource
+	WithMergeRoute(path string, method string, handler string, priority float64) ContainerImageResource
+	WithMergeRouteMiddleware(path string, method string, handler string, priority float64, middleware string) ContainerImageResource
+	WithModifiedAt(modifiedAt string) ContainerImageResource
+	WithNestedConfig(config *TestNestedDto) ContainerImageResource
+	WithOptionalCallback(options ...*WithOptionalCallbackOptions) ContainerImageResource
+	WithOptionalString(options ...*WithOptionalStringOptions) ContainerImageResource
+	WithParentProcessLifetime(parentProcessId float64) ContainerImageResource
+	WithParentRelationship(parent Resource) ContainerImageResource
+	WithPersistentLifetime() ContainerImageResource
+	WithPipelineConfiguration(callback func(obj PipelineConfigurationContext)) ContainerImageResource
+	WithPipelineStepFactory(stepName string, callback func(arg PipelineStepContext), options ...*WithPipelineStepFactoryOptions) ContainerImageResource
+	WithProcessCommand(commandName string, displayName string, options *ProcessCommandExportOptions) ContainerImageResource
+	WithProcessCommandFactory(commandName string, displayName string, createProcessSpec func(arg ExecuteCommandContext) *ProcessCommandSpecExportData, options ...*ProcessCommandResultExportOptions) ContainerImageResource
+	WithRelationship(resourceBuilder Resource, type_ string) ContainerImageResource
+	WithRequiredCommand(command string, options ...*WithRequiredCommandOptions) ContainerImageResource
+	WithRequiredCommandValidation(command string, validationCallback func(arg RequiredCommandValidationContext) RequiredCommandValidationResult, options ...*WithRequiredCommandValidationOptions) ContainerImageResource
+	WithSessionLifetime() ContainerImageResource
+	WithStatus(status TestResourceStatus) ContainerImageResource
+	WithTerminal() ContainerImageResource
+	WithUnionDependency(dependency any) ContainerImageResource
+	WithUrl(url any, options ...*WithUrlOptions) ContainerImageResource
+	WithUrlForEndpoint(endpointName string, callback func(obj *ResourceUrlAnnotation)) ContainerImageResource
+	WithUrls(callback func(obj ResourceUrlsCallbackContext)) ContainerImageResource
+	WithValidator(validator func(arg TestResourceContext) bool) ContainerImageResource
+	Err() error
+}
+
+// containerImageResource is the unexported impl of ContainerImageResource.
+type containerImageResource struct {
+	*resourceBuilderBase
+}
+
+// newContainerImageResourceFromHandle wraps an existing handle as ContainerImageResource.
+func newContainerImageResourceFromHandle(h *handle, c *client) ContainerImageResource {
+	return &containerImageResource{resourceBuilderBase: newResourceBuilderBase(h, c)}
+}
+
+// CreateExecutionConfiguration creates an execution configuration builder for the specified resource.
+func (s *containerImageResource) CreateExecutionConfiguration() ExecutionConfigurationBuilder {
+	if s.err != nil { return &executionConfigurationBuilder{resourceBuilderBase: newErroredResourceBuilder(s.err, s.client)} }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"resource": s.handle.ToJSON(),
+	}
+	result, err := s.client.invokeCapability(ctx, "Aspire.Hosting/createExecutionConfiguration", reqArgs)
+	if err != nil {
+		return &executionConfigurationBuilder{resourceBuilderBase: newErroredResourceBuilder(err, s.client)}
+	}
+	href, ok := result.(handleReference)
+	if !ok {
+		err := fmt.Errorf("aspire: Aspire.Hosting/createExecutionConfiguration returned unexpected type %T", result)
+		return &executionConfigurationBuilder{resourceBuilderBase: newErroredResourceBuilder(err, s.client)}
+	}
+	return &executionConfigurationBuilder{resourceBuilderBase: newResourceBuilderBase(href.getHandle(), s.client)}
+}
+
+// ExcludeFromManifest excludes a resource from being published to the manifest.
+func (s *containerImageResource) ExcludeFromManifest() ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/excludeFromManifest", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// ExcludeFromMcp exclude the resource from MCP operations using the Aspire MCP server. The resource is excluded from results that return resources, console logs and telemetry.
+func (s *containerImageResource) ExcludeFromMcp() ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/excludeFromMcp", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// GetImageReference gets a structured image reference for an associated registry.
+func (s *containerImageResource) GetImageReference(registry IContainerRegistry) ContainerImageDestinationReference {
+	if s.err != nil { return &containerImageDestinationReference{resourceBuilderBase: newErroredResourceBuilder(s.err, s.client)} }
+	if registry != nil { if err := registry.Err(); err != nil { return &containerImageDestinationReference{resourceBuilderBase: newErroredResourceBuilder(err, s.client)} } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["registry"] = serializeValue(registry)
+	result, err := s.client.invokeCapability(ctx, "Aspire.Hosting/getImageReference", reqArgs)
+	if err != nil {
+		return &containerImageDestinationReference{resourceBuilderBase: newErroredResourceBuilder(err, s.client)}
+	}
+	href, ok := result.(handleReference)
+	if !ok {
+		err := fmt.Errorf("aspire: Aspire.Hosting/getImageReference returned unexpected type %T", result)
+		return &containerImageDestinationReference{resourceBuilderBase: newErroredResourceBuilder(err, s.client)}
+	}
+	return &containerImageDestinationReference{resourceBuilderBase: newResourceBuilderBase(href.getHandle(), s.client)}
+}
+
+// GetResourceName gets the name of the resource from a builder.
+func (s *containerImageResource) GetResourceName() (string, error) {
+	if s.err != nil { var zero string; return zero, s.err }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"resource": s.handle.ToJSON(),
+	}
+	result, err := s.client.invokeCapability(ctx, "Aspire.Hosting/getResourceName", reqArgs)
+	if err != nil {
+		var zero string
+		return zero, err
+	}
+	return decodeAs[string](result)
+}
+
+// OnBeforeResourceStarted subscribes to the BeforeResourceStarted event.
+func (s *containerImageResource) OnBeforeResourceStarted(callback func(arg BeforeResourceStartedEvent)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[BeforeResourceStartedEvent](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/onBeforeResourceStarted", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// OnInitializeResource subscribes to the InitializeResource event.
+func (s *containerImageResource) OnInitializeResource(callback func(arg InitializeResourceEvent)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[InitializeResourceEvent](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/onInitializeResource", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// OnResourceReady subscribes to the ResourceReady event.
+func (s *containerImageResource) OnResourceReady(callback func(arg ResourceReadyEvent)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[ResourceReadyEvent](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/onResourceReady", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// OnResourceStopped subscribes to the ResourceStopped event.
+func (s *containerImageResource) OnResourceStopped(callback func(arg ResourceStoppedEvent)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[ResourceStoppedEvent](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/onResourceStopped", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// SubscribeHttpsEndpointsUpdate subscribes to the `BeforeStartEvent` and invokes the specified callback when an HTTPS certificate is determined to be available for the resource. This is used to conditionally update endpoint URI schemes or perform other HTTPS-related configuration at startup.
+func (s *containerImageResource) SubscribeHttpsEndpointsUpdate(callback func(obj HttpsEndpointUpdateCallbackContext)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[HttpsEndpointUpdateCallbackContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/subscribeHttpsEndpointsUpdate", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// TestWaitFor waits for another resource (test version)
+func (s *containerImageResource) TestWaitFor(dependency Resource) ContainerImageResource {
+	if s.err != nil { return s }
+	if dependency != nil { if err := dependency.Err(); err != nil { s.setErr(err); return s } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["dependency"] = serializeValue(dependency)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/testWaitFor", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithCancellableOperation performs a cancellable operation
+func (s *containerImageResource) WithCancellableOperation(operation func(arg *CancellationToken)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if operation != nil {
+		cb := operation
+		shim := func(args ...any) any {
+			cb(callbackArg[*CancellationToken](args, 0))
+			return nil
+		}
+		reqArgs["operation"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withCancellableOperation", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithChildRelationship sets a child relationship
+func (s *containerImageResource) WithChildRelationship(child Resource) ContainerImageResource {
+	if s.err != nil { return s }
+	if child != nil { if err := child.Err(); err != nil { s.setErr(err); return s } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["child"] = serializeValue(child)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withBuilderChildRelationship", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithCommand adds a resource command
+func (s *containerImageResource) WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["name"] = serializeValue(name)
+	reqArgs["displayName"] = serializeValue(displayName)
+	if executeCommand != nil {
+		cb := executeCommand
+		shim := func(args ...any) any {
+			return cb(callbackArg[ExecuteCommandContext](args, 0))
+		}
+		reqArgs["executeCommand"] = s.client.registerCallback(shim)
+	}
+	if len(options) > 0 {
+		merged := &WithCommandOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withCommand", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithConfig configures the resource with a DTO
+func (s *containerImageResource) WithConfig(config *TestConfigDto) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if config != nil { reqArgs["config"] = serializeValue(config) }
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withConfig", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithContainerRegistry configures the resource to use the specified container registry for container image operations.
+func (s *containerImageResource) WithContainerRegistry(registry IContainerRegistry) ContainerImageResource {
+	if s.err != nil { return s }
+	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["registry"] = serializeValue(registry)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerRegistry", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithCorrelationId sets the correlation ID
+func (s *containerImageResource) WithCorrelationId(correlationId string) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["correlationId"] = serializeValue(correlationId)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withCorrelationId", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithCreatedAt sets the created timestamp
+func (s *containerImageResource) WithCreatedAt(createdAt string) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["createdAt"] = serializeValue(createdAt)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withCreatedAt", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithDependency adds a dependency on another resource
+func (s *containerImageResource) WithDependency(dependency ResourceWithConnectionString) ContainerImageResource {
+	if s.err != nil { return s }
+	if dependency != nil { if err := dependency.Err(); err != nil { s.setErr(err); return s } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["dependency"] = serializeValue(dependency)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withDependency", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithDockerfileBaseImage configures custom base images for generated Dockerfiles.
+func (s *containerImageResource) WithDockerfileBaseImage(options ...*WithDockerfileBaseImageOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if len(options) > 0 {
+		merged := &WithDockerfileBaseImageOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withDockerfileBaseImage", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithEndpoints sets the endpoints
+func (s *containerImageResource) WithEndpoints(endpoints []string) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if endpoints != nil { reqArgs["endpoints"] = serializeValue(endpoints) }
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withEndpoints", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithExplicitStart prevents resource from starting automatically
+func (s *containerImageResource) WithExplicitStart() ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withExplicitStart", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithHealthCheck adds a health check by key
+func (s *containerImageResource) WithHealthCheck(key string) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["key"] = serializeValue(key)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withHealthCheck", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithHidden hides the resource from default resource lists
+func (s *containerImageResource) WithHidden() ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withHidden", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithHiddenOnCompletion hides the resource from default resource lists after successful completion
+func (s *containerImageResource) WithHiddenOnCompletion(options ...*WithHiddenOnCompletionOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if len(options) > 0 {
+		merged := &WithHiddenOnCompletionOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withHiddenOnCompletion", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithIconName specifies the icon to use when displaying the resource in the dashboard.
+func (s *containerImageResource) WithIconName(iconName string, options ...*WithIconNameOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["iconName"] = serializeValue(iconName)
+	if len(options) > 0 {
+		merged := &WithIconNameOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withIconName", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithLifetimeOf configures a resource to match the lifetime of another resource.
+func (s *containerImageResource) WithLifetimeOf(sourceBuilder Resource) ContainerImageResource {
+	if s.err != nil { return s }
+	if sourceBuilder != nil { if err := sourceBuilder.Err(); err != nil { s.setErr(err); return s } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["sourceBuilder"] = serializeValue(sourceBuilder)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withLifetimeOf", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithMergeEndpoint configures a named endpoint
+func (s *containerImageResource) WithMergeEndpoint(endpointName string, port float64) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["endpointName"] = serializeValue(endpointName)
+	reqArgs["port"] = serializeValue(port)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withMergeEndpoint", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithMergeEndpointScheme configures a named endpoint with scheme
+func (s *containerImageResource) WithMergeEndpointScheme(endpointName string, port float64, scheme string) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["endpointName"] = serializeValue(endpointName)
+	reqArgs["port"] = serializeValue(port)
+	reqArgs["scheme"] = serializeValue(scheme)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withMergeEndpointScheme", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithMergeLabel adds a label to the resource
+func (s *containerImageResource) WithMergeLabel(label string) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["label"] = serializeValue(label)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withMergeLabel", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithMergeLabelCategorized adds a categorized label to the resource
+func (s *containerImageResource) WithMergeLabelCategorized(label string, category string) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["label"] = serializeValue(label)
+	reqArgs["category"] = serializeValue(category)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withMergeLabelCategorized", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithMergeLogging configures resource logging
+func (s *containerImageResource) WithMergeLogging(logLevel string, options ...*WithMergeLoggingOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["logLevel"] = serializeValue(logLevel)
+	if len(options) > 0 {
+		merged := &WithMergeLoggingOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withMergeLogging", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithMergeLoggingPath configures resource logging with file path
+func (s *containerImageResource) WithMergeLoggingPath(logLevel string, logPath string, options ...*WithMergeLoggingPathOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["logLevel"] = serializeValue(logLevel)
+	reqArgs["logPath"] = serializeValue(logPath)
+	if len(options) > 0 {
+		merged := &WithMergeLoggingPathOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withMergeLoggingPath", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithMergeRoute configures a route
+func (s *containerImageResource) WithMergeRoute(path string, method string, handler string, priority float64) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["path"] = serializeValue(path)
+	reqArgs["method"] = serializeValue(method)
+	reqArgs["handler"] = serializeValue(handler)
+	reqArgs["priority"] = serializeValue(priority)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withMergeRoute", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithMergeRouteMiddleware configures a route with middleware
+func (s *containerImageResource) WithMergeRouteMiddleware(path string, method string, handler string, priority float64, middleware string) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["path"] = serializeValue(path)
+	reqArgs["method"] = serializeValue(method)
+	reqArgs["handler"] = serializeValue(handler)
+	reqArgs["priority"] = serializeValue(priority)
+	reqArgs["middleware"] = serializeValue(middleware)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withMergeRouteMiddleware", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithModifiedAt sets the modified timestamp
+func (s *containerImageResource) WithModifiedAt(modifiedAt string) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["modifiedAt"] = serializeValue(modifiedAt)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withModifiedAt", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithNestedConfig configures with nested DTO
+func (s *containerImageResource) WithNestedConfig(config *TestNestedDto) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if config != nil { reqArgs["config"] = serializeValue(config) }
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withNestedConfig", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithOptionalCallback configures with optional callback
+func (s *containerImageResource) WithOptionalCallback(options ...*WithOptionalCallbackOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if len(options) > 0 {
+		merged := &WithOptionalCallbackOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+		if merged.Callback != nil {
+			cb := merged.Callback
+			shim := func(args ...any) any {
+				cb(callbackArg[TestCallbackContext](args, 0))
+				return nil
+			}
+			reqArgs["callback"] = s.client.registerCallback(shim)
+		}
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withOptionalCallback", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithOptionalString adds an optional string parameter
+func (s *containerImageResource) WithOptionalString(options ...*WithOptionalStringOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if len(options) > 0 {
+		merged := &WithOptionalStringOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withOptionalString", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithParentProcessLifetime configures a resource to use a persistent lifetime that ends when a parent process exits.
+func (s *containerImageResource) WithParentProcessLifetime(parentProcessId float64) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["parentProcessId"] = serializeValue(parentProcessId)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withParentProcessLifetime", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithParentRelationship sets the parent relationship
+func (s *containerImageResource) WithParentRelationship(parent Resource) ContainerImageResource {
+	if s.err != nil { return s }
+	if parent != nil { if err := parent.Err(); err != nil { s.setErr(err); return s } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["parent"] = serializeValue(parent)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withBuilderParentRelationship", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithPersistentLifetime configures a resource to use a persistent lifetime.
+func (s *containerImageResource) WithPersistentLifetime() ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withPersistentLifetime", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithPipelineConfiguration registers a callback to be executed during the pipeline configuration phase, allowing modification of step dependencies and relationships.
+func (s *containerImageResource) WithPipelineConfiguration(callback func(obj PipelineConfigurationContext)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[PipelineConfigurationContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withPipelineConfiguration", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithPipelineStepFactory adds a pipeline step to the resource that will be executed during deployment.
+func (s *containerImageResource) WithPipelineStepFactory(stepName string, callback func(arg PipelineStepContext), options ...*WithPipelineStepFactoryOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["stepName"] = serializeValue(stepName)
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[PipelineStepContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if len(options) > 0 {
+		merged := &WithPipelineStepFactoryOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withPipelineStepFactory", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithProcessCommand adds a command to the resource that starts a local process when invoked.
+func (s *containerImageResource) WithProcessCommand(commandName string, displayName string, options *ProcessCommandExportOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["commandName"] = serializeValue(commandName)
+	reqArgs["displayName"] = serializeValue(displayName)
+	if options != nil { reqArgs["options"] = serializeValue(options) }
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withProcessCommand", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithProcessCommandFactory adds a command to the resource that starts a local process created by a callback when invoked.
+func (s *containerImageResource) WithProcessCommandFactory(commandName string, displayName string, createProcessSpec func(arg ExecuteCommandContext) *ProcessCommandSpecExportData, options ...*ProcessCommandResultExportOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["commandName"] = serializeValue(commandName)
+	reqArgs["displayName"] = serializeValue(displayName)
+	if createProcessSpec != nil {
+		cb := createProcessSpec
+		shim := func(args ...any) any {
+			return cb(callbackArg[ExecuteCommandContext](args, 0))
+		}
+		reqArgs["createProcessSpec"] = s.client.registerCallback(shim)
+	}
+	if len(options) > 0 {
+		merged := &ProcessCommandResultExportOptions{}
+		applied := false
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt); applied = true }
+		}
+		if applied { reqArgs["options"] = serializeValue(merged) }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withProcessCommandFactory", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithRelationship adds a relationship to another resource using its builder.
+func (s *containerImageResource) WithRelationship(resourceBuilder Resource, type_ string) ContainerImageResource {
+	if s.err != nil { return s }
+	if resourceBuilder != nil { if err := resourceBuilder.Err(); err != nil { s.setErr(err); return s } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["resourceBuilder"] = serializeValue(resourceBuilder)
+	reqArgs["type"] = serializeValue(type_)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withBuilderRelationship", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithRequiredCommand declares that a resource requires a specific command/executable to be available on the local machine PATH before it can start.
+func (s *containerImageResource) WithRequiredCommand(command string, options ...*WithRequiredCommandOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["command"] = serializeValue(command)
+	if len(options) > 0 {
+		merged := &WithRequiredCommandOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withRequiredCommand", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithRequiredCommandValidation declares that a resource requires a specific command/executable to be available on the local machine PATH before it can start, with custom validation logic.
+func (s *containerImageResource) WithRequiredCommandValidation(command string, validationCallback func(arg RequiredCommandValidationContext) RequiredCommandValidationResult, options ...*WithRequiredCommandValidationOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["command"] = serializeValue(command)
+	if validationCallback != nil {
+		cb := validationCallback
+		shim := func(args ...any) any {
+			return cb(callbackArg[RequiredCommandValidationContext](args, 0))
+		}
+		reqArgs["validationCallback"] = s.client.registerCallback(shim)
+	}
+	if len(options) > 0 {
+		merged := &WithRequiredCommandValidationOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withRequiredCommandValidation", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithSessionLifetime configures a resource to use a session lifetime.
+func (s *containerImageResource) WithSessionLifetime() ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withSessionLifetime", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithStatus sets the resource status
+func (s *containerImageResource) WithStatus(status TestResourceStatus) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["status"] = serializeValue(status)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withStatus", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithTerminal adds an interactive terminal session to a resource using the default terminal options.
+func (s *containerImageResource) WithTerminal() ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withTerminal", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithUnionDependency adds a dependency from a string or another resource
+// Allowed types for parameter dependency: string, ResourceWithConnectionString.
+func (s *containerImageResource) WithUnionDependency(dependency any) ContainerImageResource {
+	if s.err != nil { return s }
+	switch dependency.(type) {
+	case string, ResourceWithConnectionString:
+	default:
+		err := fmt.Errorf("aspire: WithUnionDependency: parameter %q must be one of [string, ResourceWithConnectionString], got %T", "dependency", dependency)
+		s.setErr(err); return s
+	}
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if !isNil(dependency) { reqArgs["dependency"] = serializeValue(dependency) }
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withUnionDependency", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithUrl adds or modifies displayed URLs
+// Allowed types for parameter url: string, *ReferenceExpression.
+func (s *containerImageResource) WithUrl(url any, options ...*WithUrlOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	switch url.(type) {
+	case string, *ReferenceExpression:
+	default:
+		err := fmt.Errorf("aspire: WithUrl: parameter %q must be one of [string, *ReferenceExpression], got %T", "url", url)
+		s.setErr(err); return s
+	}
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if !isNil(url) { reqArgs["url"] = serializeValue(url) }
+	if len(options) > 0 {
+		merged := &WithUrlOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withUrl", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithUrlForEndpoint registers a callback to update the URL displayed for the endpoint with the specified name.
+func (s *containerImageResource) WithUrlForEndpoint(endpointName string, callback func(obj *ResourceUrlAnnotation)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["endpointName"] = serializeValue(endpointName)
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			arg0 := callbackArg[*ResourceUrlAnnotation](args, 0)
+			cb(arg0)
+			return map[string]any{
+				"p0": serializeValue(arg0),
+			}
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withUrlForEndpoint", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithUrls registers a callback to customize the URLs displayed for the resource.
+func (s *containerImageResource) WithUrls(callback func(obj ResourceUrlsCallbackContext)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[ResourceUrlsCallbackContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withUrls", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithValidator adds validation callback
+func (s *containerImageResource) WithValidator(validator func(arg TestResourceContext) bool) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if validator != nil {
+		cb := validator
+		shim := func(args ...any) any {
+			return cb(callbackArg[TestResourceContext](args, 0))
+		}
+		reqArgs["validator"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting.CodeGeneration.Go.Tests/withValidator", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
 // ContainerMountAnnotation is the public interface for handle type ContainerMountAnnotation.
 type ContainerMountAnnotation interface {
 	handleReference
@@ -6579,8 +7600,7 @@ type ContainerRegistryResource interface {
 	WithChildRelationship(child Resource) ContainerRegistryResource
 	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ContainerRegistryResource
 	WithConfig(config *TestConfigDto) ContainerRegistryResource
-	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ContainerRegistryResource
-	WithContainerRegistry(registry Resource) ContainerRegistryResource
+	WithContainerRegistry(registry IContainerRegistry) ContainerRegistryResource
 	WithCorrelationId(correlationId string) ContainerRegistryResource
 	WithCreatedAt(createdAt string) ContainerRegistryResource
 	WithDependency(dependency ResourceWithConnectionString) ContainerRegistryResource
@@ -6611,6 +7631,7 @@ type ContainerRegistryResource interface {
 	WithPipelineStepFactory(stepName string, callback func(arg PipelineStepContext), options ...*WithPipelineStepFactoryOptions) ContainerRegistryResource
 	WithProcessCommand(commandName string, displayName string, options *ProcessCommandExportOptions) ContainerRegistryResource
 	WithProcessCommandFactory(commandName string, displayName string, createProcessSpec func(arg ExecuteCommandContext) *ProcessCommandSpecExportData, options ...*ProcessCommandResultExportOptions) ContainerRegistryResource
+	WithPushedImage(image ContainerImageResource, options ...*WithPushedImageOptions) ContainerRegistryResource
 	WithRelationship(resourceBuilder Resource, type_ string) ContainerRegistryResource
 	WithRequiredCommand(command string, options ...*WithRequiredCommandOptions) ContainerRegistryResource
 	WithRequiredCommandValidation(command string, validationCallback func(arg RequiredCommandValidationContext) RequiredCommandValidationResult, options ...*WithRequiredCommandValidationOptions) ContainerRegistryResource
@@ -6870,27 +7891,8 @@ func (s *containerRegistryResource) WithConfig(config *TestConfigDto) ContainerR
 	return s
 }
 
-// WithContainerBuildOptions configures container build options for a compute resource using an async callback.
-func (s *containerRegistryResource) WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ContainerRegistryResource {
-	if s.err != nil { return s }
-	ctx := context.Background()
-	reqArgs := map[string]any{
-		"builder": s.handle.ToJSON(),
-	}
-	if callback != nil {
-		cb := callback
-		shim := func(args ...any) any {
-			cb(callbackArg[ContainerBuildOptionsCallbackContext](args, 0))
-			return nil
-		}
-		reqArgs["callback"] = s.client.registerCallback(shim)
-	}
-	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerBuildOptions", reqArgs); err != nil { s.setErr(err) }
-	return s
-}
-
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *containerRegistryResource) WithContainerRegistry(registry Resource) ContainerRegistryResource {
+func (s *containerRegistryResource) WithContainerRegistry(registry IContainerRegistry) ContainerRegistryResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -7367,6 +8369,26 @@ func (s *containerRegistryResource) WithProcessCommandFactory(commandName string
 	return s
 }
 
+// WithPushedImage configures an image artifact to be pushed to a registry.
+func (s *containerRegistryResource) WithPushedImage(image ContainerImageResource, options ...*WithPushedImageOptions) ContainerRegistryResource {
+	if s.err != nil { return s }
+	if image != nil { if err := image.Err(); err != nil { s.setErr(err); return s } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["image"] = serializeValue(image)
+	if len(options) > 0 {
+		merged := &WithPushedImageOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withRegistryPushedImage", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
 // WithRelationship adds a relationship to another resource using its builder.
 func (s *containerRegistryResource) WithRelationship(resourceBuilder Resource, type_ string) ContainerRegistryResource {
 	if s.err != nil { return s }
@@ -7604,7 +8626,7 @@ type ContainerResource interface {
 	WithContainerFilesCallback(destinationPath string, callback func(arg1 ContainerFileSystemCallbackContext, arg2 *CancellationToken) []ContainerFileSystemItem, options ...*ContainerFilesOptions) ContainerResource
 	WithContainerName(name string) ContainerResource
 	WithContainerNetworkAlias(alias string) ContainerResource
-	WithContainerRegistry(registry Resource) ContainerResource
+	WithContainerRegistry(registry IContainerRegistry) ContainerResource
 	WithContainerRuntimeArgs(args []string) ContainerResource
 	WithCorrelationId(correlationId string) ContainerResource
 	WithCreatedAt(createdAt string) ContainerResource
@@ -8302,7 +9324,7 @@ func (s *containerResource) WithContainerNetworkAlias(alias string) ContainerRes
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *containerResource) WithContainerRegistry(registry Resource) ContainerResource {
+func (s *containerResource) WithContainerRegistry(registry IContainerRegistry) ContainerResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -9660,6 +10682,7 @@ type DistributedApplicationBuilder interface {
 	AddCSharpApp(name string, path string, options ...*AddCSharpAppOptions) CSharpAppResource
 	AddConnectionString(name string, options ...*AddConnectionStringOptions) ResourceWithConnectionString
 	AddContainer(name string, image any) ContainerResource
+	AddContainerImage(name string, image string) ContainerImageResource
 	AddContainerRegistry(name string, endpoint any, options ...*AddContainerRegistryOptions) ContainerRegistryResource
 	AddDockerfile(name string, contextPath string, options ...*AddDockerfileOptions) ContainerResource
 	AddDockerfileBuilder(name string, contextPath string, callback func(arg DockerfileBuilderCallbackContext), options ...*AddDockerfileBuilderOptions) ContainerResource
@@ -9780,6 +10803,27 @@ func (s *distributedApplicationBuilder) AddContainer(name string, image any) Con
 		return &containerResource{resourceBuilderBase: newErroredResourceBuilder(err, s.client)}
 	}
 	return &containerResource{resourceBuilderBase: newResourceBuilderBase(href.getHandle(), s.client)}
+}
+
+// AddContainerImage adds an existing container image as a standalone artifact.
+func (s *distributedApplicationBuilder) AddContainerImage(name string, image string) ContainerImageResource {
+	if s.err != nil { return &containerImageResource{resourceBuilderBase: newErroredResourceBuilder(s.err, s.client)} }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["name"] = serializeValue(name)
+	reqArgs["image"] = serializeValue(image)
+	result, err := s.client.invokeCapability(ctx, "Aspire.Hosting/addContainerImage", reqArgs)
+	if err != nil {
+		return &containerImageResource{resourceBuilderBase: newErroredResourceBuilder(err, s.client)}
+	}
+	href, ok := result.(handleReference)
+	if !ok {
+		err := fmt.Errorf("aspire: Aspire.Hosting/addContainerImage returned unexpected type %T", result)
+		return &containerImageResource{resourceBuilderBase: newErroredResourceBuilder(err, s.client)}
+	}
+	return &containerImageResource{resourceBuilderBase: newResourceBuilderBase(href.getHandle(), s.client)}
 }
 
 // AddContainerRegistry adds a container registry resource
@@ -11263,7 +12307,7 @@ type DotnetToolResource interface {
 	WithComputeEnvironment(computeEnvironmentResource ComputeEnvironmentResource) DotnetToolResource
 	WithConfig(config *TestConfigDto) DotnetToolResource
 	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) DotnetToolResource
-	WithContainerRegistry(registry Resource) DotnetToolResource
+	WithContainerRegistry(registry IContainerRegistry) DotnetToolResource
 	WithCorrelationId(correlationId string) DotnetToolResource
 	WithCreatedAt(createdAt string) DotnetToolResource
 	WithDependency(dependency ResourceWithConnectionString) DotnetToolResource
@@ -11811,7 +12855,7 @@ func (s *dotnetToolResource) WithContainerBuildOptions(callback func(arg Contain
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *dotnetToolResource) WithContainerRegistry(registry Resource) DotnetToolResource {
+func (s *dotnetToolResource) WithContainerRegistry(registry IContainerRegistry) DotnetToolResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -14087,7 +15131,7 @@ type ExecutableResource interface {
 	WithComputeEnvironment(computeEnvironmentResource ComputeEnvironmentResource) ExecutableResource
 	WithConfig(config *TestConfigDto) ExecutableResource
 	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ExecutableResource
-	WithContainerRegistry(registry Resource) ExecutableResource
+	WithContainerRegistry(registry IContainerRegistry) ExecutableResource
 	WithCorrelationId(correlationId string) ExecutableResource
 	WithCreatedAt(createdAt string) ExecutableResource
 	WithDependency(dependency ResourceWithConnectionString) ExecutableResource
@@ -14629,7 +15673,7 @@ func (s *executableResource) WithContainerBuildOptions(callback func(arg Contain
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *executableResource) WithContainerRegistry(registry Resource) ExecutableResource {
+func (s *executableResource) WithContainerRegistry(registry IContainerRegistry) ExecutableResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -16077,8 +17121,7 @@ type ExternalServiceResource interface {
 	WithChildRelationship(child Resource) ExternalServiceResource
 	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ExternalServiceResource
 	WithConfig(config *TestConfigDto) ExternalServiceResource
-	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ExternalServiceResource
-	WithContainerRegistry(registry Resource) ExternalServiceResource
+	WithContainerRegistry(registry IContainerRegistry) ExternalServiceResource
 	WithCorrelationId(correlationId string) ExternalServiceResource
 	WithCreatedAt(createdAt string) ExternalServiceResource
 	WithDependency(dependency ResourceWithConnectionString) ExternalServiceResource
@@ -16369,27 +17412,8 @@ func (s *externalServiceResource) WithConfig(config *TestConfigDto) ExternalServ
 	return s
 }
 
-// WithContainerBuildOptions configures container build options for a compute resource using an async callback.
-func (s *externalServiceResource) WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ExternalServiceResource {
-	if s.err != nil { return s }
-	ctx := context.Background()
-	reqArgs := map[string]any{
-		"builder": s.handle.ToJSON(),
-	}
-	if callback != nil {
-		cb := callback
-		shim := func(args ...any) any {
-			cb(callbackArg[ContainerBuildOptionsCallbackContext](args, 0))
-			return nil
-		}
-		reqArgs["callback"] = s.client.registerCallback(shim)
-	}
-	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerBuildOptions", reqArgs); err != nil { s.setErr(err) }
-	return s
-}
-
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *externalServiceResource) WithContainerRegistry(registry Resource) ExternalServiceResource {
+func (s *externalServiceResource) WithContainerRegistry(registry IContainerRegistry) ExternalServiceResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -17642,6 +18666,22 @@ func newIContainerFilesDestinationResourceFromHandle(h *handle, c *client) ICont
 	return &iContainerFilesDestinationResource{resourceBuilderBase: newResourceBuilderBase(h, c)}
 }
 
+// IContainerRegistry is the public interface for handle type IContainerRegistry.
+type IContainerRegistry interface {
+	handleReference
+	Err() error
+}
+
+// iContainerRegistry is the unexported impl of IContainerRegistry.
+type iContainerRegistry struct {
+	*resourceBuilderBase
+}
+
+// newIContainerRegistryFromHandle wraps an existing handle as IContainerRegistry.
+func newIContainerRegistryFromHandle(h *handle, c *client) IContainerRegistry {
+	return &iContainerRegistry{resourceBuilderBase: newResourceBuilderBase(h, c)}
+}
+
 // InitializeResourceEvent is the public interface for handle type InitializeResourceEvent.
 type InitializeResourceEvent interface {
 	handleReference
@@ -18762,8 +19802,7 @@ type ParameterResource interface {
 	WithChildRelationship(child Resource) ParameterResource
 	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ParameterResource
 	WithConfig(config *TestConfigDto) ParameterResource
-	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ParameterResource
-	WithContainerRegistry(registry Resource) ParameterResource
+	WithContainerRegistry(registry IContainerRegistry) ParameterResource
 	WithCorrelationId(correlationId string) ParameterResource
 	WithCreatedAt(createdAt string) ParameterResource
 	WithCustomInput(options *ParameterCustomInputOptions) ParameterResource
@@ -19055,27 +20094,8 @@ func (s *parameterResource) WithConfig(config *TestConfigDto) ParameterResource 
 	return s
 }
 
-// WithContainerBuildOptions configures container build options for a compute resource using an async callback.
-func (s *parameterResource) WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ParameterResource {
-	if s.err != nil { return s }
-	ctx := context.Background()
-	reqArgs := map[string]any{
-		"builder": s.handle.ToJSON(),
-	}
-	if callback != nil {
-		cb := callback
-		shim := func(args ...any) any {
-			cb(callbackArg[ContainerBuildOptionsCallbackContext](args, 0))
-			return nil
-		}
-		reqArgs["callback"] = s.client.registerCallback(shim)
-	}
-	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerBuildOptions", reqArgs); err != nil { s.setErr(err) }
-	return s
-}
-
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *parameterResource) WithContainerRegistry(registry Resource) ParameterResource {
+func (s *parameterResource) WithContainerRegistry(registry IContainerRegistry) ParameterResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -20511,7 +21531,7 @@ type ProjectResource interface {
 	WithComputeEnvironment(computeEnvironmentResource ComputeEnvironmentResource) ProjectResource
 	WithConfig(config *TestConfigDto) ProjectResource
 	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ProjectResource
-	WithContainerRegistry(registry Resource) ProjectResource
+	WithContainerRegistry(registry IContainerRegistry) ProjectResource
 	WithCorrelationId(correlationId string) ProjectResource
 	WithCreatedAt(createdAt string) ProjectResource
 	WithDependency(dependency ResourceWithConnectionString) ProjectResource
@@ -21085,7 +22105,7 @@ func (s *projectResource) WithContainerBuildOptions(callback func(arg ContainerB
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *projectResource) WithContainerRegistry(registry Resource) ProjectResource {
+func (s *projectResource) WithContainerRegistry(registry IContainerRegistry) ProjectResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -23910,7 +24930,7 @@ type TestDatabaseResource interface {
 	WithContainerFilesCallback(destinationPath string, callback func(arg1 ContainerFileSystemCallbackContext, arg2 *CancellationToken) []ContainerFileSystemItem, options ...*ContainerFilesOptions) TestDatabaseResource
 	WithContainerName(name string) TestDatabaseResource
 	WithContainerNetworkAlias(alias string) TestDatabaseResource
-	WithContainerRegistry(registry Resource) TestDatabaseResource
+	WithContainerRegistry(registry IContainerRegistry) TestDatabaseResource
 	WithContainerRuntimeArgs(args []string) TestDatabaseResource
 	WithCorrelationId(correlationId string) TestDatabaseResource
 	WithCreatedAt(createdAt string) TestDatabaseResource
@@ -24608,7 +25628,7 @@ func (s *testDatabaseResource) WithContainerNetworkAlias(alias string) TestDatab
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *testDatabaseResource) WithContainerRegistry(registry Resource) TestDatabaseResource {
+func (s *testDatabaseResource) WithContainerRegistry(registry IContainerRegistry) TestDatabaseResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -26178,7 +27198,7 @@ type TestRedisResource interface {
 	WithContainerFilesCallback(destinationPath string, callback func(arg1 ContainerFileSystemCallbackContext, arg2 *CancellationToken) []ContainerFileSystemItem, options ...*ContainerFilesOptions) TestRedisResource
 	WithContainerName(name string) TestRedisResource
 	WithContainerNetworkAlias(alias string) TestRedisResource
-	WithContainerRegistry(registry Resource) TestRedisResource
+	WithContainerRegistry(registry IContainerRegistry) TestRedisResource
 	WithContainerRuntimeArgs(args []string) TestRedisResource
 	WithCorrelationId(correlationId string) TestRedisResource
 	WithCreatedAt(createdAt string) TestRedisResource
@@ -27096,7 +28116,7 @@ func (s *testRedisResource) WithContainerNetworkAlias(alias string) TestRedisRes
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *testRedisResource) WithContainerRegistry(registry Resource) TestRedisResource {
+func (s *testRedisResource) WithContainerRegistry(registry IContainerRegistry) TestRedisResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -28804,6 +29824,20 @@ func (s *userSecretsManager) TrySetSecret(name string, value string) (bool, erro
 // Options structs
 // ============================================================================
 
+// WithPushedImageOptions carries optional parameters for WithPushedImage.
+type WithPushedImageOptions struct {
+	Repository *string `json:"repository,omitempty"`
+	Tag *string `json:"tag,omitempty"`
+}
+
+func (o *WithPushedImageOptions) ToMap() map[string]any {
+	m := map[string]any{}
+	if o == nil { return m }
+	if o.Repository != nil { m["repository"] = serializeValue(o.Repository) }
+	if o.Tag != nil { m["tag"] = serializeValue(o.Tag) }
+	return m
+}
+
 // AddContainerRegistryOptions carries optional parameters for AddContainerRegistry.
 type AddContainerRegistryOptions struct {
 	Repository any `json:"repository,omitempty"`
@@ -30074,6 +31108,9 @@ func registerWrappers(c *client) {
 	c.registerHandleWrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerFileSystemItem", func(h *handle, c *client) any {
 		return newContainerFileSystemItemFromHandle(h, c)
 	})
+	c.registerHandleWrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerImageDestinationReference", func(h *handle, c *client) any {
+		return newContainerImageDestinationReferenceFromHandle(h, c)
+	})
 	c.registerHandleWrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerImagePushOptions", func(h *handle, c *client) any {
 		return newContainerImagePushOptionsFromHandle(h, c)
 	})
@@ -30082,6 +31119,9 @@ func registerWrappers(c *client) {
 	})
 	c.registerHandleWrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerImageReference", func(h *handle, c *client) any {
 		return newContainerImageReferenceFromHandle(h, c)
+	})
+	c.registerHandleWrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerImageResource", func(h *handle, c *client) any {
+		return newContainerImageResourceFromHandle(h, c)
 	})
 	c.registerHandleWrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerMountAnnotation", func(h *handle, c *client) any {
 		return newContainerMountAnnotationFromHandle(h, c)
@@ -30187,6 +31227,9 @@ func registerWrappers(c *client) {
 	})
 	c.registerHandleWrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.IContainerFilesDestinationResource", func(h *handle, c *client) any {
 		return newIContainerFilesDestinationResourceFromHandle(h, c)
+	})
+	c.registerHandleWrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.IContainerRegistry", func(h *handle, c *client) any {
+		return newIContainerRegistryFromHandle(h, c)
 	})
 	c.registerHandleWrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.InitializeResourceEvent", func(h *handle, c *client) any {
 		return newInitializeResourceEventFromHandle(h, c)

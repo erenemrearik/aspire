@@ -14,6 +14,56 @@ namespace Aspire.Hosting.RemoteHost.Tests;
 
 public class AtsCapabilityScannerTests
 {
+    [Theory]
+    [InlineData(nameof(ResourceFirstRegistryConstraint))]
+    [InlineData(nameof(RegistryFirstResourceConstraint))]
+    public void CreateTypeRef_ResourceBuilderWithRegistryConstraint_PreservesRegistryType(string methodName)
+    {
+        var method = typeof(AtsCapabilityScannerTests).GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static)!;
+        var builderType = method.GetParameters()[0].ParameterType;
+
+        Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(IContainerRegistry)),
+            AtsCapabilityScanner.MapToAtsTypeId(builderType));
+        var typeRef = Assert.IsType<AtsTypeRef>(AtsCapabilityScanner.CreateTypeRef(builderType));
+        Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(IContainerRegistry)), typeRef.TypeId);
+        Assert.True(typeRef.IsInterface);
+        Assert.Equal(AtsTypeCategory.Handle, typeRef.Category);
+    }
+
+    [Fact]
+    public void ScanAssembly_ImagePublication_OnlyTargetsRegistries()
+    {
+        var result = AtsCapabilityScanner.ScanAssembly(typeof(DistributedApplication).Assembly);
+        var publication = Assert.Single(result.Capabilities,
+            capability => capability.CapabilityId == "Aspire.Hosting/withRegistryPushedImage");
+
+        Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(IContainerRegistry)), publication.TargetTypeId);
+#pragma warning disable ASPIRECOMPUTE003
+        Assert.Collection(publication.ExpandedTargetTypes,
+            target => Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(ContainerRegistryResource)), target.TypeId));
+#pragma warning restore ASPIRECOMPUTE003
+
+        foreach (var capabilityId in new[] { "Aspire.Hosting/getImageReference", "Aspire.Hosting/withContainerRegistry" })
+        {
+            var capability = Assert.Single(result.Capabilities, capability => capability.CapabilityId == capabilityId);
+            var registry = Assert.Single(capability.Parameters, parameter => parameter.Name == "registry");
+            Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(IContainerRegistry)), registry.Type?.TypeId);
+            Assert.True(registry.Type?.IsInterface);
+        }
+    }
+
+    private static IResourceBuilder<T> ResourceFirstRegistryConstraint<T>(IResourceBuilder<T> builder)
+        where T : IResource, IContainerRegistry
+    {
+        return builder;
+    }
+
+    private static IResourceBuilder<T> RegistryFirstResourceConstraint<T>(IResourceBuilder<T> builder)
+        where T : IContainerRegistry, IResource
+    {
+        return builder;
+    }
+
     #region MapToAtsTypeId Tests
 
     [Fact]

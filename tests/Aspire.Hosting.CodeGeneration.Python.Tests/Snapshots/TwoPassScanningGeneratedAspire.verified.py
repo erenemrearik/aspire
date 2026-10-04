@@ -1648,6 +1648,12 @@ class MergeRouteParameters(typing.TypedDict, total=False):
     middleware: str
 
 
+class PushedImageParameters(typing.TypedDict, total=False):
+    image: typing.Required[ContainerImageResource]
+    repository: str
+    tag: str
+
+
 class BindMountParameters(typing.TypedDict, total=False):
     source: typing.Required[str]
     target: typing.Required[str]
@@ -2292,8 +2298,35 @@ class AbstractConfigurationSection:
         )
 
 
-class AbstractContainerRegistry(abc.ABC):
-    """Abstract base class for AbstractContainerRegistry."""
+class AbstractContainerRegistry:
+    """Type class for AbstractContainerRegistry."""
+
+    def __init__(self, handle: Handle, client: AspireClient) -> None:
+        self._handle = handle
+        self._client = client
+
+    def __repr__(self) -> str:
+        return f"AbstractContainerRegistry(handle={self._handle.handle_id})"
+
+    @_uncached_property
+    def handle(self) -> Handle:
+        """The underlying object reference handle."""
+        return self._handle
+
+    def with_pushed_image(self, image: ContainerImageResource, *, repository: str | None = None, tag: str | None = None) -> AbstractContainerRegistry:
+        """Configures an image artifact to be pushed to a registry."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['image'] = image
+        if repository is not None:
+            rpc_args['repository'] = repository
+        if tag is not None:
+            rpc_args['tag'] = tag
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withRegistryPushedImage',
+            rpc_args,
+        )
+        return typing.cast(AbstractContainerRegistry, result)
+
 
 class DistributedApplicationBuilder:
     '''Type class for DistributedApplicationBuilder.'''
@@ -2387,6 +2420,18 @@ class DistributedApplicationBuilder:
             rpc_args,
         )
         return typing.cast(DistributedApplication, result)
+
+    def add_container_image(self, name: str, image: str, **kwargs: typing.Unpack["ContainerImageResourceKwargs"]) -> ContainerImageResource:  # type: ignore
+        """Adds an existing container image as a standalone artifact."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['name'] = name
+        rpc_args['image'] = image
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/addContainerImage',
+            rpc_args,
+            kwargs,
+        )
+        return typing.cast(ContainerImageResource, result)
 
     def add_container_registry(self, name: str, endpoint: str | ParameterResource, *, repository: str | ParameterResource | None = None, **kwargs: typing.Unpack["ContainerRegistryResourceKwargs"]) -> ContainerRegistryResource:  # type: ignore
         """Adds a container registry resource"""
@@ -4148,6 +4193,22 @@ class ContainerFileSystemItem:
 
     def __repr__(self) -> str:
         return f"ContainerFileSystemItem(handle={self._handle.handle_id})"
+
+    @_uncached_property
+    def handle(self) -> Handle:
+        """The underlying object reference handle."""
+        return self._handle
+
+
+class ContainerImageDestinationReference:
+    """Type class for ContainerImageDestinationReference."""
+
+    def __init__(self, handle: Handle, client: AspireClient) -> None:
+        self._handle = handle
+        self._client = client
+
+    def __repr__(self) -> str:
+        return f"ContainerImageDestinationReference(handle={self._handle.handle_id})"
 
     @_uncached_property
     def handle(self) -> Handle:
@@ -7371,7 +7432,7 @@ class AbstractResource(abc.ABC):
     """Abstract base class for AbstractResource interface."""
 
     @abc.abstractmethod
-    def with_container_registry(self, registry: AbstractResource) -> typing.Self:
+    def with_container_registry(self, registry: AbstractContainerRegistry) -> typing.Self:
         """Configures the resource to use the specified container registry for container image operations."""
 
     @abc.abstractmethod
@@ -7507,10 +7568,6 @@ class AbstractResource(abc.ABC):
         """Creates an execution configuration builder for the specified resource."""
 
     @abc.abstractmethod
-    def with_container_build_options(self, callback: typing.Callable[[ContainerBuildOptionsCallbackContext], None]) -> typing.Self:
-        """Configures container build options for a compute resource using an async callback."""
-
-    @abc.abstractmethod
     def with_optional_string(self, *, value: str | None = None, enabled: bool = True) -> typing.Self:
         """Adds an optional string parameter"""
 
@@ -7605,6 +7662,10 @@ class AbstractComputeResource(AbstractResource):
     @abc.abstractmethod
     def with_remote_image_tag(self, remote_image_tag: str) -> typing.Self:
         """Sets the remote image tag for container push operations."""
+
+    @abc.abstractmethod
+    def with_container_build_options(self, callback: typing.Callable[[ContainerBuildOptionsCallbackContext], None]) -> typing.Self:
+        """Configures container build options for a compute resource using an async callback."""
 
 
 class AbstractContainerFilesDestinationResource(AbstractResource):
@@ -7783,6 +7844,10 @@ class AbstractResourceWithEnvironment(AbstractResource):
         """Sets environment variables"""
 
 
+class AbstractResourceWithoutLifetime(AbstractResource):
+    """Abstract base class for AbstractResourceWithoutLifetime interface."""
+
+
 class AbstractResourceWithProbes(AbstractResource):
     """Abstract base class for AbstractResourceWithProbes interface."""
 
@@ -7846,7 +7911,7 @@ class AbstractTestVaultResource(AbstractResource):
 class _BaseResourceKwargs(typing.TypedDict, total=False):
     """Base resource options."""
 
-    container_registry: AbstractResource
+    container_registry: AbstractContainerRegistry
     dockerfile_base_image: DockerfileBaseImageParameters | typing.Literal[True]
     required_command: str | tuple[str, str]
     required_command_validation: tuple[str, typing.Callable[[RequiredCommandValidationContext], RequiredCommandValidationResult]] | RequiredCommandValidationParameters
@@ -7878,7 +7943,6 @@ class _BaseResourceKwargs(typing.TypedDict, total=False):
     on_resource_stopped: typing.Callable[[ResourceStoppedEvent], None]
     on_initialize_resource: typing.Callable[[InitializeResourceEvent], None]
     on_resource_ready: typing.Callable[[ResourceReadyEvent], None]
-    container_build_options: typing.Callable[[ContainerBuildOptionsCallbackContext], None]
     optional_string: OptionalStringParameters | typing.Literal[True]
     config: TestConfigDto
     created_at: datetime.datetime
@@ -7911,7 +7975,7 @@ class _BaseResource(AbstractResource):
         """The underlying object reference handle."""
         return self._handle
 
-    def with_container_registry(self, registry: AbstractResource) -> typing.Self:
+    def with_container_registry(self, registry: AbstractContainerRegistry) -> typing.Self:
         """Configures the resource to use the specified container registry for container image operations."""
         rpc_args: dict[str, typing.Any] = {'builder': self._handle}
         rpc_args['registry'] = registry
@@ -8310,17 +8374,6 @@ class _BaseResource(AbstractResource):
         )
         return typing.cast(AbstractExecutionConfigurationBuilder, result)
 
-    def with_container_build_options(self, callback: typing.Callable[[ContainerBuildOptionsCallbackContext], None]) -> typing.Self:
-        """Configures container build options for a compute resource using an async callback."""
-        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
-        rpc_args['callback'] = self._client.register_callback(callback, ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
-        result = self._client.invoke_capability(
-            'Aspire.Hosting/withContainerBuildOptions',
-            rpc_args,
-        )
-        self._handle = self._wrap_builder(result)
-        return self
-
     def with_optional_string(self, *, value: str | None = None, enabled: bool = True) -> typing.Self:
         """Adds an optional string parameter"""
         rpc_args: dict[str, typing.Any] = {'builder': self._handle}
@@ -8545,12 +8598,12 @@ class _BaseResource(AbstractResource):
 
     def __init__(self, handle: Handle, client: AspireClient, **kwargs: typing.Unpack[_BaseResourceKwargs]) -> None:
         if _container_registry := kwargs.pop("container_registry", None):
-            if _validate_type(_container_registry, AbstractResource):
+            if _validate_type(_container_registry, AbstractContainerRegistry):
                 rpc_args: dict[str, typing.Any] = {"builder": handle}
-                rpc_args["registry"] = typing.cast(AbstractResource, _container_registry)
+                rpc_args["registry"] = typing.cast(AbstractContainerRegistry, _container_registry)
                 handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerRegistry', rpc_args))
             else:
-                raise TypeError("Invalid type for option 'container_registry'. Expected: AbstractResource")
+                raise TypeError("Invalid type for option 'container_registry'. Expected: AbstractContainerRegistry")
         if _dockerfile_base_image := kwargs.pop("dockerfile_base_image", None):
             if _validate_dict_types(_dockerfile_base_image, DockerfileBaseImageParameters):
                 rpc_args: dict[str, typing.Any] = {"builder": handle}
@@ -8823,13 +8876,6 @@ class _BaseResource(AbstractResource):
                 handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/onResourceReady', rpc_args))
             else:
                 raise TypeError("Invalid type for option 'on_resource_ready'. Expected: Callable[[ResourceReadyEvent], None]")
-        if _container_build_options := kwargs.pop("container_build_options", None):
-            if _validate_type(_container_build_options, typing.Callable[[ContainerBuildOptionsCallbackContext], None]):
-                rpc_args: dict[str, typing.Any] = {"builder": handle}
-                rpc_args["callback"] = client.register_callback(typing.cast(typing.Callable[[ContainerBuildOptionsCallbackContext], None], _container_build_options), ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
-                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerBuildOptions', rpc_args))
-            else:
-                raise TypeError("Invalid type for option 'container_build_options'. Expected: Callable[[ContainerBuildOptionsCallbackContext], None]")
         if _optional_string := kwargs.pop("optional_string", None):
             if _validate_dict_types(_optional_string, OptionalStringParameters):
                 rpc_args: dict[str, typing.Any] = {"builder": handle}
@@ -8995,9 +9041,34 @@ class _BaseResource(AbstractResource):
             raise TypeError(f"Unexpected keyword arguments: {list(kwargs.keys())}")
 
 
+class ContainerImageResourceKwargs(_BaseResourceKwargs, total=False):
+    """ContainerImageResource options."""
+
+
+class ContainerImageResource(_BaseResource, AbstractResourceWithoutLifetime):
+    """ContainerImageResource resource."""
+
+    def __repr__(self) -> str:
+        return "ContainerImageResource(handle={self._handle.handle_id})"
+
+    def get_image_reference(self, registry: AbstractContainerRegistry) -> ContainerImageDestinationReference:
+        """Gets a structured image reference for an associated registry."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['registry'] = registry
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/getImageReference',
+            rpc_args,
+        )
+        return typing.cast(ContainerImageDestinationReference, result)
+
+    def __init__(self, handle: Handle, client: AspireClient, **kwargs: typing.Unpack[ContainerImageResourceKwargs]) -> None:
+        super().__init__(handle, client, **kwargs)
+
+
 class ContainerRegistryResourceKwargs(_BaseResourceKwargs, total=False):
     """ContainerRegistryResource options."""
 
+    pushed_image: ContainerImageResource | PushedImageParameters
 
 class ContainerRegistryResource(_BaseResource, AbstractContainerRegistry):
     """ContainerRegistryResource resource."""
@@ -9005,7 +9076,35 @@ class ContainerRegistryResource(_BaseResource, AbstractContainerRegistry):
     def __repr__(self) -> str:
         return "ContainerRegistryResource(handle={self._handle.handle_id})"
 
+    def with_pushed_image(self, image: ContainerImageResource, *, repository: str | None = None, tag: str | None = None) -> typing.Self:
+        """Configures an image artifact to be pushed to a registry."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['image'] = image
+        if repository is not None:
+            rpc_args['repository'] = repository
+        if tag is not None:
+            rpc_args['tag'] = tag
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withRegistryPushedImage',
+            rpc_args,
+        )
+        self._handle = self._wrap_builder(result)
+        return self
+
     def __init__(self, handle: Handle, client: AspireClient, **kwargs: typing.Unpack[ContainerRegistryResourceKwargs]) -> None:
+        if _pushed_image := kwargs.pop("pushed_image", None):
+            if _validate_type(_pushed_image, ContainerImageResource):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["image"] = typing.cast(ContainerImageResource, _pushed_image)
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withRegistryPushedImage', rpc_args))
+            elif _validate_dict_types(_pushed_image, PushedImageParameters):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["image"] = typing.cast(PushedImageParameters, _pushed_image)["image"]
+                rpc_args["repository"] = typing.cast(PushedImageParameters, _pushed_image).get("repository")
+                rpc_args["tag"] = typing.cast(PushedImageParameters, _pushed_image).get("tag")
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withRegistryPushedImage', rpc_args))
+            else:
+                raise TypeError("Invalid type for option 'pushed_image'. Expected: ContainerImageResource or PushedImageParameters")
         super().__init__(handle, client, **kwargs)
 
 
@@ -9067,6 +9166,7 @@ class ContainerResourceKwargs(_BaseResourceKwargs, total=False):
     remote_image_tag: str
     volume: str | VolumeParameters
     on_resource_endpoints_allocated: typing.Callable[[ResourceEndpointsAllocatedEvent], None]
+    container_build_options: typing.Callable[[ContainerBuildOptionsCallbackContext], None]
     test_with_env_callback: typing.Callable[[TestEnvironmentContext], None]
     env_vars: typing.Mapping[str, str]
 
@@ -9802,6 +9902,17 @@ class ContainerResource(_BaseResource, AbstractResourceWithEnvironment, Abstract
         self._handle = self._wrap_builder(result)
         return self
 
+    def with_container_build_options(self, callback: typing.Callable[[ContainerBuildOptionsCallbackContext], None]) -> typing.Self:
+        """Configures container build options for a compute resource using an async callback."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['callback'] = self._client.register_callback(callback, ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withContainerBuildOptions',
+            rpc_args,
+        )
+        self._handle = self._wrap_builder(result)
+        return self
+
     def test_with_env_callback(self, callback: typing.Callable[[TestEnvironmentContext], None]) -> typing.Self:
         """Configures environment with callback (test version)"""
         rpc_args: dict[str, typing.Any] = {'builder': self._handle}
@@ -10363,6 +10474,13 @@ class ContainerResource(_BaseResource, AbstractResourceWithEnvironment, Abstract
                 handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/onResourceEndpointsAllocated', rpc_args))
             else:
                 raise TypeError("Invalid type for option 'on_resource_endpoints_allocated'. Expected: Callable[[ResourceEndpointsAllocatedEvent], None]")
+        if _container_build_options := kwargs.pop("container_build_options", None):
+            if _validate_type(_container_build_options, typing.Callable[[ContainerBuildOptionsCallbackContext], None]):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["callback"] = client.register_callback(typing.cast(typing.Callable[[ContainerBuildOptionsCallbackContext], None], _container_build_options), ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerBuildOptions', rpc_args))
+            else:
+                raise TypeError("Invalid type for option 'container_build_options'. Expected: Callable[[ContainerBuildOptionsCallbackContext], None]")
         if _test_with_env_callback := kwargs.pop("test_with_env_callback", None):
             if _validate_type(_test_with_env_callback, typing.Callable[[TestEnvironmentContext], None]):
                 rpc_args: dict[str, typing.Any] = {"builder": handle}
@@ -10422,6 +10540,7 @@ class ProjectResourceKwargs(_BaseResourceKwargs, total=False):
     volume: tuple[str, str, str] | ProjectVolumeParameters
     endpoints_in_env: typing.Iterable[str]
     on_resource_endpoints_allocated: typing.Callable[[ResourceEndpointsAllocatedEvent], None]
+    container_build_options: typing.Callable[[ContainerBuildOptionsCallbackContext], None]
     test_with_env_callback: typing.Callable[[TestEnvironmentContext], None]
     env_vars: typing.Mapping[str, str]
 
@@ -10956,6 +11075,17 @@ class ProjectResource(_BaseResource, AbstractResourceWithEnvironment, AbstractRe
         self._handle = self._wrap_builder(result)
         return self
 
+    def with_container_build_options(self, callback: typing.Callable[[ContainerBuildOptionsCallbackContext], None]) -> typing.Self:
+        """Configures container build options for a compute resource using an async callback."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['callback'] = self._client.register_callback(callback, ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withContainerBuildOptions',
+            rpc_args,
+        )
+        self._handle = self._wrap_builder(result)
+        return self
+
     def test_with_env_callback(self, callback: typing.Callable[[TestEnvironmentContext], None]) -> typing.Self:
         """Configures environment with callback (test version)"""
         rpc_args: dict[str, typing.Any] = {'builder': self._handle}
@@ -11360,6 +11490,13 @@ class ProjectResource(_BaseResource, AbstractResourceWithEnvironment, AbstractRe
                 handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/onResourceEndpointsAllocated', rpc_args))
             else:
                 raise TypeError("Invalid type for option 'on_resource_endpoints_allocated'. Expected: Callable[[ResourceEndpointsAllocatedEvent], None]")
+        if _container_build_options := kwargs.pop("container_build_options", None):
+            if _validate_type(_container_build_options, typing.Callable[[ContainerBuildOptionsCallbackContext], None]):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["callback"] = client.register_callback(typing.cast(typing.Callable[[ContainerBuildOptionsCallbackContext], None], _container_build_options), ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerBuildOptions', rpc_args))
+            else:
+                raise TypeError("Invalid type for option 'container_build_options'. Expected: Callable[[ContainerBuildOptionsCallbackContext], None]")
         if _test_with_env_callback := kwargs.pop("test_with_env_callback", None):
             if _validate_type(_test_with_env_callback, typing.Callable[[TestEnvironmentContext], None]):
                 rpc_args: dict[str, typing.Any] = {"builder": handle}
@@ -11431,6 +11568,7 @@ class ExecutableResourceKwargs(_BaseResourceKwargs, total=False):
     remote_image_tag: str
     volume: tuple[str, str, str] | ExecutableVolumeParameters
     on_resource_endpoints_allocated: typing.Callable[[ResourceEndpointsAllocatedEvent], None]
+    container_build_options: typing.Callable[[ContainerBuildOptionsCallbackContext], None]
     test_with_env_callback: typing.Callable[[TestEnvironmentContext], None]
     env_vars: typing.Mapping[str, str]
 
@@ -11942,6 +12080,17 @@ class ExecutableResource(_BaseResource, AbstractResourceWithEnvironment, Abstrac
         self._handle = self._wrap_builder(result)
         return self
 
+    def with_container_build_options(self, callback: typing.Callable[[ContainerBuildOptionsCallbackContext], None]) -> typing.Self:
+        """Configures container build options for a compute resource using an async callback."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['callback'] = self._client.register_callback(callback, ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withContainerBuildOptions',
+            rpc_args,
+        )
+        self._handle = self._wrap_builder(result)
+        return self
+
     def test_with_env_callback(self, callback: typing.Callable[[TestEnvironmentContext], None]) -> typing.Self:
         """Configures environment with callback (test version)"""
         rpc_args: dict[str, typing.Any] = {'builder': self._handle}
@@ -12329,6 +12478,13 @@ class ExecutableResource(_BaseResource, AbstractResourceWithEnvironment, Abstrac
                 handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/onResourceEndpointsAllocated', rpc_args))
             else:
                 raise TypeError("Invalid type for option 'on_resource_endpoints_allocated'. Expected: Callable[[ResourceEndpointsAllocatedEvent], None]")
+        if _container_build_options := kwargs.pop("container_build_options", None):
+            if _validate_type(_container_build_options, typing.Callable[[ContainerBuildOptionsCallbackContext], None]):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["callback"] = client.register_callback(typing.cast(typing.Callable[[ContainerBuildOptionsCallbackContext], None], _container_build_options), ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerBuildOptions', rpc_args))
+            else:
+                raise TypeError("Invalid type for option 'container_build_options'. Expected: Callable[[ContainerBuildOptionsCallbackContext], None]")
         if _test_with_env_callback := kwargs.pop("test_with_env_callback", None):
             if _validate_type(_test_with_env_callback, typing.Callable[[TestEnvironmentContext], None]):
                 rpc_args: dict[str, typing.Any] = {"builder": handle}
@@ -13062,6 +13218,7 @@ _register_handle_wrapper("Aspire.Hosting/Dict<string,number>", AspireDict)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.IAspireStore", AbstractAspireStore)
 _register_handle_wrapper("Microsoft.Extensions.Configuration.Abstractions/Microsoft.Extensions.Configuration.IConfiguration", AbstractConfiguration)
 _register_handle_wrapper("Microsoft.Extensions.Configuration.Abstractions/Microsoft.Extensions.Configuration.IConfigurationSection", AbstractConfigurationSection)
+_register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.IContainerRegistry", AbstractContainerRegistry)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.Eventing.IDistributedApplicationEventing", AbstractDistributedApplicationEventing)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.Pipelines.IDistributedApplicationPipeline", AbstractDistributedApplicationPipeline)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.IExecutionConfigurationBuilder", AbstractExecutionConfigurationBuilder)
@@ -13085,6 +13242,7 @@ _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.Connect
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext", ContainerBuildOptionsCallbackContext)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerFileSystemCallbackContext", ContainerFileSystemCallbackContext)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerFileSystemItem", ContainerFileSystemItem)
+_register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerImageDestinationReference", ContainerImageDestinationReference)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerImagePushOptions", ContainerImagePushOptions)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerImagePushOptionsCallbackContext", ContainerImagePushOptionsCallbackContext)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerImageReference", ContainerImageReference)
@@ -13143,6 +13301,7 @@ _register_handle_wrapper("Aspire.Hosting.CodeGeneration.Python.Tests/Aspire.Host
 _register_handle_wrapper("Aspire.Hosting.CodeGeneration.Python.Tests/Aspire.Hosting.CodeGeneration.TypeScript.Tests.TestTypes.TestResourceContext", TestResourceContext)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.UpdateCommandStateContext", UpdateCommandStateContext)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.Resource", _BaseResource)
+_register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerImageResource", ContainerImageResource)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerRegistryResource", ContainerRegistryResource)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerResource", ContainerResource)
 _register_handle_wrapper("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ProjectResource", ProjectResource)
