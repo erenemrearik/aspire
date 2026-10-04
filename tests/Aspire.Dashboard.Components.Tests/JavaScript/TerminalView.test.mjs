@@ -1403,29 +1403,70 @@ test("clipboard permission denial does not clear an existing sizing error", asyn
     assert.equal(terminal.getToolbarState(id).error, "sizing-failed");
 });
 
-test("terminal status errors remain visible and dismiss without replacing the client", async () => {
-    const { id } = mount();
+test("connected terminal status errors are console-only without replacing the client", async () => {
+    mount();
     attempts[0].resolve();
     await settle();
     const client = attempts[0].client;
     client.screenText = "Retained terminal output";
+    const before = terminal.getTerminalSnapshot(attempts[0].element);
     attempts[0].options.onStatus("Selection UI failed: invalid control", "error");
     await settle();
-    const before = terminal.getTerminalSnapshot(attempts[0].element);
-    assert.equal(before.error, "input-failed");
-    document.activeElement = { tagName: "BUTTON" };
-
-    terminal.dismissError(id);
-    await settle();
-
-    assert.deepEqual(terminal.getTerminalSnapshot(attempts[0].element), { ...before, error: null });
+    assert.deepEqual(terminal.getTerminalSnapshot(attempts[0].element), before);
     assert.equal(snapshots.at(-1).error, null);
-    assert.equal(document.activeElement, client.element);
+    assert.deepEqual(console.log.mock.calls.at(-1).arguments, [
+        "Dashboard terminal status error.", "Selection UI failed: invalid control",
+    ]);
     assert.equal(client.disposed, false);
     assert.equal(client.selectionClears, 0);
     assert.equal(client.primaryRequests, 0);
     assert.equal(attempts.length, 1);
     assert.equal(timers.size, 0);
+});
+
+for (const failure of ["sizing", "palette"]) {
+    test(`input status and error callbacks preserve an existing ${failure} error in either order`, async () => {
+        const { id } = mount();
+        attempts[0].resolve();
+        await settle();
+        const attempt = attempts[0];
+        if (failure === "sizing") {
+            attempt.client.requestPrimary = () => { throw new Error("Resize failed"); };
+            terminal.fitToContainer(id);
+        } else {
+            mock.method(localStorage, "setItem", () => { throw new Error("Storage disabled"); });
+            terminal.setPaletteFromHost(id, "light");
+        }
+        const before = terminal.getToolbarState(id);
+        assert.equal(before.error, `${failure}-failed`);
+        const error = new DOMException("Read permission denied.", "NotAllowedError");
+        for (const statusFirst of [true, false]) {
+            const callbacks = [
+                () => attempt.options.onStatus(`Input action failed: ${error.message}`, "error"),
+                () => attempt.options.onInputError(error),
+            ];
+            for (const callback of statusFirst ? callbacks : callbacks.toReversed()) {
+                callback();
+            }
+            await settle();
+            assert.deepEqual(terminal.getToolbarState(id), before);
+        }
+        assert.equal(attempt.client.disposed, false);
+        assert.equal(attempts.length, 1);
+        assert.equal(timers.size, 0);
+    });
+}
+
+test("disconnected terminal status errors remain visible and schedule reconnect", async () => {
+    const { id } = mount();
+    attempts[0].resolve();
+    await settle();
+    attempts[0].client.connected = false;
+    attempts[0].options.onStatus("Renderer device lost.", "error");
+    await settle();
+    assert.equal(terminal.getToolbarState(id).error, "mount-failed");
+    assert.equal(attempts[0].client.disposed, true);
+    assert.equal(timers.size, 1);
 });
 
 test("dismissing a sizing error keeps the existing connection", async () => {

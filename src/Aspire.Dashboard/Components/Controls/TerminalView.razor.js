@@ -665,9 +665,9 @@ async function mountClient(state, generation, controller) {
                     return;
                 }
                 if (state.client?.connected) {
-                    console.warn("Dashboard terminal status error.", message);
-                    state.error = "input-failed";
-                    notifyToolbar(state);
+                    // Local action/inspection failures do not break the connection.
+                    // Fatal renderer and transport failures disconnect before reporting status.
+                    console.log("Dashboard terminal status error.", message);
                 } else {
                     connectionFailed(state, generation, message);
                 }

@@ -252,9 +252,13 @@ banner. Diagnostics include the exception, selection status, document focus, and
 clipboard permissions policy, never clipboard or selected text. These failures can
 include pending selection resolution before the browser clipboard API is called;
 they do not necessarily mean clipboard permission was denied.
+Error status callbacks from a still-connected terminal are also logged with
+`console.log` without an Aspire banner or clearing an existing sizing/palette error.
+Fatal renderer and transport errors disconnect before reporting status and retain
+the connection-failure banner and retry behavior.
 Hex1b also displays its own inspection status inside its shadow root.
 Its public API does not currently expose an option to suppress that native message.
-Other terminal status and sizing errors offer **Dismiss**, which clears the local
+Sizing and palette errors offer **Dismiss**, which clears the local
 error and returns focus without reconnecting or discarding terminal history.
 Only connection/initialization failures offer **Reconnect terminal**.
 
