@@ -166,6 +166,8 @@ jobs:
         (needs.build_cli_e2e_image.result == 'success' || needs.build_cli_e2e_image.result == 'skipped')
       }}
     uses: ./.github/workflows/run-tests.yml
+    permissions:
+      contents: read
     with:
       testShortName: ${{ matrix.tests.project }}
       properties: ${{ toJson(matrix.tests.properties) }}
@@ -180,6 +182,8 @@ jobs:
     runs-on: ubuntu-latest
     name: Final Results
     needs: [generate_tests_matrix, build_packages, build_cli_archives, build_cli_e2e_image, run_tests]
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

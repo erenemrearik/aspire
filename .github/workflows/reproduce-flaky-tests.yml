@@ -394,6 +394,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Reproduce Results
     needs: [reproduce]
+    permissions: {}
     steps:
       - name: Summary
         shell: bash

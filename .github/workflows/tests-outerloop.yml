@@ -38,6 +38,8 @@ jobs:
   outerloop_tests:
     if: ${{ github.repository == 'microsoft/aspire' }}
     uses: ./.github/workflows/specialized-test-runner.yml
+    permissions:
+      contents: read
     with:
       testRunnerName: "OuterloopTestRunsheetBuilder"
       attributeName: "OuterloopTest"
