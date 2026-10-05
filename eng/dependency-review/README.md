@@ -80,12 +80,18 @@ The initial enhanced skill evaluators could not invoke `skill(pr-testing)`
 because the task tool did not expose it. Those outputs are **guide-loaded only**,
 not compliant skill-invoked assessments. `local-study-candidate-followup.md`
 records the separate posthoc, unblinded candidate-text comparison.
-`actual-skill-study-report.md` records the subsequent project-session pair with
-successful skill invocations and an arm-blinded judge. These are distinct
-experiments, not interchangeable evidence. No result is a compatibility/safety
-certificate.
+`actual-skill-study-report.md` records a subsequent project-session pair that
+explicitly invoked the repository's existing `pr-testing` skill and was scored
+by an arm-blinded judge. **This is not the user's separate local-only
+CI-confidence skill and does not test that skill or its combination with
+Copilot review.** Its contents were unavailable in this remote session; the
+attempted local-folder attachment returned `ENOENT`. These are distinct
+experiments, not interchangeable evidence. The intended CI-confidence
+comparison remains pending until its actual skill contents are made available.
+No result is a compatibility/safety certificate.
 
-Reproduce the actual skill pair's recorded scores without calling a model:
+Reproduce the repository `pr-testing` skill pair's recorded scores without
+calling a model:
 
 ```python
 import sys

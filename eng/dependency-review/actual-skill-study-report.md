@@ -1,11 +1,15 @@
-# Dependency review pilot: final comparison
+# Dependency review pilot: final comparison (not CI-confidence)
 
 **IGNORE — DO NOT MERGE. Detection-only experiment.** The comparison does not
 demonstrate dependency-defect detection uplift. The actual skill-invoked pair
-ties on the frozen targets and execution classifications. Concise evidence
-guidance improves some aggregate labels in exploratory text-only runs, but
-does not consistently improve review findings. No dependency defect was repaired,
-original PR mutated, or compatibility/upstream-safety certification issued.
+invoked the repository's existing `pr-testing` skill and ties on the frozen
+targets and execution classifications. It did **not** evaluate the user's
+separate, local-only CI-confidence skill, which was not available in this
+remote session. The Copilot reviewer/CI-confidence-skill combination was
+therefore not tested. Concise repository evidence guidance improves some
+aggregate labels in exploratory text-only runs, but does not consistently
+improve review findings. No dependency defect was repaired, original PR
+mutated, or compatibility/upstream-safety certification issued.
 
 Implementation draft: [#20741](https://github.com/microsoft/aspire/pull/20741).
 Seeded drafts: [NuGet #20742](https://github.com/microsoft/aspire/pull/20742) and
@@ -15,10 +19,11 @@ Instruction-only hosted control:
 
 ## Prespecified outcomes and separation of evidence
 
-The same 15 synthetic cases and 19 target findings were supplied to both actual
-skill assessors. The oracle was frozen separately before the initial assessment
-calls. Cases cover documented pins/coupled majors, host/type and runtime-floor
-risks, coupled toolchain updates, approved-feed authentication blockage,
+The same 15 synthetic cases and 19 target findings were supplied to both
+repository `pr-testing` skill assessors. The oracle was frozen separately before
+the initial assessment calls. Cases cover documented pins/coupled majors,
+host/type and runtime-floor risks, coupled toolchain updates, approved-feed
+authentication blockage,
 generated Actions drift versus harmless wrapper/runtime differences, unknown
 allow-list policy, stateful image migration/platform evidence, resolved versus
 selector advisory claims, legitimate patch/minor updates, encoded registry
@@ -38,7 +43,7 @@ are fixture labels, not real commit SHAs. Frozen finding emission is the primary
 metric; recognition in states/tables is a separately disclosed posthoc metric.
 The machine-check fixtures are a different arm, not hints fed to these models.
 
-## Actual skill-invoked pair
+## Existing repository `pr-testing` skill pair (not CI-confidence)
 
 Both fresh project sessions called `functions.skill` with `skill="pr-testing"`
 as their first action and received:
@@ -46,6 +51,20 @@ as their first action and received:
 Raw assessment return outputs, recorded invocation returns, loaded file blobs,
 per-case decisions and recomputed scores are retained in
 [actual-skill-study-results.json](actual-skill-study-results.json).
+The `actual-skill-*` filenames refer only to this repository `pr-testing`
+skill experiment. They are not evidence about, or a substitute for, the distinct
+CI-confidence skill the user intended to evaluate.
+
+The user's correction clarified that CI-confidence is installed only on their
+local machine, outside the available repository/files and skill catalog in
+this remote environment. An attempted folder attachment reported `ENOENT` for
+the user's local path, so its contents could not be inspected. Accordingly,
+no CI-confidence behavior, output, invocation, or combined Copilot-plus-skill
+result is assessed here. Findings about this repository's `pr-testing` skill,
+enhanced repo instructions, deterministic checks, and hosted Copilot reviews
+must remain separate. This report's conclusions are provisional with respect
+to the requested CI-confidence comparison; the skill contents must first be
+made available to assess it.
 
 Baseline used head `e5f8dc6b1194773458881b400b1e2c91f91a33d8`, original skill blob
 `513355cf0b21c2d51045a723556b61a29addbdfd` and CI reference blob
@@ -61,7 +80,7 @@ This is **arm-blinded adjudication**, not blinding to expected answers. The
 scorer validates complete case coverage and reproduces explicit decisions; it
 does not independently establish truth from generated prose.
 
-| Actual skill arm | Finding TP/miss | Recognition | FP/unsupported/duplicate findings | Row states | Provided consumer states | Redis/template | Relevant citations | Head labels |
+| Repository `pr-testing` arm | Finding TP/miss | Recognition | FP/unsupported/duplicate findings | Row states | Provided consumer states | Redis/template | Relevant citations | Head labels |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Baseline | 19/0 | 19/19 | 0/0/0 | 15/15 | 28/28 | 2/2 | 77/77 | 15/15 |
 | Candidate | 19/0 | 19/19 | 0/0/0 | 15/15 | 23/23 | 2/2 | 73/73 | 15/15 |
@@ -75,14 +94,14 @@ output granularity; perfect correctness of supplied rows is **not** proof that
 every possible required consumer was enumerated. Head scores check synthetic
 label equality, not actual artifact provenance.
 
-Requested configurations were the same default project-session Auto/autopilot
-settings; concrete backend, reasoning effort, sampling and context tier were
-not independently exposed or pinned. Actual skill contents/reference loads
-differed, but repository heads and inherited instructions/environment also
-differed. The evidence therefore does not isolate skill content as the sole
-cause. Invocation provenance records actual reported calls/returns and file
-identities, not inference from output resemblance; an independent low-level
-event-audit export is unavailable.
+The pair's configurations were the same requested default project-session
+Auto/autopilot settings; concrete backend, reasoning effort, sampling and
+context tier were not independently exposed or pinned. The repository
+`pr-testing` skill/reference loads differed, but repository heads and inherited
+instructions/environment also differed. The evidence therefore does not
+isolate skill content as the sole cause. Invocation provenance records actual
+reported calls/returns and file identities, not inference from output
+resemblance; an independent low-level event-audit export is unavailable.
 
 ## Earlier review and guide-only experiments
 
@@ -183,8 +202,13 @@ counted as executed. No privileged workflow or credential bypass was used.
 
 ## Remaining work and decision
 
-**No user approval, push or kick is required for this completed bounded local
-comparison.** Hosted baseline publication remains blocked by the supported
+The bounded repository-tooling/`pr-testing` comparisons are complete, but the
+requested CI-confidence comparison remains pending because its skill content
+is unavailable here. Once supplied, a separate matched assessment can be
+designed; do not treat the results above as its baseline or outcome.
+
+**No user approval, push or kick is required for these completed bounded local
+experiments.** Hosted baseline publication remains blocked by the supported
 app-side PR creation path; repairing that path or manually creating a marked
 draft would enable a future hosted pair. That optional follow-up is not a
 prerequisite for the reported local result. Genuine minimum-host, older-VS,
