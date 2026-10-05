@@ -1,0 +1,5 @@
+﻿parameters: {}
+secrets: {}
+config:
+  consumer:
+    SANDBOX_IMAGE: ""

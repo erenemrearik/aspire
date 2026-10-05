@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 #pragma warning disable ASPIREPIPELINES001 // Pipeline step types used for push/deploy dependency wiring
+#pragma warning disable ASPIREPIPELINES003
 #pragma warning disable ASPIREAZURE001 // AzureEnvironmentResource.ProvisionInfrastructureStepName for pipeline ordering
 #pragma warning disable ASPIREAZURE003 // AzureSubnetResource used in WithSubnet extensions
 
@@ -116,8 +117,12 @@ public static class AzureKubernetesEnvironmentExtensions
 
             foreach (var pushStep in pushSteps)
             {
-                // Ensure push waits for Azure provisioning (ACR endpoint resolution)
-                pushStep.DependsOn(AzureEnvironmentResource.ProvisionInfrastructureStepName);
+                // Standalone images already depend on their registry's provisioning. Waiting
+                // for all infrastructure would cycle through consumers that require the image.
+                if (pushStep.Resource is not DestinationImageResource)
+                {
+                    pushStep.DependsOn(AzureEnvironmentResource.ProvisionInfrastructureStepName);
+                }
 
                 // Ensure push waits for push-prereq (ACR login)
                 pushStep.DependsOn(WellKnownPipelineSteps.PushPrereq);

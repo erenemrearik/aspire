@@ -4,6 +4,7 @@
 #pragma warning disable ASPIREPIPELINES001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 #pragma warning disable ASPIREPIPELINES003
 #pragma warning disable ASPIREAZURE001
+#pragma warning disable ASPIREAZURE003
 
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Azure.AppContainers;
@@ -18,6 +19,110 @@ namespace Aspire.Hosting.Azure.Tests;
 
 public class AzureContainerRegistryTests(ITestOutputHelper testOutputHelper)
 {
+    [Fact]
+    public async Task RunModeDoesNotGrantPullAccessForInertImageArtifacts()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Run, testOutputHelper);
+        builder.AddAzureContainerAppEnvironment("env");
+        var registry = builder.AddAzureContainerRegistry("acr");
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var image = registry.AddImage("published", source);
+        var consumer = builder.AddProject<Project>("api", launchProfileName: null).WithReference(image);
+        using var app = builder.Build();
+        await ExecuteBeforeStartHooksAsync(app, default);
+
+        Assert.Empty(image.Resource.Annotations.OfType<ReferenceRoleAssignmentAnnotation>());
+        Assert.Empty(consumer.Resource.Annotations.OfType<RoleAssignmentAnnotation>());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ImageConsumerReceivesScopedPullAccessAndWaitsForPublication(bool environmentOnly)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, testOutputHelper);
+        builder.AddAzureContainerAppEnvironment("env");
+        var registry = builder.AddAzureContainerRegistry("acr");
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var image = registry.AddImage("published", source);
+        var second = registry.AddImage("second", source);
+        var unrelatedRegistry = builder.AddAzureContainerRegistry("unrelated");
+        unrelatedRegistry.AddImage("unused", source);
+        var consumer = builder.AddProject<Project>("api", launchProfileName: null);
+        if (environmentOnly)
+        {
+            consumer.WithEnvironment("IMAGE", image);
+        }
+        else
+        {
+            consumer.WithReference(image).WithReference(second);
+        }
+        var bystander = builder.AddProject<Project>("bystander", launchProfileName: null)
+            .WithEnvironment("REGISTRY", registry.Resource.RegistryEndpoint);
+        IReadOnlyList<PipelineStep> steps = [];
+        builder.Pipeline.AddPipelineConfiguration(context =>
+        {
+            steps = context.Steps;
+            return Task.CompletedTask;
+        });
+        builder.Services.Configure<PipelineOptions>(options => options.Step = WellKnownPipelineSteps.Diagnostics);
+        using var app = builder.Build();
+        await ExecuteBeforeStartHooksAsync(app, default);
+        var model = app.Services.GetRequiredService<DistributedApplicationModel>();
+        var roleAssignment = Assert.Single(model.Resources.OfType<AzureRoleAssignmentResource>(),
+            resource => resource.Name == "api-roles-acr");
+        Assert.Same(consumer.Resource, roleAssignment.OwnerResource);
+        Assert.Same(registry.Resource, roleAssignment.TargetAzureResource);
+        Assert.True(consumer.Resource.TryGetLastAnnotation<RoleAssignmentAnnotation>(out var roles));
+        Assert.Equal([ContainerRegistryBuiltInRole.AcrPull.ToString()], roles.Roles.Select(role => role.Id));
+        Assert.Empty(bystander.Resource.Annotations.OfType<RoleAssignmentAnnotation>().SelectMany(annotation => annotation.Roles));
+        Assert.Equal(["api-roles-acr", "bystander-roles-acr"], model.Resources.OfType<AzureRoleAssignmentResource>()
+            .Select(resource => resource.Name));
+
+        await app.Services.GetRequiredService<IDistributedApplicationPipeline>().ExecuteAsync(
+            new PipelineContext(model, app.Services.GetRequiredService<DistributedApplicationExecutionContext>(),
+                app.Services, NullLogger.Instance, default));
+        Assert.Single(image.Resource.Annotations.OfType<ReferenceRoleAssignmentAnnotation>());
+        var target = Assert.IsType<AzureContainerAppResource>(consumer.Resource.GetDeploymentTargetAnnotation()!.DeploymentTarget);
+        var provision = Assert.Single(steps, step => ReferenceEquals(step.Resource, target) &&
+            step.Tags.Contains(WellKnownPipelineTags.ProvisionInfrastructure));
+        Assert.Contains("push-published", provision.DependsOnSteps);
+        if (!environmentOnly)
+        {
+            Assert.Contains("push-second", provision.DependsOnSteps);
+        }
+        var (manifest, bicep) = await GetManifestWithBicep(roleAssignment);
+        var (consumerManifest, consumerBicep) = await GetManifestWithBicep(target);
+        await Verify(manifest.ToString(), "json")
+            .AppendContentAsFile(bicep, "bicep")
+            .AppendContentAsFile(consumerManifest.ToString(), "json")
+            .AppendContentAsFile(consumerBicep, "bicep");
+    }
+
+    [Fact]
+    public async Task ImagePullAccessPreservesExplicitRegistryRoles()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, testOutputHelper);
+        builder.AddAzureContainerAppEnvironment("env");
+        var registry = builder.AddAzureContainerRegistry("acr");
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var image = registry.AddImage("published", source);
+        var consumer = builder.AddProject<Project>("api", launchProfileName: null)
+            .WithRoleAssignments(registry, ContainerRegistryBuiltInRole.AcrPush)
+            .WithReference(image);
+        using var app = builder.Build();
+        await ExecuteBeforeStartHooksAsync(app, default);
+
+        var roles = consumer.Resource.Annotations.OfType<RoleAssignmentAnnotation>()
+            .Where(annotation => ReferenceEquals(annotation.Target, registry.Resource))
+            .SelectMany(annotation => annotation.Roles)
+            .Select(role => role.Id)
+            .Distinct()
+            .Order(StringComparer.Ordinal);
+        Assert.Equal(new[] { ContainerRegistryBuiltInRole.AcrPull.ToString(), ContainerRegistryBuiltInRole.AcrPush.ToString() }
+            .Order(StringComparer.Ordinal), roles);
+    }
+
     [Fact]
     public async Task ImageOnlyDeploymentIncludesRegistryProvisioningLoginAndPublication()
     {

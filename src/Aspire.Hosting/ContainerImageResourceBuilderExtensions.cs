@@ -49,7 +49,7 @@ public static class ContainerImageResourceBuilderExtensions
         var resourceBuilder = builder.ExecutionContext.IsRunMode
             ? builder.CreateResourceBuilder(resource)
             : builder.AddResource(resource);
-        ContainerImagePublishing.Configure(resource);
+        ContainerImagePublishing.Configure(builder, resource);
 
         return resourceBuilder.WithManifestPublishingCallback(context => WriteSourceManifestAsync(context, resource));
     }
@@ -132,7 +132,8 @@ public static class ContainerImageResourceBuilderExtensions
     /// <returns>The original consumer builder.</returns>
     /// <remarks>
     /// Preserves destination, source, and registry provenance without resolving values during construction.
-    /// This does not grant registry pull permissions or start a container.
+    /// Deployment waits for the image publication. Azure Container Registry image references
+    /// grant the consumer's managed identity pull access. This does not start a container.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The builders belong to different applications.</exception>
@@ -158,8 +159,10 @@ public static class ContainerImageResourceBuilderExtensions
     /// <returns>The original consumer builder.</returns>
     /// <remarks>
     /// Records image consumption for publication ordering and provider-specific pull access.
-    /// This method records the relationship only: publication ordering, permission provisioning,
-    /// and local dispatch are not implemented. Use <c>WithEnvironment</c> separately to choose an environment variable name.
+    /// Deployment waits for verified image publication. Azure Container Registry grants the
+    /// consumer's managed identity pull access. Other registry providers must configure pull access separately.
+    /// This does not inject an image environment variable or implement local dispatch.
+    /// Use <c>WithEnvironment</c> separately to choose an environment variable name.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required builder is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The builders belong to different applications.</exception>

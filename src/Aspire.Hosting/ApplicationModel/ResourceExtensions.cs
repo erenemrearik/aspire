@@ -1477,7 +1477,8 @@ public static class ResourceExtensions
     /// <item>Parent resources via <see cref="IResourceWithParent"/></item>
     /// <item>Wait dependencies via <see cref="WaitAnnotation"/></item>
     /// <item>Connection string redirects via <see cref="ConnectionStringRedirectAnnotation"/></item>
-    /// <item>References to endpoints in environment variables and command-line arguments (via <see cref="IValueWithReferences"/>)</item>
+    /// <item>Explicit references to destination images</item>
+    /// <item>Structured values in environment variables and command-line arguments (via <see cref="IValueWithReferences"/>)</item>
     /// </list>
     /// </para>
     /// <para>
@@ -1514,7 +1515,8 @@ public static class ResourceExtensions
     /// <item>Parent resources via <see cref="IResourceWithParent"/></item>
     /// <item>Wait dependencies via <see cref="WaitAnnotation"/></item>
     /// <item>Connection string redirects via <see cref="ConnectionStringRedirectAnnotation"/></item>
-    /// <item>References to endpoints in environment variables and command-line arguments (via <see cref="IValueWithReferences"/>)</item>
+    /// <item>Explicit references to destination images</item>
+    /// <item>Structured values in environment variables and command-line arguments (via <see cref="IValueWithReferences"/>)</item>
     /// </list>
     /// </para>
     /// <para>
@@ -1626,6 +1628,11 @@ public static class ResourceExtensions
 
         // Collect direct dependencies from annotations
         CollectAnnotationDependencies(resource, dependencies, newDependencies);
+
+        foreach (var reference in resource.Annotations.OfType<DestinationImageReferenceAnnotation>())
+        {
+            CollectDependenciesFromValue(reference.Image, dependencies, newDependencies, visited, executionContext);
+        }
 
         // Collect raw (unresolved) environment variable and argument values
         var rawValues = await GatherRawEnvironmentAndArgumentValuesAsync(resource, executionContext, options, cancellationToken).ConfigureAwait(false);

@@ -1,0 +1,10 @@
+﻿services:
+  consumer:
+    image: "busybox:latest"
+    environment:
+      SANDBOX_IMAGE: "${PUBLISHED_IMAGE}"
+    networks:
+      - "aspire"
+networks:
+  aspire:
+    driver: "bridge"

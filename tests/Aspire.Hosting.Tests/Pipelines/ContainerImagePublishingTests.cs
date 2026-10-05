@@ -26,6 +26,84 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
     private const string PinnedSource = "docker.io/library/busybox@" + Digest;
 
     [Theory]
+    [InlineData("exclude-source")]
+    [InlineData("exclude-destination")]
+    [InlineData("remove-source")]
+    [InlineData("remove-destination")]
+    public async Task ConsumerRejectsUnavailableImagePublication(string change)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "apply-consumer");
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var image = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        builder.AddContainer("consumer", "busybox").WithReference(image);
+        switch (change)
+        {
+            case "exclude-source":
+                source.ExcludeFromManifest();
+                break;
+            case "exclude-destination":
+                image.ExcludeFromManifest();
+                break;
+            case "remove-source":
+                builder.Resources.Remove(source.Resource);
+                break;
+            case "remove-destination":
+                builder.Resources.Remove(image.Resource);
+                break;
+        }
+        using var app = builder.Build();
+
+        var exception = await Assert.ThrowsAsync<DistributedApplicationException>(() => app.ExecuteBeforeStartHooksAsync(default));
+        Assert.Contains("published", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task ConsumerCannotApplyBeforeVerifiedImagePublication(bool environmentOnly, bool failPublication)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "apply-consumer");
+        var runtime = AddRuntime(builder);
+        if (failPublication)
+        {
+            runtime.CopyRemoteImageAsyncCallback = (_, _, _) => throw new DistributedApplicationException("Copy failed.");
+        }
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var image = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        var consumer = builder.AddContainer("consumer", "busybox");
+        if (environmentOnly)
+        {
+            consumer.WithEnvironment("IMAGE", image);
+        }
+        else
+        {
+            consumer.WithReference(image);
+        }
+        string? appliedImage = null;
+        consumer.WithPipelineStepFactory(_ => new PipelineStep
+        {
+            Name = "apply-consumer",
+            Tags = [WellKnownPipelineTags.DeployCompute],
+            Action = async context => appliedImage = await ((IValueProvider)image.Resource).GetValueAsync(context.CancellationToken)
+        });
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+
+        if (failPublication)
+        {
+            await Assert.ThrowsAsync<DistributedApplicationException>(() => ExecuteAsync(app));
+            Assert.Null(appliedImage);
+        }
+        else
+        {
+            await ExecuteAsync(app);
+            Assert.Equal("registry.example.com/published@" + Digest, appliedImage);
+            Assert.Single(runtime.RemoteCopyCalls);
+        }
+    }
+
+    [Theory]
     [InlineData("deploy")]
     [InlineData("push")]
     [InlineData("push-first")]

@@ -5,6 +5,7 @@
 #pragma warning disable ASPIREPIPELINES002
 #pragma warning disable ASPIREPIPELINES003
 #pragma warning disable ASPIRECONTAINERRUNTIME001
+#pragma warning disable ASPIRECOMPUTE003
 
 using Aspire.Hosting.Pipelines;
 using Aspire.Hosting.Publishing;
@@ -18,8 +19,15 @@ namespace Aspire.Hosting.ApplicationModel;
 /// </summary>
 internal static class ContainerImagePublishing
 {
-    internal static void Configure(ContainerImageResource source)
+    internal static void Configure(IDistributedApplicationBuilder builder, ContainerImageResource source)
     {
+        if (!builder.Services.Any(descriptor => descriptor.ServiceType == typeof(ConsumerConfiguration)))
+        {
+            var configuration = new ConsumerConfiguration();
+            builder.Services.AddSingleton(configuration);
+            builder.Pipeline.AddPipelineConfiguration(configuration.ConfigureAsync);
+        }
+
         source.Annotations.Add(new PipelineStepAnnotation(factory =>
         {
             if (factory.PipelineContext.ExecutionContext.IsRunMode || source.IsExcludedFromPublish())
@@ -190,6 +198,52 @@ internal static class ContainerImagePublishing
         {
             throw new DistributedApplicationException(
                 $"Image source '{source.Name}' changed after the publication pipeline was resolved. Retry the deployment.");
+        }
+    }
+
+    private sealed class ConsumerConfiguration
+    {
+        private readonly ResourceDependencyDiscoveryOptions _dependencyOptions = new()
+        {
+            DiscoveryMode = ResourceDependencyDiscoveryMode.DirectOnly
+        };
+
+        public async Task ConfigureAsync(PipelineConfigurationContext context)
+        {
+            var executionContext = context.Services.GetRequiredService<DistributedApplicationExecutionContext>();
+            if (executionContext.IsRunMode)
+            {
+                return;
+            }
+
+            foreach (var consumer in context.Model.GetComputeResources().Where(resource => !resource.IsExcludedFromPublish()))
+            {
+                var dependencies = await consumer.GetResourceDependenciesAsync(
+                    executionContext, _dependencyOptions).ConfigureAwait(false);
+                foreach (var image in dependencies.OfType<DestinationImageResource>())
+                {
+                    var pushSteps = context.GetSteps(image, WellKnownPipelineTags.PushContainerImage).ToArray();
+                    if (pushSteps.Length == 0 || !context.Model.Resources.Contains(image) ||
+                        !context.Model.Resources.Contains(image.Source))
+                    {
+                        throw new DistributedApplicationException(
+                            $"Resource '{consumer.Name}' consumes destination image '{image.Name}', but that image has no publishable source and destination in the application model.");
+                    }
+
+                    context.GetSteps(consumer, WellKnownPipelineTags.DeployCompute).DependsOn(pushSteps);
+                    foreach (var target in consumer.Annotations.OfType<DeploymentTargetAnnotation>())
+                    {
+                        // Azure applies workload settings during provisioning. Compose and Helm
+                        // resolve deferred values during deployment preparation, before applying them.
+                        context.GetSteps(target.DeploymentTarget, WellKnownPipelineTags.ProvisionInfrastructure).DependsOn(pushSteps);
+                        context.GetSteps(target.DeploymentTarget, WellKnownPipelineTags.DeployCompute).DependsOn(pushSteps);
+                        if (target.ComputeEnvironment is { } environment)
+                        {
+                            context.GetSteps(environment, WellKnownPipelineTags.DeployCompute).DependsOn(pushSteps);
+                        }
+                    }
+                }
+            }
         }
     }
 

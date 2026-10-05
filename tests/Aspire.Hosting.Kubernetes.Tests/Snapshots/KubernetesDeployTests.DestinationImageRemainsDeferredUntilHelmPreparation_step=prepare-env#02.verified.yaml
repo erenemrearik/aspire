@@ -1,0 +1,3 @@
+﻿config:
+  consumer:
+    SANDBOX_IMAGE: "registry.example.com/published@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

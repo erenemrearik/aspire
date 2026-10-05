@@ -29,7 +29,11 @@ public class AzureKubernetesEnvironmentExtensionsTests(ITestOutputHelper outputH
         var environment = builder.AddAzureKubernetesEnvironment("aks");
         var registry = Assert.IsType<AzureContainerRegistryResource>(
             Assert.Single(environment.Resource.Annotations.OfType<ContainerRegistryReferenceAnnotation>()).Registry);
-        builder.CreateResourceBuilder(registry).AddImage("published", source);
+        var image = builder.CreateResourceBuilder(registry).AddImage("published", source);
+        builder.AddContainer("consumer", "busybox")
+            .WithReference(image)
+            .WithEnvironment("SANDBOX_IMAGE", image)
+            .PublishAsKubernetesService(_ => { });
         IReadOnlyList<PipelineStep> steps = [];
         builder.Pipeline.AddPipelineConfiguration(context =>
         {
@@ -46,9 +50,11 @@ public class AzureKubernetesEnvironmentExtensionsTests(ITestOutputHelper outputH
 
         var push = Assert.Single(steps, step => step.Name == "push-published");
         Assert.Equal(
-            new[] { AzureEnvironmentResource.ProvisionInfrastructureStepName, "prepare-image-tools", "provision-aks-acr", WellKnownPipelineSteps.PushPrereq }.Order(StringComparer.Ordinal),
+            new[] { "prepare-image-tools", "provision-aks-acr", WellKnownPipelineSteps.PushPrereq }.Order(StringComparer.Ordinal),
             push.DependsOnSteps.Order(StringComparer.Ordinal));
         Assert.All(push.DependsOnSteps, name => Assert.Single(steps, step => step.Name == name));
+        var prepare = Assert.Single(steps, step => step.Name == $"prepare-{environment.Resource.KubernetesEnvironment.Name}");
+        Assert.Contains(push.Name, prepare.DependsOnSteps);
     }
 
     [Theory]
