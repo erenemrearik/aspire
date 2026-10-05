@@ -76,6 +76,30 @@ in this directory; do not overwrite it accidentally with a different experiment.
 hold/source cases, not blind input or a compatibility oracle.
 
 See `local-study-report.md` for scores, paths, repeat variability and limits.
-The enhanced skill evaluators could not invoke `skill(pr-testing)` because the
-task tool did not expose it. Their outputs are **guide-loaded only**, not compliant
-skill-invoked assessments. No result is a compatibility/safety certificate.
+The initial enhanced skill evaluators could not invoke `skill(pr-testing)`
+because the task tool did not expose it. Those outputs are **guide-loaded only**,
+not compliant skill-invoked assessments. `local-study-candidate-followup.md`
+records the separate posthoc, unblinded candidate-text comparison.
+`actual-skill-study-report.md` records the subsequent project-session pair with
+successful skill invocations and an arm-blinded judge. These are distinct
+experiments, not interchangeable evidence. No result is a compatibility/safety
+certificate.
+
+Reproduce the actual skill pair's recorded scores without calling a model:
+
+```python
+import sys
+
+sys.path.insert(0, "eng/dependency-review")
+import study
+
+corpus = study.load(study.ROOT / "corpus.json")
+expected = study.load(study.ROOT / "expected.json")
+bundle = study.load(study.ROOT / "actual-skill-study-results.json")
+for arm, run in bundle["runs"].items():
+    result = study.score(
+        corpus, expected, run["output"], run["adjudication"], expected["cases"].keys()
+    )
+    assert result == run["scores"], arm
+    print(arm, result["totals"])
+```
