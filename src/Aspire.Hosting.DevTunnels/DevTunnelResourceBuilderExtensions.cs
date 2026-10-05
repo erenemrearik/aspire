@@ -714,9 +714,8 @@ public static partial class DevTunnelsResourceBuilderExtensions
             });
     }
 
-    internal static async Task UpdatePortAsync(DevTunnelPortResource portResource, bool available, IServiceProvider services, CancellationToken cancellationToken)
+    internal static async Task UpdatePortAsync(DevTunnelPortResource portResource, bool available, ResourceNotificationService notifications, ResourceLoggerService logs, CancellationToken cancellationToken)
     {
-        var notifications = services.GetRequiredService<ResourceNotificationService>();
         var port = await portResource.GetTunnelPortAsync(cancellationToken).ConfigureAwait(false);
         var description = available
             ? string.Format(CultureInfo.CurrentCulture, MessageStrings.DevTunnelPortHealthy, port, portResource.DevTunnel.TunnelId)
@@ -756,7 +755,7 @@ public static partial class DevTunnelsResourceBuilderExtensions
 
         if (!wasAvailable || !string.Equals(previousAddress, portUri.Host, StringComparison.OrdinalIgnoreCase))
         {
-            services.GetRequiredService<ResourceLoggerService>().GetLogger(portResource)
+            logs.GetLogger(portResource)
                 .LogInformation("Forwarding from {PortUrl} to {TargetUrl} ({TargetResourceName}/{TargetEndpointName})",
                     NormalizeUrl(portUri), portResource.TargetEndpoint.Url, portResource.TargetEndpoint.Resource.Name, portResource.TargetEndpoint.EndpointName);
         }
@@ -797,20 +796,25 @@ public static partial class DevTunnelsResourceBuilderExtensions
             : updated.AbsoluteUri;
     }
 
-    internal static async Task UpdatePortAccessAsync(DevTunnelPortResource portResource, IServiceProvider services)
+    internal static async Task UpdatePortAccessAsync(DevTunnelPortResource portResource, ResourceNotificationService notifications, ResourceLoggerService logs)
     {
-        var portLogger = services.GetRequiredService<ResourceLoggerService>().GetLogger(portResource);
-        var effectivePolicy = portResource.LastKnownAccessStatus?.LogAnonymousAccessPolicy(portLogger);
-        if (effectivePolicy is not null)
+        var effectivePolicy = portResource.LastKnownAccessStatus?.GetAnonymousAccessPolicy();
+        var previousPolicy = notifications.TryGetCurrentState(portResource.Name, out var current)
+            ? current.Snapshot.Properties.FirstOrDefault(p => p.Name == "Anonymous access")?.Value as string
+            : null;
+        if (!string.Equals(effectivePolicy, previousPolicy, StringComparison.Ordinal) && portResource.LastKnownAccessStatus is { } access)
         {
-            await services.GetRequiredService<ResourceNotificationService>().PublishUpdateAsync(portResource, snapshot => snapshot with
-            {
-                Properties = [
-                    .. snapshot.Properties.Where(p => !string.Equals(p.Name, "Anonymous access", StringComparison.OrdinalIgnoreCase)),
-                    new("Anonymous access", effectivePolicy)
-                ]
-            }).ConfigureAwait(false);
+            access.LogAnonymousAccessPolicy(logs.GetLogger(portResource));
         }
+
+        ResourcePropertySnapshot[] policyProperties = effectivePolicy is null ? [] : [new("Anonymous access", effectivePolicy)];
+        await notifications.PublishUpdateAsync(portResource, snapshot => snapshot with
+        {
+            Properties = [
+                .. snapshot.Properties.Where(p => !string.Equals(p.Name, "Anonymous access", StringComparison.OrdinalIgnoreCase)),
+                .. policyProperties
+            ]
+        }).ConfigureAwait(false);
     }
 
     internal static async Task StopPortAsync(DevTunnelPortResource portResource, IServiceProvider services, CancellationToken cancellationToken)

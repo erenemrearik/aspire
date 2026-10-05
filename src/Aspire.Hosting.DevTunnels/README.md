@@ -225,7 +225,7 @@ When dev tunnel ports are successfully allocated, they log detailed information 
 
 Aspire observes the `devtunnel host` console output to make public endpoints available as soon as the local host reports that it is ready. Connection loss updates the tunnel and port resources without waiting for the next health check. A running CLI process does not necessarily mean its tunnel connection is active.
 
-Health checks also reconcile tunnel ports and access settings with the dev tunnels service. If the CLI output is unrecognized or does not provide a complete readiness message, Aspire logs a warning and uses service-based reconciliation to discover the endpoints. Minor whitespace, line wrapping, and separator differences are supported. The warning is limited to once per resource start; the original console output remains available in the tunnel resource's logs.
+Health checks also reconcile tunnel ports and access settings with the dev tunnels service. If port or readiness output is unrecognized, Aspire logs a warning and uses service-based reconciliation to discover the endpoints once this local host has reported a connection. A remote host count alone cannot establish local readiness: another machine might be hosting the same tunnel. If no local connection message is recognized, the tunnel remains unready rather than exposing another host's endpoints. Minor whitespace, line wrapping, and separator differences are supported. The warning is limited to once per resource start; the original console output remains available in the tunnel resource's logs.
 
 Starting a tunnel checks its remote configuration and reuses matching tunnels and ports. Unchanged access policies are left intact; changed policies are reconciled before hosting. Ports are recreated only when their protocol, description, or labels differ from the application model. Remote drift is checked on each start rather than relying on a cached successful setup.
 
@@ -241,7 +241,7 @@ Forwarding from https://37tql9l1-7023.usw2.devtunnels.ms to https://localhost:70
 
 ### Anonymous access logging
 
-Port resources also log their effective anonymous access policy, showing both the current access level and the configuration that led to it:
+Port resources also log their effective anonymous access policy when first known or when it changes, showing both the current access level and the configuration that led to it. A failed policy query clears that port's access property instead of retaining a stale value; successful policy queries for other ports are still applied.
 
 **When anonymous access is allowed:**
 ```text

@@ -6,6 +6,7 @@ using Aspire.Hosting.Eventing;
 using Microsoft.AspNetCore.InternalTesting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 
 namespace Aspire.Hosting.DevTunnels.Tests;
 
@@ -31,6 +32,7 @@ public class DevTunnelMonitorTests
         using var test = new TestDevTunnelMonitor();
         test.Monitor.StartupLogTimeout = TimeSpan.Zero;
         await test.StartAsync();
+        await test.LogAsync("Connection to host tunnel relay restored.");
         await test.LogAsync("A new output format");
         await test.LogAsync("Another unrecognized line");
         Assert.Equal(HealthStatus.Healthy, (await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout()).Status);
@@ -40,28 +42,105 @@ public class DevTunnelMonitorTests
     }
 
     [Fact]
-    public async Task ReconciliationRetriesUntilUnrecognizedOutputCanBeReplacedByServiceStatus()
+    public async Task AnotherHostCannotEstablishUnknownLocalReadiness()
     {
         using var test = new TestDevTunnelMonitor();
         test.Monitor.StartupLogTimeout = TimeSpan.Zero;
-        test.Monitor.ReconciliationRetryInterval = TimeSpan.Zero;
+        test.Monitor.ReconciliationRetryInterval = TimeSpan.FromMinutes(1);
+        var queried = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        test.Client.GetTunnelCallback = (_, _) =>
+        {
+            queried.TrySetResult();
+            return Task.FromResult(test.Client.TunnelStatus);
+        };
+        await test.StartAsync();
+        await test.LogAsync("Unrecognized connection output.");
+        var health = test.Monitor.CheckHealthAsync(CancellationToken.None);
+        await queried.Task.DefaultTimeout();
+        await test.App.ResourceNotifications.WaitForResourceAsync(test.Tunnel.Name,
+            _ => test.Tunnel.LastKnownStatus?.HostConnections == 1).DefaultTimeout();
+        await test.LogAsync("");
+
+        Assert.False(health.IsCompleted);
+        Assert.Equal(HealthStatus.Unhealthy, Assert.Single(test.Snapshot(test.Tunnel).HealthReports, r => r.Name == "tunnel-connection").Status);
+        Assert.Equal(KnownResourceStates.NotStarted, test.Snapshot(test.Port).State?.Text);
+        Assert.Null(test.Port.TunnelEndpointAnnotation.AllocatedEndpoint);
+        Assert.All(test.Snapshot(test.Port).Urls, u => Assert.True(u.IsInactive));
+
+        // Even after service metadata is available, an unrecognized local host is not enough.
+        // This run must supply a connection observation before those URLs can become active.
+        await test.LogAsync("Connection to host tunnel relay restored.");
+        await health.DefaultTimeout();
+        Assert.Equal(HealthStatus.Healthy, test.Snapshot(test.Port).HealthStatus);
+    }
+
+    [Theory]
+    [InlineData("Executing command 'stop'.")]
+    [InlineData("Executing command 'restart'.")]
+    [InlineData("Successfully executed command 'start'.")]
+    [InlineData("Error executing command 'restart'.\nSystem.Exception: command failure\n   at SomeMethod()")]
+    [InlineData("Failure executing command 'start'. Error message: failed")]
+    [InlineData("Command 'restart' was canceled.")]
+    [InlineData("[sys] Starting process...\nUnprefixed system detail")]
+    [InlineData("[Aspire dev tunnels] Failed to refresh tunnel access metadata.\nRetryableProvisioningException: Tunnel port not found\n   at SomeMethod()")]
+    public async Task AspireDiagnosticEntriesDoNotTriggerOutputWarnings(string content)
+    {
+        using var test = new TestDevTunnelMonitor();
+        await test.StartAsync();
+        await test.ReadyAsync();
+        await test.LogAsync(content);
+        test.App.Services.GetRequiredService<ResourceLoggerService>().GetLogger(test.Tunnel)
+            .LogInformation(DevTunnelMonitor.DiagnosticPrefix + "Log capture boundary.");
+        Assert.Equal(0, (await test.LogsAsync()).Count(l => l.Content.Contains("Some devtunnel output was not recognized", StringComparison.Ordinal)));
+
+        // Filtering a known source must not use up the once-per-start warning allowance.
+        await test.LogAsync("An actual unknown CLI message");
+        Assert.Single(await test.LogsAsync(), l => l.Content.Contains("Some devtunnel output was not recognized", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReconciliationRetriesUntilUnrecognizedOutputCanBeReplacedByServiceStatus()
+    {
+        var time = new TestDevTunnelTimeProvider();
+        using var test = new TestDevTunnelMonitor(time);
+        test.Monitor.StartupLogTimeout = TimeSpan.Zero;
+        test.Monitor.ReconciliationRetryInterval = TimeSpan.FromSeconds(1);
+        var firstReturned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var retried = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var response = new TaskCompletionSource<DevTunnelStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        test.App.Services.GetRequiredService<IDistributedApplicationEventing>().Subscribe<ResourceEndpointsAllocatedEvent>(test.Port, async (_, ct) =>
+        {
+            callbackStarted.TrySetResult();
+            await callbackRelease.Task.WaitAsync(ct);
+        });
         var count = 0;
         test.Client.GetTunnelCallback = (_, ct) =>
         {
             if (Interlocked.Increment(ref count) == 1)
             {
+                firstReturned.TrySetResult();
                 return Task.FromResult(test.Client.TunnelStatus with { HostConnections = 0 });
             }
             retried.TrySetResult();
             return response.Task.WaitAsync(ct);
         };
         await test.StartAsync();
+        await test.LogAsync("Connection to host tunnel relay restored.");
         var health = test.Monitor.CheckHealthAsync(CancellationToken.None);
+        await firstReturned.Task.DefaultTimeout();
+        Assert.Equal(TimeSpan.FromSeconds(1), await time.ScheduledDelays.Reader.ReadAsync().AsTask().DefaultTimeout());
+        time.Advance(TimeSpan.FromSeconds(1));
         await retried.Task.DefaultTimeout();
         Assert.False(health.IsCompleted);
         response.SetResult(test.Client.TunnelStatus);
+        await callbackStarted.Task.DefaultTimeout();
+        time.Advance(TimeSpan.FromMinutes(1));
+        await test.LogAsync("");
+        Assert.False(health.IsCompleted);
+        Assert.Equal(2, count);
+        callbackRelease.SetResult();
         await health.DefaultTimeout();
         Assert.Equal(HealthStatus.Healthy, test.Snapshot(test.Port).HealthStatus);
         Assert.Equal(2, count);
@@ -327,6 +406,93 @@ public class DevTunnelMonitorTests
         Assert.Same(test.Client.AccessStatus, test.Port.LastKnownAccessStatus);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AccessQueryFailuresClearOnlyFailedResults(bool missingPort)
+    {
+        using var test = new TestDevTunnelMonitor(includeSecondPort: true);
+        var otherPort = Assert.Single(test.Tunnel.Ports, p => p.TargetEndpoint.EndpointName == "other");
+        test.Client.TunnelStatus = test.Client.TunnelStatus with
+        {
+            Ports = [
+                .. test.Client.TunnelStatus.Ports,
+                new(3001, "http") { PortUri = new("https://original-3001.usw2.devtunnels.ms/") }
+            ]
+        };
+        await test.StartAsync();
+        await test.ReadyAsync();
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Equal("Denied", Assert.Single(test.Snapshot(test.Port).Properties, p => p.Name == "Anonymous access").Value);
+        Assert.Equal("Denied", Assert.Single(test.Snapshot(otherPort).Properties, p => p.Name == "Anonymous access").Value);
+
+        var allowed = new DevTunnelAccessStatus
+        {
+            AccessControlEntries = [new("Anonymous", false, true, [], ["connect"])]
+        };
+        test.Client.GetAccessCallback = (number, _) =>
+        {
+            if (number == (missingPort ? 3001 : (int?)null))
+            {
+                throw new DistributedApplicationException("Access query failed.");
+            }
+            return Task.FromResult(allowed);
+        };
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+
+        Assert.Same(allowed, test.Port.LastKnownAccessStatus);
+        Assert.Equal("Allowed", Assert.Single(test.Snapshot(test.Port).Properties, p => p.Name == "Anonymous access").Value);
+        if (missingPort)
+        {
+            Assert.Same(allowed, test.Tunnel.LastKnownAccessStatus);
+            Assert.Null(otherPort.LastKnownAccessStatus);
+            Assert.Equal(0, test.Snapshot(otherPort).Properties.Count(p => p.Name == "Anonymous access"));
+        }
+        else
+        {
+            Assert.Null(test.Tunnel.LastKnownAccessStatus);
+            Assert.Same(allowed, otherPort.LastKnownAccessStatus);
+            Assert.Equal("Allowed", Assert.Single(test.Snapshot(otherPort).Properties, p => p.Name == "Anonymous access").Value);
+        }
+        Assert.Equal(0, (await test.LogsAsync()).Count(l => l.Content.Contains("Some devtunnel output was not recognized", StringComparison.Ordinal)));
+
+        test.Client.GetAccessCallback = (_, _) => Task.FromResult(allowed);
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Same(allowed, test.Tunnel.LastKnownAccessStatus);
+        Assert.Equal("Allowed", Assert.Single(test.Snapshot(otherPort).Properties, p => p.Name == "Anonymous access").Value);
+    }
+
+    [Fact]
+    public async Task AccessPolicyLogsOnlyEffectiveChanges()
+    {
+        using var test = new TestDevTunnelMonitor();
+        await test.StartAsync();
+        await test.ReadyAsync();
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Single(await test.LogsAsync(test.Port), l => l.Content.Contains("Anonymous access is not allowed", StringComparison.Ordinal));
+
+        test.Client.AccessStatus = new()
+        {
+            AccessControlEntries = [new("Anonymous", false, true, [], ["connect"])]
+        };
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        test.Client.AccessStatus = new()
+        {
+            AccessControlEntries = [new("Anonymous", false, false, [], ["connect"])]
+        };
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Single(await test.LogsAsync(test.Port), l => l.Content.Contains("!! Anonymous access is allowed", StringComparison.Ordinal));
+        Assert.Equal("Allowed", Assert.Single(test.Snapshot(test.Port).Properties, p => p.Name == "Anonymous access").Value);
+
+        test.Client.GetAccessCallback = (_, _) => throw new DistributedApplicationException("Access query failed.");
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Equal(0, test.Snapshot(test.Port).Properties.Count(p => p.Name == "Anonymous access"));
+        test.Client.GetAccessCallback = null;
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Equal(2, (await test.LogsAsync(test.Port)).Count(l => l.Content.Contains("!! Anonymous access is allowed", StringComparison.Ordinal)));
+    }
+
     [Fact]
     public async Task AuthenticationNotificationDoesNotBlockReconciliation()
     {
@@ -399,6 +565,7 @@ public class DevTunnelMonitorTests
             Ports = [new(3000, "http") { PortUri = new("https://service-assigned-name.usw2.devtunnels.ms") }]
         };
         await test.StartAsync();
+        await test.LogAsync("Connection to host tunnel relay restored.");
         await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
         Assert.Equal(HealthStatus.Healthy, test.Snapshot(test.Port).HealthStatus);
         Assert.Equal("service-assigned-name.usw2.devtunnels.ms", test.Port.TunnelEndpointAnnotation.AllocatedEndpoint?.Address);
@@ -410,6 +577,30 @@ public class DevTunnelMonitorTests
         using var test = new TestDevTunnelMonitor();
         await test.StartAsync();
         await test.Monitor.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => test.Monitor.CheckHealthAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DisposalCancelsIndependentAccessQueries()
+    {
+        using var test = new TestDevTunnelMonitor(includeSecondPort: true);
+        var called = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var response = new TaskCompletionSource<DevTunnelAccessStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queries = 0;
+        test.Client.GetAccessCallback = (_, ct) =>
+        {
+            if (Interlocked.Increment(ref queries) == 3)
+            {
+                called.TrySetResult();
+            }
+            return response.Task.WaitAsync(ct);
+        };
+        await test.StartAsync();
+        await test.ReadyAsync();
+        await called.Task.DefaultTimeout();
+        await test.Monitor.DisposeAsync().AsTask().DefaultTimeout();
+        Assert.Equal(3, queries);
+        Assert.False(response.Task.IsCompleted);
         await Assert.ThrowsAsync<ObjectDisposedException>(() => test.Monitor.CheckHealthAsync(CancellationToken.None));
     }
 }

@@ -300,6 +300,7 @@ public class DevTunnelResourceBuilderExtensionsTests
         var monitor = app.Services.GetRequiredKeyedService<DevTunnelMonitor>(tunnel.Resource);
         monitor.StartupLogTimeout = TimeSpan.Zero;
         await monitor.StartAsync("mytunnel", CancellationToken.None);
+        await monitor.ProcessLogAsync("Connection to host tunnel relay restored.", CancellationToken.None);
         var healthCheck = new DevTunnelHealthCheck(monitor);
 
         var result = await healthCheck.CheckHealthAsync(new HealthCheckContext()).DefaultTimeout();
@@ -361,6 +362,7 @@ public class DevTunnelResourceBuilderExtensionsTests
         var monitor = app.Services.GetRequiredKeyedService<DevTunnelMonitor>(tunnel.Resource);
         monitor.StartupLogTimeout = TimeSpan.Zero;
         await monitor.StartAsync("mytunnel.eun1", CancellationToken.None);
+        await monitor.ProcessLogAsync("Connection to host tunnel relay restored.", CancellationToken.None);
         var healthCheck = new DevTunnelHealthCheck(monitor);
 
         var result = await healthCheck.CheckHealthAsync(new HealthCheckContext()).DefaultTimeout();
@@ -711,7 +713,7 @@ public class DevTunnelResourceBuilderExtensionsTests
         };
         var (command, arguments) = GetLongRunningCommand();
         using var builder = TestDistributedApplicationBuilder.Create();
-        var tunnelCommand = useConsoleOutput && !OperatingSystem.IsWindows() ? "/bin/sh" : command;
+        var tunnelCommand = OperatingSystem.IsWindows() ? command : "/bin/sh";
         builder.Configuration["ASPIRE_DEVTUNNEL_CLI_PATH"] = tunnelCommand;
         if (useConsoleOutput)
         {
@@ -729,11 +731,14 @@ public class DevTunnelResourceBuilderExtensionsTests
         {
             tunnel.Resource.Annotations.Remove(annotation);
         }
-        tunnel.WithArgs(useConsoleOutput
+        var portOutput = useConsoleOutput
             ? OperatingSystem.IsWindows()
-                ? ["/c", $"echo Hosting port: {targetPort} & echo Connect via browser: {tunnelUrl} & echo Ready to accept connections for tunnel: mytunnel & ping -n 180 127.0.0.1"]
-                : ["-c", $"printf '%s\\n' 'Hosting port: {targetPort}' 'Connect via browser: {tunnelUrl}' 'Ready to accept connections for tunnel: mytunnel'; sleep 180"]
-            : arguments);
+                ? $" & echo Hosting port: {targetPort} & echo Connect via browser: {tunnelUrl} & echo Ready to accept connections for tunnel: mytunnel"
+                : $" 'Hosting port: {targetPort}' 'Connect via browser: {tunnelUrl}' 'Ready to accept connections for tunnel: mytunnel'"
+            : "";
+        tunnel.WithArgs(OperatingSystem.IsWindows()
+            ? ["/c", $"echo Connection to host tunnel relay restored.{portOutput} & ping -n 180 127.0.0.1"]
+            : ["-c", $"printf '%s\\n' 'Connection to host tunnel relay restored.'{portOutput}; sleep 180"]);
 
         var dependent = builder.AddExecutable("dependent", command, Environment.CurrentDirectory, arguments)
             .WithExplicitStart()

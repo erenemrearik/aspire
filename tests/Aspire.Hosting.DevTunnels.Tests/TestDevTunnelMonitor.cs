@@ -14,16 +14,26 @@ internal sealed class TestDevTunnelMonitor : IDisposable
 {
     private readonly IDistributedApplicationTestingBuilder _builder = TestDistributedApplicationBuilder.Create();
 
-    public TestDevTunnelMonitor()
+    public TestDevTunnelMonitor(TimeProvider? timeProvider = null, bool includeSecondPort = false)
     {
+        if (timeProvider is not null)
+        {
+            _builder.Services.AddSingleton(timeProvider);
+        }
         _builder.Services.AddSingleton<IDevTunnelClient>(Client);
         _builder.Services.AddSingleton<IInteractionService>(Interaction);
         var target = _builder.AddExecutable("target", "unused", _builder.AppHostDirectory)
             .WithHttpEndpoint(targetPort: 3000);
         var targetEndpoint = target.GetEndpoint("http");
         targetEndpoint.EndpointAnnotation.AllocatedEndpoint = new(targetEndpoint.EndpointAnnotation, "localhost", 3000);
+        if (includeSecondPort)
+        {
+            target.WithHttpEndpoint(targetPort: 3001, name: "other");
+            var otherEndpoint = target.GetEndpoint("other");
+            otherEndpoint.EndpointAnnotation.AllocatedEndpoint = new(otherEndpoint.EndpointAnnotation, "localhost", 3001);
+        }
         Tunnel = _builder.AddDevTunnel("tunnel", "mytunnel").WithReference(target).Resource;
-        Port = Assert.Single(Tunnel.Ports);
+        Port = Assert.Single(Tunnel.Ports, p => p.TargetEndpoint.EndpointName == "http");
         App = _builder.Build();
         Monitor = App.Services.GetRequiredKeyedService<DevTunnelMonitor>(Tunnel);
         // Tests opt into fallback explicitly; host load must not select that path accidentally.
@@ -61,6 +71,13 @@ internal sealed class TestDevTunnelMonitor : IDisposable
             Inspect network activity: https://original-3000-inspect.usw2.devtunnels.ms
             Ready to accept connections for tunnel: mytunnel.usw2
             """);
+        if (Tunnel.Ports.Count > 1)
+        {
+            await LogAsync("""
+                Hosting port: 3001
+                Connect via browser: https://original-3001.usw2.devtunnels.ms
+                """);
+        }
         await App.ResourceNotifications.WaitForResourceAsync(Port.Name,
             e => e.Snapshot.State?.Text == KnownResourceStates.Running && e.Snapshot.HealthStatus == Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy).DefaultTimeout();
     }
@@ -71,9 +88,9 @@ internal sealed class TestDevTunnelMonitor : IDisposable
         return current.Snapshot;
     }
 
-    public async Task<IReadOnlyList<LogLine>> LogsAsync()
+    public async Task<IReadOnlyList<LogLine>> LogsAsync(IResource? resource = null)
     {
-        await using var reader = App.Services.GetRequiredService<ResourceLoggerService>().WatchAsync(Tunnel).GetAsyncEnumerator();
+        await using var reader = App.Services.GetRequiredService<ResourceLoggerService>().WatchAsync(resource ?? Tunnel).GetAsyncEnumerator();
         Assert.True(await reader.MoveNextAsync().AsTask().DefaultTimeout());
         return reader.Current;
     }

@@ -27,6 +27,9 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
     private readonly ResourceLoggerService _logs;
     private readonly ResourceNotificationService _notifications;
     private readonly ILogger _logger;
+    private readonly ILogger<DevTunnelHealthCheck> _healthLogger;
+    private readonly LoggedOutNotificationManager _loggedOutNotifications;
+    private readonly IDistributedApplicationEventing _eventing;
     private readonly TimeProvider _timeProvider;
     private readonly CancellationTokenSource _stopping;
     private readonly Channel<Operation> _operations = Channel.CreateUnbounded<Operation>(new()
@@ -39,6 +42,7 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
     private readonly HashSet<DevTunnelPortResource> _allocatedEndpoints = [];
     private readonly Dictionary<DevTunnelPortResource, Exception> _endpointErrors = [];
     private Run? _run;
+    private int _disposeStarted;
     private int _disposed;
 
     internal TimeSpan StartupLogTimeout { get; set; } = TimeSpan.FromSeconds(5);
@@ -52,6 +56,9 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
         _logs = services.GetRequiredService<ResourceLoggerService>();
         _notifications = services.GetRequiredService<ResourceNotificationService>();
         _logger = _logs.GetLogger(resource);
+        _healthLogger = services.GetRequiredService<ILogger<DevTunnelHealthCheck>>();
+        _loggedOutNotifications = services.GetRequiredService<LoggedOutNotificationManager>();
+        _eventing = services.GetRequiredService<IDistributedApplicationEventing>();
         _timeProvider = services.GetService<TimeProvider>() ?? TimeProvider.System;
         _stopping = CancellationTokenSource.CreateLinkedTokenSource(services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping);
         _processing = ProcessAsync();
@@ -147,31 +154,34 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
             // polls, using the same service observation as subsequent health evaluations.
             try
             {
-                await run.Ready.Task.WaitAsync(StartupLogTimeout, _timeProvider, run.Cancellation.Token).ConfigureAwait(false);
-                return;
+                await run.HostReady.Task.WaitAsync(StartupLogTimeout, _timeProvider, run.Cancellation.Token).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
                 // Missing or changed output must not prevent the service-based fallback.
             }
 
-            await InvokeAsync(() =>
+            if (!run.HostReady.Task.IsCompleted)
             {
-                if (!run.HasReadyMessage || !run.ExpectedPorts.Values.All(run.Ports.ContainsKey))
+                await InvokeAsync(() =>
                 {
                     WarnUnrecognizedOutput(run);
-                }
-                return Task.FromResult(true);
-            }, run.Cancellation.Token).ConfigureAwait(false);
+                    return Task.FromResult(true);
+                }, run.Cancellation.Token).ConfigureAwait(false);
+            }
 
-            while (!run.Ready.Task.IsCompleted)
+            while (!run.HostReady.Task.IsCompleted && !run.Ready.Task.IsCompleted)
             {
                 await ReconcileAsync(run, run.Cancellation.Token).ConfigureAwait(false);
-                if (!run.Ready.Task.IsCompleted)
+                if (!run.HostReady.Task.IsCompleted && !run.Ready.Task.IsCompleted)
                 {
                     await Task.Delay(ReconciliationRetryInterval, _timeProvider, run.Cancellation.Token).ConfigureAwait(false);
                 }
             }
+
+            // The service can't tell us anything about user endpoint callbacks. Once the local
+            // host and its ports are observed, wait for those callbacks without more CLI polling.
+            await run.Ready.Task.WaitAsync(run.Cancellation.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (run.Cancellation.IsCancellationRequested)
         {
@@ -206,7 +216,7 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
     private async Task QueryServiceAsync(Run run, long revision)
     {
         var cancellationToken = run.Cancellation.Token;
-        var logger = _services.GetRequiredService<ILogger<DevTunnelHealthCheck>>();
+        var logger = _healthLogger;
         try
         {
             var status = await _client.GetTunnelAsync(run.TunnelId, logger, cancellationToken).ConfigureAwait(false);
@@ -217,9 +227,10 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
                 {
                     run.TunnelId = status.TunnelId;
                     _resource.LastKnownStatus = status;
-                    // Aggregate service connections may belong to another host. They cannot
-                    // override an explicit disconnect observed from this local process.
-                    run.Connected = !run.LocallyDisconnected && status.HostConnections > 0;
+                    // Aggregate connections can belong to another machine, including before this
+                    // run has ever connected. Service metadata can fill in unknown port URLs,
+                    // but it cannot establish local connectivity or override a local disconnect.
+                    run.Connected = run.HasConnectionEvidence && !run.LocallyDisconnected && status.HostConnections > 0;
                     run.Ports.Clear();
                     foreach (var port in status.Ports)
                     {
@@ -265,7 +276,7 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
                             run.Connected = false;
                             run.Ports.Clear();
                         }
-                        else if (!run.HasReadyMessage)
+                        else if (!run.HasConnectionEvidence)
                         {
                             run.Connected = false;
                         }
@@ -284,43 +295,58 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
 
     private async Task QueryAccessAsync(Run run)
     {
+        // A missing or inaccessible port must not hide a successful tunnel query or prevent
+        // another port's inherited policy from being refreshed.
+        await Task.WhenAll(
+            run.ExpectedPorts.Select(p => RefreshAccessAsync(run, p.Key, p.Value))
+                .Prepend(RefreshAccessAsync(run, port: null, portNumber: null))).ConfigureAwait(false);
+    }
+
+    private async Task RefreshAccessAsync(Run run, DevTunnelPortResource? port, int? portNumber)
+    {
         var cancellationToken = run.Cancellation.Token;
-        var logger = _services.GetRequiredService<ILogger<DevTunnelHealthCheck>>();
+        var logger = _healthLogger;
+        DevTunnelAccessStatus? access = null;
+        var failed = false;
         try
         {
-            var tunnelAccess = await _client.GetAccessAsync(run.TunnelId, portNumber: null, logger, cancellationToken).ConfigureAwait(false);
-            var portAccess = new Dictionary<DevTunnelPortResource, DevTunnelAccessStatus>();
-            foreach (var (port, number) in run.ExpectedPorts)
-            {
-                portAccess.Add(port, await _client.GetAccessAsync(run.TunnelId, number, logger, cancellationToken).ConfigureAwait(false));
-            }
+            access = await _client.GetAccessAsync(run.TunnelId, portNumber, logger, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            failed = true;
+            _logger.LogWarning(ex, DiagnosticPrefix + "Failed to refresh access metadata for tunnel '{TunnelId}', port '{PortNumber}'.", run.TunnelId, portNumber);
+        }
+
+        try
+        {
             await InvokeAsync(async () =>
             {
                 if (IsCurrent(run))
                 {
-                    _resource.LastKnownAccessStatus = tunnelAccess;
-                    foreach (var (port, access) in portAccess)
+                    if (port is null)
+                    {
+                        _resource.LastKnownAccessStatus = access;
+                    }
+                    else
                     {
                         port.LastKnownAccessStatus = access;
-                        await DevTunnelsResourceBuilderExtensions.UpdatePortAccessAsync(port, _services).ConfigureAwait(false);
+                        await DevTunnelsResourceBuilderExtensions.UpdatePortAccessAsync(port, _notifications, _logs).ConfigureAwait(false);
                     }
                 }
                 return true;
             }, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, DiagnosticPrefix + "Failed to refresh tunnel access metadata.");
-            try
+            if (failed)
             {
                 await CheckLoginAsync(run).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
         }
     }
 
@@ -336,14 +362,13 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
 
     private async Task NotifyIfLoggedOutAsync(CancellationToken cancellationToken)
     {
-        var logger = _services.GetRequiredService<ILogger<DevTunnelHealthCheck>>();
+        var logger = _healthLogger;
         try
         {
             var login = await _client.GetUserLoginStatusAsync(logger, cancellationToken).ConfigureAwait(false);
             if (!login.IsLoggedIn)
             {
-                await _services.GetRequiredService<LoggedOutNotificationManager>()
-                    .NotifyUserLoggedOutAsync(cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+                await _loggedOutNotifications.NotifyUserLoggedOutAsync(cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -447,11 +472,17 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
                     canWarn = false;
                 }
             }
+            // The resource logger appends exceptions and stack traces to the same entry.
+            // Reject the whole diagnostic before splitting, not just its prefixed first line.
+            if (IsHostDiagnostic(content.TrimStart()))
+            {
+                continue;
+            }
             foreach (var line in DevTunnelOutputParser.SplitOutput(content))
             {
                 // Resource logs also contain DCP messages and our own diagnostics. Never feed
                 // diagnostics back into the parser, or a warning could recursively warn about itself.
-                if (line.StartsWith("[sys]", StringComparison.Ordinal) || line.StartsWith(DiagnosticPrefix, StringComparison.Ordinal))
+                if (IsHostDiagnostic(line.TrimStart()))
                 {
                     continue;
                 }
@@ -466,13 +497,14 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
                     case DevTunnelOutputParser.OutputKind.Ready:
                         run.Connected = true;
                         run.LocallyDisconnected = false;
-                        run.HasReadyMessage = true;
+                        run.HasConnectionEvidence = true;
                         changed = true;
                         break;
                     case DevTunnelOutputParser.OutputKind.Connected:
-                        // "Restored" is emitted before the initial port block, but on reconnect
-                        // previously observed ports can be reused.
-                        run.Connected = run.HasReadyMessage || run.Ready.Task.IsCompletedSuccessfully;
+                        // "Restored" is run-specific evidence even when the port/ready format
+                        // is unknown. Reconciliation can then supply the missing port metadata.
+                        run.HasConnectionEvidence = true;
+                        run.Connected = true;
                         run.LocallyDisconnected = false;
                         changed = true;
                         break;
@@ -495,6 +527,15 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
         }
     }
 
+    private static bool IsHostDiagnostic(string content) =>
+        content.StartsWith("[sys]", StringComparison.Ordinal)
+        || content.StartsWith(DiagnosticPrefix, StringComparison.Ordinal)
+        || content.StartsWith("Executing command '", StringComparison.Ordinal)
+        || content.StartsWith("Successfully executed command '", StringComparison.Ordinal)
+        || content.StartsWith("Failure executing command '", StringComparison.Ordinal)
+        || content.StartsWith("Error executing command '", StringComparison.Ordinal)
+        || content.StartsWith("Command '", StringComparison.Ordinal);
+
     private void WarnUnrecognizedOutput(Run run)
     {
         if (!IsCurrent(run) || run.WarnedAboutOutput)
@@ -502,11 +543,15 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
             return;
         }
         run.WarnedAboutOutput = true;
-        _logger.LogWarning(DiagnosticPrefix + "Some devtunnel output was not recognized, or a complete readiness message has not arrived. Health checks will reconcile tunnel status. If status is incorrect, report an Aspire issue with the devtunnel version and relevant console output, after removing sensitive information.");
+        _logger.LogWarning(DiagnosticPrefix + "Some devtunnel output was not recognized, or a complete readiness message has not arrived. Health checks will reconcile tunnel status, but readiness still requires connection evidence from this local host. If status is incorrect, report an Aspire issue with the devtunnel version and relevant console output, after removing sensitive information.");
     }
 
     private async Task PublishAsync(Run run)
     {
+        if (run.Connected && run.ExpectedPorts.Values.All(run.Ports.ContainsKey))
+        {
+            run.HostReady.TrySetResult();
+        }
         foreach (var (port, number) in run.ExpectedPorts)
         {
             port.LastKnownStatus = run.Ports.TryGetValue(number, out var knownUri) ? new(number, port.Options.Protocol!) { PortUri = knownUri } : null;
@@ -546,7 +591,7 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
         foreach (var (port, number) in run.ExpectedPorts)
         {
             var available = run.Connected && run.Ports.ContainsKey(number) && _allocatedEndpoints.Contains(port);
-            await DevTunnelsResourceBuilderExtensions.UpdatePortAsync(port, available, _services, run.Cancellation.Token).ConfigureAwait(false);
+            await DevTunnelsResourceBuilderExtensions.UpdatePortAsync(port, available, _notifications, _logs, run.Cancellation.Token).ConfigureAwait(false);
         }
         if (healthy && run.Ready.TrySetResult())
         {
@@ -560,8 +605,7 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
         var cancellationToken = _stopping.Token;
         try
         {
-            await _services.GetRequiredService<IDistributedApplicationEventing>()
-                .PublishAsync(new ResourceEndpointsAllocatedEvent(port, _services), cancellationToken)
+            await _eventing.PublishAsync(new ResourceEndpointsAllocatedEvent(port, _services), cancellationToken)
                 .WaitAsync(cancellationToken).ConfigureAwait(false);
             await InvokeAsync(async () =>
             {
@@ -622,6 +666,7 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
         _run = null;
         await run.Cancellation.CancelAsync().ConfigureAwait(false);
         run.Ready.TrySetCanceled(run.Cancellation.Token);
+        run.HostReady.TrySetCanceled(run.Cancellation.Token);
         await Task.WhenAll(run.LogTask, run.StateTask, run.ReconciliationTask, run.AccessTask, run.LoginTask, run.InitialHealthTask ?? Task.CompletedTask).ConfigureAwait(false);
         run.Cancellation.Dispose();
     }
@@ -662,11 +707,15 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
         {
             return;
         }
         await _stopping.CancelAsync().ConfigureAwait(false);
+        // Cancel linked producer tokens before closing admission. Otherwise a completed access
+        // query can race shutdown, see "disposed" while its run token is still live, and fault
+        // disposal rather than taking the normal cancellation path.
+        Volatile.Write(ref _disposed, 1);
         _operations.Writer.TryComplete();
         await _processing.ConfigureAwait(false);
         await StopRunAsync().ConfigureAwait(false);
@@ -684,6 +733,7 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
         public DevTunnelOutputParser Parser { get; } = new(friendlyTunnelId);
         public CancellationTokenSource Cancellation { get; } = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         public TaskCompletionSource Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource HostReady { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Dictionary<int, Uri> Ports { get; } = [];
         public Task LogTask { get; set; } = Task.CompletedTask;
         public Task StateTask { get; set; } = Task.CompletedTask;
@@ -693,7 +743,7 @@ internal sealed class DevTunnelMonitor : IDisposable, IAsyncDisposable
         public Task? InitialHealthTask { get; set; }
         public long Revision { get; set; }
         public bool Connected { get; set; }
-        public bool HasReadyMessage { get; set; }
+        public bool HasConnectionEvidence { get; set; }
         public bool LocallyDisconnected { get; set; }
         public bool WarnedAboutOutput { get; set; }
         public string? Error { get; set; }

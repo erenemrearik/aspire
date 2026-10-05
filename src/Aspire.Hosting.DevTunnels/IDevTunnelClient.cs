@@ -77,7 +77,11 @@ internal sealed record DevTunnelAccessStatus
 
     public sealed record AccessControlEntry(string Type, bool IsDeny, bool IsInherited, IReadOnlyList<string> Subjects, IReadOnlyList<string> Scopes);
 
-    internal string LogAnonymousAccessPolicy(ILogger logger)
+    internal string GetAnonymousAccessPolicy() => EvaluateAnonymousAccessPolicy(logger: null);
+
+    internal string LogAnonymousAccessPolicy(ILogger logger) => EvaluateAnonymousAccessPolicy(logger);
+
+    private string EvaluateAnonymousAccessPolicy(ILogger? logger)
     {
         const string AnonymousType = "Anonymous";
         const string ConnectScope = "connect";
@@ -105,44 +109,44 @@ internal sealed record DevTunnelAccessStatus
         if (tunnelHasAnonymousAllow && portHasInheritedAnonymousAllow && !portHasExplicitAnonymousDeny && !portHasExplicitAnonymousAllow)
         {
             // Case 1: tunnel allows anonymous; port inherits allow; no deny override
-            logger.LogInformation("!! Anonymous access is allowed (inherited from tunnel) !!");
+            logger?.LogInformation("!! Anonymous access is allowed (inherited from tunnel) !!");
             effective = "Allowed";
         }
         else if (tunnelHasAnonymousAllow && portHasExplicitAnonymousDeny)
         {
             // Case 2: tunnel allows anonymous but port explicitly denies
-            logger.LogInformation("Anonymous access is not allowed (tunnel allows it but port explicitly denies it)");
+            logger?.LogInformation("Anonymous access is not allowed (tunnel allows it but port explicitly denies it)");
             effective = "Denied";
         }
         else if (!tunnelHasAnonymousAllow && portHasExplicitAnonymousAllow && !portHasExplicitAnonymousDeny)
         {
             // Case 3: tunnel does not allow but port explicitly allows
-            logger.LogInformation("!! Anonymous access is allowed (port explicitly allows it) !!");
+            logger?.LogInformation("!! Anonymous access is allowed (port explicitly allows it) !!");
             effective = "Allowed";
         }
         else if (!tunnelHasAnonymousAllow && portHasExplicitAnonymousDeny)
         {
             // Case 4: tunnel does not allow and port explicitly denies
-            logger.LogInformation("Anonymous access is not allowed (tunnel does not allow it and port explicitly denies it)");
+            logger?.LogInformation("Anonymous access is not allowed (tunnel does not allow it and port explicitly denies it)");
             effective = "Denied";
         }
         else if (tunnelHasAnonymousAllow && portHasExplicitAnonymousAllow && !portHasExplicitAnonymousDeny)
         {
             // Case 5: tunnel allows anonymous; port allows anonymous; no deny override
-            logger.LogInformation("!! Anonymous access is allowed (tunnel allows it and port allows it) !!");
+            logger?.LogInformation("!! Anonymous access is allowed (tunnel allows it and port allows it) !!");
             effective = "Allowed";
         }
         else if (!tunnelHasAnonymousAllow && !portHasExplicitAnonymousAllow && !portHasExplicitAnonymousDeny)
         {
             // Case 6: tunnel does not allow; port does not explicitly allow or deny
-            logger.LogInformation("Anonymous access is not allowed (tunnel does not allow it and port does not explicitly allow or deny it)");
+            logger?.LogInformation("Anonymous access is not allowed (tunnel does not allow it and port does not explicitly allow or deny it)");
             effective = "Denied";
         }
         else
         {
             // Fallback / other combinations
             effective = "Unknown";
-            logger.LogDebug("Anonymous access: TunnelAllow={TunnelAllow} InheritedAllow={InheritedAllow} ExplicitAllow={ExplicitAllow} ExplicitDeny={ExplicitDeny} Effective={Effective}",
+            logger?.LogDebug("Anonymous access: TunnelAllow={TunnelAllow} InheritedAllow={InheritedAllow} ExplicitAllow={ExplicitAllow} ExplicitDeny={ExplicitDeny} Effective={Effective}",
                 tunnelHasAnonymousAllow, portHasInheritedAnonymousAllow, portHasExplicitAnonymousAllow, portHasExplicitAnonymousDeny, effective);
         }
 
