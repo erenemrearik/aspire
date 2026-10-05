@@ -77,6 +77,8 @@ aspire <command> [options]
 
 `aspire doctor` checks for local Aspire skill files along the active directory's ancestor chain within the workspace. `aspire update --migrate` uses the selected AppHost's Git root, or the nearest `.sln`/`.slnx` directory outside Git, falling back to the selected directory when neither exists. Sibling projects are not scanned, and migration preserves existing local skill files.
 
+Legacy installs have no reliable ownership/version receipt, so discovery reports possible conflicts without classifying files as CLI-owned or outdated. Automatic retirement is intentionally unsupported. After verifying the registered content in each client, review duplicate local skills and supporting files manually; retain customizations and intentional standalone installs.
+
 Changed agent configuration and managed skill files are published atomically. Replacement preserves the destination DACL on Windows and mode bits on Unix. Unix ownership, custom ACLs, and extended attributes are not preserved; files relying on that metadata should be configured manually instead.
 
 ## Examples
