@@ -540,8 +540,10 @@ internal sealed class CapabilityDispatcher
     /// <param name="args">The arguments as a JSON object.</param>
     /// <param name="ownerInvoker">The callback invoker of the guest-side connection issuing this
     /// call, used to route external capability callbacks back to the originating guest.</param>
+    /// <param name="cancellationToken">Cancellation of the incoming RPC request.</param>
     /// <returns>The result as JSON, or null for void methods.</returns>
-    public async Task<JsonNode?> InvokeAsync(string capabilityId, JsonObject? args, JsonRpcCallbackInvoker? ownerInvoker = null)
+    public async Task<JsonNode?> InvokeAsync(
+        string capabilityId, JsonObject? args, JsonRpcCallbackInvoker? ownerInvoker = null, CancellationToken cancellationToken = default)
     {
         // Look up the capability in the local (scoped) registry
         if (!_capabilities.TryGetValue(capabilityId, out var registration))
@@ -553,7 +555,10 @@ internal sealed class CapabilityDispatcher
             if (_externalRegistry is not null)
             {
                 _logger.LogDebug("Calling ExternalCapabilityRegistry.TryInvokeAsync for {CapabilityId}", capabilityId);
-                var (found, result) = await _externalRegistry.TryInvokeAsync(capabilityId, args, ownerInvoker).ConfigureAwait(false);
+                using var externalCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    [cancellationToken, .. _externalRegistry.GetCancellationTokens(capabilityId, args, _marshaller)]);
+                var (found, result) = await _externalRegistry.TryInvokeAsync(
+                    capabilityId, args, ownerInvoker, externalCancellation.Token).ConfigureAwait(false);
                 _logger.LogDebug("ExternalCapabilityRegistry returned: found={Found}, result={Result}",
                     found, result?.ToJsonString() ?? "null");
                 if (found)

@@ -1,21 +1,21 @@
 import * as net from 'node:net';
 import {
-    RequestType2,
+    RequestType3,
     createMessageConnection,
     StreamMessageReader,
     StreamMessageWriter,
     type MessageConnection,
+    type CancellationToken as RpcCancellationToken,
 } from 'vscode-jsonrpc/node.js';
 // Register generated factories before dispatch wraps incoming server handles.
 import './aspire.mjs';
 import {
-    invokeRegisteredCallback,
     getAspireExport,
     type AspireExportedFunction,
     type AspireExportMetadata,
     type AspireIntegrationDefinition,
 } from './base.mjs';
-import { wrapIfHandle, type AspireClientRpc } from './transport.mjs';
+import { AspireClient, CancellationToken, wrapIfHandle, type AspireClientRpc } from './transport.mjs';
 
 export type JsonObject = Record<string, unknown>;
 
@@ -93,32 +93,14 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
         log("Connection closed");
     });
 
-    // Raw invokeCapability — used by both the generated lib (through AspireClientRpc)
-    // and the callback relay.
-    const invokeCapability = async <TResult,>(capabilityId: string, args: JsonObject): Promise<TResult> => {
-        try {
-            const result = await connection.sendRequest<TResult | { $error: { code: string; message: string } }>(
-                'invokeCapability',
-                capabilityId,
-                args);
-
-            if (typeof result === 'object' && result !== null && '$error' in result) {
-                throw new Error(`ATS Error [${result.$error.code}]: ${result.$error.message}`);
-            }
-
-            return result as TResult;
-        } catch (error) {
-            log(`Engine capability ${capabilityId} failed: ${error instanceof Error ? error.message : String(error)}`);
-            throw error;
-        }
-    };
+    const client = AspireClient.fromConnection(connection, socket, log);
 
     // Callback relay — when an integration calls a guest-owned callback, we
     // route it through the AppHost server's invokeGuestCallback method.
     const invokeGuestCallback = async <TResult,>(callbackId: string, positionalArgs: readonly unknown[]): Promise<TResult> => {
         const callArgs: JsonObject = {};
         for (let i = 0; i < positionalArgs.length; i++) {
-            callArgs[`p${i}`] = positionalArgs[i] as never;
+            callArgs[`p${i}`] = positionalArgs[i];
         }
         log(`Invoking guest callback ${callbackId} (${positionalArgs.length} positional arg(s))`);
         try {
@@ -130,29 +112,6 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
             throw error;
         }
     };
-
-    // A lightweight AspireClientRpc implementation backed by this host's JSON-RPC
-    // connection. Passed to the generated `Impl` classes when we wrap incoming
-    // handles before dispatching to user code.
-    //
-    // Responses from `invokeCapability` get routed through `wrapIfHandle` so that
-    // raw {$handle, $type} JSON arriving off the wire is upgraded into proper
-    // Handle instances (or typed wrappers via the registered factory) — which is
-    // what the generated Impl classes expect to hold in their `_handle` fields.
-    const client: AspireClientRpc = {
-        connected: true,
-        invokeCapability: async <T,>(id: string, args?: Record<string, unknown>): Promise<T> => {
-            const raw = await invokeCapability<unknown>(id, (args ?? {}) as JsonObject);
-            return wrapIfHandle(raw, client) as T;
-        },
-        cancelToken: async () => true,
-        trackPromise: () => {},
-        flushPendingPromises: async () => {},
-        throwOnPendingRejections: true,
-    };
-
-    connection.onRequest('invokeCallback', (callbackId: string, args: unknown) =>
-        invokeRegisteredCallback(callbackId, args, client));
 
     connection.listen();
 
@@ -183,8 +142,8 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
     }
 
     connection.onRequest(
-        new RequestType2<string, JsonObject | undefined, unknown, void>('handleExternalCapability'),
-        async (capabilityId: string, args: JsonObject | undefined) => {
+        new RequestType3<string, JsonObject | undefined, string, unknown, void>('handleExternalCapability'),
+        async (capabilityId: string, args: JsonObject | undefined, invocationId: string, cancellation: RpcCancellationToken) => {
             const fn = capabilityMap.get(capabilityId);
             if (!fn) {
                 throw new Error(`Unknown capability: ${capabilityId}`);
@@ -198,29 +157,54 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
             // back through invokeGuestCallback. User code can call it like any
             // normal closure.
             const params = meta.projection?.parameters ?? [];
+            const controller = new AbortController();
+            const cancellationRegistration = cancellation?.onCancellationRequested(() => controller.abort());
+            if (cancellation?.isCancellationRequested) {
+                controller.abort();
+            }
             for (const param of params) {
                 if (param.isCallback && typeof wrappedArgs[param.name] === 'string') {
                     const callbackId = wrappedArgs[param.name] as string;
                     wrappedArgs[param.name] = async (...callbackArgs: unknown[]) =>
                         invokeGuestCallback(callbackId, callbackArgs);
                 }
+                if (param.type?.typeId === 'cancellationToken') {
+                    wrappedArgs[param.name] = CancellationToken.from(controller.signal);
+                }
             }
 
-            log(`Dispatching ${capabilityId}`);
+            const started = performance.now();
+            let phase = 'integration code';
+            const stalled = setInterval(() =>
+                log(`Still executing ${capabilityId} (invocation ${invocationId}, PID ${process.pid}, elapsed ${Math.round(performance.now() - started)}ms); awaiting ${phase}`),
+                10_000);
+            stalled.unref();
+            log(`Dispatching ${capabilityId} (invocation ${invocationId}, PID ${process.pid})`);
 
             try {
-                const result = await fn(wrappedArgs);
-                log(`Completed ${capabilityId}`);
+                const result = await client.runWithPendingPromises(async () => {
+                    try {
+                        return await fn(wrappedArgs);
+                    } finally {
+                        phase = 'fluent RPC work';
+                        log(`Integration code finished for ${capabilityId} (invocation ${invocationId}); draining fluent RPC work`);
+                    }
+                });
+                log(`Completed ${capabilityId} (invocation ${invocationId}, elapsed ${Math.round(performance.now() - started)}ms)`);
                 return result;
             } catch (error) {
-                log(`Failed ${capabilityId}: ${error instanceof Error ? error.message : String(error)}`);
+                log(`Failed ${capabilityId} (invocation ${invocationId}, elapsed ${Math.round(performance.now() - started)}ms): ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
                 throw error;
+            } finally {
+                clearInterval(stalled);
+                cancellationRegistration?.dispose();
             }
         });
 
     connection.onRequest('getCapabilities', () => {
         log(`getCapabilities called (${allCapabilities.length} capability/capabilities)`);
         return {
+            protocolVersion: 2,
             capabilities: allCapabilities
                 .map(fn => getAspireExport(fn))
                 .filter((m): m is AspireExportMetadata => m !== undefined)

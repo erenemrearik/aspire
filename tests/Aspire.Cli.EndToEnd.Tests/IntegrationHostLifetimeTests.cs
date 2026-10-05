@@ -37,6 +37,14 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
     [CaptureWorkspaceOnFailure]
     public Task CallbackOwnerCrash_StopsSessionAndRebuildsCallbacksOnExplicitRestart() => RunScenarioAsync("callback");
 
+    [Fact]
+    [CaptureWorkspaceOnFailure]
+    public Task DeferredGuestCallbackOwnerCrash_StopsSessionAndRebuildsRelaysOnExplicitRestart() => RunScenarioAsync("guestcallback");
+
+    [Fact]
+    [CaptureWorkspaceOnFailure]
+    public Task StalledInvocation_ReportsFailureReapsWorkersAndRecoversCommandsWithoutReplay() => RunScenarioAsync("stall");
+
     private async Task RunScenarioAsync(string target)
     {
         var repoRoot = CliE2ETestHelpers.GetRepoRoot();
@@ -52,7 +60,7 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
         await auto.PrepareDockerEnvironmentAsync(counter, workspace, enableDcpDiagnostics: true);
         await auto.InstallAspireCliAsync(strategy, counter);
         await auto.RunCommandAsync("aspire init --language typescript --non-interactive", counter, TimeSpan.FromMinutes(3));
-        IntegrationHostLifetimeTestHelper.WriteFixture(workspace.WorkspaceRoot.FullName, repoRoot, target == "callback");
+        IntegrationHostLifetimeTestHelper.WriteFixture(workspace.WorkspaceRoot.FullName, repoRoot, target);
         if (target == "install")
         {
             IntegrationHostLifetimeTestHelper.WriteInstallCrashFixture(workspace.WorkspaceRoot.FullName);
@@ -70,8 +78,9 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
         // A foreground run launched in the test shell's background retains the real
         // CLI as session owner. Killing an 'aspire start' caller would only kill the
         // already-exited handoff process and would not exercise CLI-owner death.
+        var timeoutOverride = target == "stall" ? "IntegrationHost__InvocationTimeout=00:00:20 " : "";
         await auto.RunCommandAsync(
-            "aspire run --non-interactive --log-file \"$PWD/session.log\" > run.log 2>&1 & echo $! > cli.pid",
+            $"{timeoutOverride}aspire run --non-interactive --log-file \"$PWD/session.log\" > run.log 2>&1 & echo $! > cli.pid",
             counter);
         await auto.ExecuteCommandUntilOutputAsync(
             counter,
@@ -85,17 +94,29 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
         {
             await auto.RunCommandAsync("node process-control.mjs block", counter, TimeSpan.FromSeconds(75));
         }
-        var killTarget = target == "callback" ? "runtime" : target;
+        var killTarget = target is "callback" or "guestcallback" ? "runtime" : target;
         if (target != "install")
         {
             await auto.RunCommandAsync(
-                target == "crashloop" ? "node process-control.mjs crashloop" : $"node process-control.mjs kill {killTarget}",
+                target switch
+                {
+                    "crashloop" => "node process-control.mjs crashloop",
+                    "stall" => "node process-control.mjs stall",
+                    _ => $"node process-control.mjs kill {killTarget}"
+                },
                 counter);
         }
-        if (target is "server" or "cli" or "crashloop" or "callback")
+        if (target == "stall")
+        {
+            await auto.RunCommandAsync(
+                "aspire resource probe probe > probe-stalled.log 2>&1; status=$?; cat probe-stalled.log; test \"$status\" -ne 0",
+                counter, TimeSpan.FromSeconds(75));
+            await auto.RunCommandAsync("node process-control.mjs stall-diagnostics", counter);
+        }
+        if (target is "server" or "cli" or "crashloop" or "callback" or "guestcallback")
         {
             await auto.RunCommandAsync("node process-control.mjs stopped", counter, TimeSpan.FromSeconds(75));
-            if (target is "server" or "crashloop" or "callback")
+            if (target is "server" or "crashloop" or "callback" or "guestcallback")
             {
                 // Owner death stops the session, rather than replaying AppHost model
                 // construction. Users must see the failure and can explicitly restart.
@@ -108,7 +129,7 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
             {
                 await auto.RunCommandAsync("node process-control.mjs exhausted", counter);
             }
-            if (target is "callback")
+            if (target is "callback" or "guestcallback")
             {
                 await auto.RunCommandAsync("node process-control.mjs callbacks", counter);
             }

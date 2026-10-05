@@ -3,10 +3,12 @@
 
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Aspire.TypeSystem;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using StreamJsonRpc;
 
@@ -29,11 +31,12 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     private readonly ConcurrentDictionary<JsonRpc, JsonRpcCallbackInvoker> _integrationCallbackInvokers = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonRpc>> _pendingRegistrations = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<JsonRpc, byte> _unavailableHosts = new();
-    private readonly ConcurrentDictionary<string, (JsonRpcCallbackInvoker Invoker, string CallbackId)> _callbackOwners = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CallbackOwner> _callbackOwners = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _hostRegisteredSignal = new(initialCount: 0);
     private readonly CancellationTokenSource _shutdown = new();
     private readonly object _registrationGate = new();
     private readonly ILogger<ExternalCapabilityRegistry> _logger;
+    private readonly TimeSpan _invocationTimeout;
     private InvalidOperationException? _initializationException;
 
     static ExternalCapabilityRegistry()
@@ -42,8 +45,20 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     }
 
     public ExternalCapabilityRegistry(ILogger<ExternalCapabilityRegistry> logger)
+        : this(logger, TimeSpan.FromSeconds(60))
     {
+    }
+
+    public ExternalCapabilityRegistry(ILogger<ExternalCapabilityRegistry> logger, IConfiguration configuration)
+        : this(logger, configuration.GetValue("IntegrationHost:InvocationTimeout", TimeSpan.FromSeconds(60)))
+    {
+    }
+
+    internal ExternalCapabilityRegistry(ILogger<ExternalCapabilityRegistry> logger, TimeSpan invocationTimeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(invocationTimeout, TimeSpan.Zero);
         _logger = logger;
+        _invocationTimeout = invocationTimeout;
     }
 
     /// <summary>
@@ -105,19 +120,22 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
 
     internal bool MarkHostUnavailable(JsonRpc clientRpc)
     {
-        var hasCallbacks = _integrationCallbackInvokers.TryGetValue(clientRpc, out var invoker) &&
-            invoker.StopAcceptingCallbacks();
-
-        // Keep projection metadata for already-generated SDKs, but never route a new
-        // invocation to a disconnected host or replay calls that may have side effects.
-        if (_capabilities.Values.Any(cap => ReferenceEquals(cap.ClientRpc, clientRpc)))
+        lock (_registrationGate)
         {
-            _unavailableHosts.TryAdd(clientRpc, 0);
-        }
-        _integrationHosts.TryRemove(clientRpc, out _);
-        clientRpc.Dispose();
+            var hasCallbacks = (_integrationCallbackInvokers.TryGetValue(clientRpc, out var invoker) &&
+                invoker.StopAcceptingCallbacks()) ||
+                (_unavailableHosts.TryGetValue(clientRpc, out var state) && state != 0) ||
+                _callbackOwners.Values.Any(owner => ReferenceEquals(owner.Host, clientRpc));
 
-        return hasCallbacks;
+            // Keep projection metadata for already-generated SDKs, but never route a new
+            // invocation to a disconnected host or replay calls that may have side effects.
+            _unavailableHosts[clientRpc] = hasCallbacks ? (byte)1 : (byte)0;
+            _integrationHosts.TryRemove(clientRpc, out _);
+            RemoveCallbackOwners(owner => ReferenceEquals(owner.Host, clientRpc));
+            clientRpc.Dispose();
+
+            return hasCallbacks;
+        }
     }
 
     /// <summary>
@@ -196,7 +214,8 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
                 {
                     CapabilityId = cap.Id,
                     ClientRpc = host,
-                    ProjectedCapability = TryCreateProjectedCapability(cap),
+                    SupportsInvocationIds = SupportsInvocationIds(capsPayload),
+                    ProjectedCapability = CreateProjectedCapability(cap),
                     Signature = CreateSignature(cap)
                 }).ToList();
             }
@@ -254,7 +273,8 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
 
     internal async Task ReplaceHostAsync(JsonRpc previous, JsonRpc replacement, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        if (_integrationCallbackInvokers.TryGetValue(previous, out var invoker) && invoker.StopAcceptingCallbacks())
+        if ((_integrationCallbackInvokers.TryGetValue(previous, out var invoker) && invoker.StopAcceptingCallbacks()) ||
+            (_unavailableHosts.TryGetValue(previous, out var state) && state != 0))
         {
             throw new InvalidOperationException(
                 "The integration host contributed callbacks to the resource model. " +
@@ -272,7 +292,8 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
             {
                 CapabilityId = cap.Id,
                 ClientRpc = replacement,
-                ProjectedCapability = TryCreateProjectedCapability(cap),
+                SupportsInvocationIds = SupportsInvocationIds(payload),
+                ProjectedCapability = CreateProjectedCapability(cap),
                 Signature = CreateSignature(cap)
             }).ToList();
         }
@@ -336,7 +357,6 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
 
         var projectedCapabilities = registrations.Values
             .Select(c => c.ProjectedCapability)
-            .OfType<AtsCapabilityInfo>()
             .OrderBy(c => c.CapabilityId, StringComparer.Ordinal)
             .ToList();
 
@@ -376,16 +396,17 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     /// issued this call, so any callback arguments can be routed back to the originating guest
     /// via <c>invokeGuestCallback</c>.
     /// </summary>
-    public async Task<(bool Found, JsonNode? Result)> TryInvokeAsync(string capabilityId, JsonObject? args, JsonRpcCallbackInvoker? ownerInvoker = null)
+    public async Task<(bool Found, JsonNode? Result)> TryInvokeAsync(
+        string capabilityId, JsonObject? args, JsonRpcCallbackInvoker? ownerInvoker = null, CancellationToken cancellationToken = default)
     {
         if (!_capabilities.TryGetValue(capabilityId, out var registration))
         {
             return (false, null);
         }
 
-        if (_unavailableHosts.ContainsKey(registration.ClientRpc))
+        if (_unavailableHosts.TryGetValue(registration.ClientRpc, out var state))
         {
-            if (_integrationCallbackInvokers.TryGetValue(registration.ClientRpc, out var invoker) && invoker.StopAcceptingCallbacks())
+            if (state != 0)
             {
                 throw new InvalidOperationException(
                     $"The integration host providing '{capabilityId}' contributed callbacks to the resource model. " +
@@ -396,20 +417,25 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
                 $"The integration host providing '{capabilityId}' is restarting. Retry after it has registered again.");
         }
 
-        _logger.LogDebug("Forwarding capability {CapabilityId} to integration host", capabilityId);
-
-        // Callback IDs belong to a guest connection, not the singleton registry. Give
-        // each invocation its own relay IDs so overlapping calls cannot overwrite or
-        // unregister one another, even when guests reuse the same callback ID.
+        var invocationId = Guid.NewGuid().ToString("N");
+        var started = Stopwatch.GetTimestamp();
         var forwardedArgs = args?.DeepClone().AsObject();
-        var registeredCallbackIds = RegisterCallbackOwners(registration.ProjectedCapability, forwardedArgs, ownerInvoker);
+        using var invocationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, _shutdown.Token, ownerInvoker?.LifetimeToken ?? CancellationToken.None);
+        invocationCancellation.Token.ThrowIfCancellationRequested();
+        RegisterCallbackOwners(registration, forwardedArgs, ownerInvoker, invocationId);
+        _logger.LogInformation(
+            "Integration invocation {InvocationId} started: capability {CapabilityId}, host {Host}, timeout {Timeout}.",
+            invocationId, capabilityId, registration.ClientRpc.GetHashCode(), _invocationTimeout);
 
         try
         {
             var rawResult = await registration.ClientRpc.InvokeWithCancellationAsync<object?>(
                 "handleExternalCapability",
-                new object?[] { capabilityId, forwardedArgs },
-                _shutdown.Token).WaitAsync(_shutdown.Token).ConfigureAwait(false);
+                registration.SupportsInvocationIds
+                    ? new object?[] { capabilityId, forwardedArgs, invocationId }
+                    : new object?[] { capabilityId, forwardedArgs },
+                invocationCancellation.Token).WaitAsync(_invocationTimeout, invocationCancellation.Token).ConfigureAwait(false);
 
             // SystemTextJsonFormatter returns JsonElement for object?
             JsonNode? result;
@@ -432,17 +458,41 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
 
             return (true, result);
         }
+        catch (TimeoutException ex)
+        {
+            invocationCancellation.Cancel();
+            MarkHostUnavailable(registration.ClientRpc);
+            var error = new TimeoutException(
+                $"Integration capability '{capabilityId}' (invocation {invocationId}, host {registration.ClientRpc.GetHashCode()}) " +
+                $"timed out after {_invocationTimeout}. The host connection was retired to stop outstanding work. " +
+                "The call will not be replayed. Check the integration host logs; restart the AppHost session if it owns callbacks.", ex);
+            _logger.LogError(error,
+                "Integration invocation {InvocationId} stalled: capability {CapabilityId}, host {Host}, elapsed {Elapsed}, timeout {Timeout}. " +
+                "Retired the connection; supervised process cleanup must complete before recovery. In-flight work is not replayed.",
+                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), Stopwatch.GetElapsedTime(started), _invocationTimeout);
+            throw error;
+        }
+        catch (OperationCanceledException) when (invocationCancellation.IsCancellationRequested)
+        {
+            // RPC cancellation alone cannot prove user code stopped mutating the model.
+            // Retiring the connection makes the supervisor reap the complete old scope.
+            MarkHostUnavailable(registration.ClientRpc);
+            _logger.LogInformation(
+                "Integration invocation {InvocationId} canceled: capability {CapabilityId}, host {Host}, elapsed {Elapsed}. " +
+                "The connection was retired; in-flight work is not replayed.",
+                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), Stopwatch.GetElapsedTime(started));
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error forwarding capability {CapabilityId}", capabilityId);
+            _logger.LogError(ex, "Integration invocation {InvocationId} failed: capability {CapabilityId}, host {Host}, elapsed {Elapsed}.",
+                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), Stopwatch.GetElapsedTime(started));
             throw;
         }
         finally
         {
-            foreach (var id in registeredCallbackIds)
-            {
-                _callbackOwners.TryRemove(id, out _);
-            }
+            _logger.LogInformation("Integration invocation {InvocationId} finished: capability {CapabilityId}, host {Host}, elapsed {Elapsed}.",
+                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), Stopwatch.GetElapsedTime(started));
         }
     }
 
@@ -452,38 +502,123 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     /// Integration hosts use this to route <c>invokeGuestCallback</c> back to the originating guest.
     /// </summary>
     public (JsonRpcCallbackInvoker Invoker, string CallbackId)? ResolveCallbackOwner(string callbackId)
-        => _callbackOwners.TryGetValue(callbackId, out var invoker) ? invoker : null;
+        => _callbackOwners.TryGetValue(callbackId, out var owner) ? (owner.Invoker, owner.CallbackId) : null;
 
-    private List<string> RegisterCallbackOwners(AtsCapabilityInfo? projected, JsonObject? args, JsonRpcCallbackInvoker? ownerInvoker)
+    internal async Task<JsonNode?> InvokeGuestCallbackAsync(JsonRpc host, string callbackId, JsonObject? args, CancellationToken cancellationToken)
     {
-        var registered = new List<string>();
-        if (projected is null || args is null || ownerInvoker is null)
+        if (!_callbackOwners.TryGetValue(callbackId, out var owner) || !ReferenceEquals(owner.Host, host))
         {
-            return registered;
+            throw new InvalidOperationException(
+                $"No guest callback relay '{callbackId}' belongs to integration host {host.GetHashCode()}. " +
+                "Its owning connection may have disconnected; restart the AppHost session to rebuild deferred callbacks.");
         }
 
-        foreach (var parameter in projected.Parameters)
+        var started = Stopwatch.GetTimestamp();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token, owner.Invoker.LifetimeToken);
+        _logger.LogInformation(
+            "Guest callback relay {CallbackId} started: integration invocation {InvocationId}, capability {CapabilityId}, host {Host}, timeout {Timeout}.",
+            callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), _invocationTimeout);
+        try
         {
-            if (!parameter.IsCallback)
-            {
-                continue;
-            }
+            return await owner.Invoker.InvokeAsync<JsonNode?>(owner.CallbackId, args, cancellation.Token, _invocationTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            cancellation.Cancel();
+            MarkHostUnavailable(host);
+            _logger.LogError(ex,
+                "Guest callback relay {CallbackId} stalled: integration invocation {InvocationId}, capability {CapabilityId}, host {Host}, elapsed {Elapsed}, timeout {Timeout}. " +
+                "The integration connection was retired; restart the AppHost session to rebuild callbacks.",
+                callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), Stopwatch.GetElapsedTime(started), _invocationTimeout);
+            throw new TimeoutException(
+                $"Guest callback relay '{callbackId}' for integration capability '{owner.CapabilityId}' " +
+                $"(invocation {owner.InvocationId}) timed out after {_invocationTimeout}. Restart the AppHost session to rebuild callbacks.", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Guest callback relay {CallbackId} failed: integration invocation {InvocationId}, capability {CapabilityId}, host {Host}, elapsed {Elapsed}.",
+                callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), Stopwatch.GetElapsedTime(started));
+            throw;
+        }
+        finally
+        {
+            _logger.LogInformation(
+                "Guest callback relay {CallbackId} finished: integration invocation {InvocationId}, capability {CapabilityId}, host {Host}, elapsed {Elapsed}.",
+                callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), Stopwatch.GetElapsedTime(started));
+        }
+    }
 
-            if (!args.TryGetPropertyValue(parameter.Name, out var node) || node is null)
-            {
-                continue;
-            }
-
-            if (node is JsonValue value && value.TryGetValue<string>(out var callbackId) && !string.IsNullOrEmpty(callbackId))
-            {
-                var relayId = $"external_callback_{Guid.NewGuid():N}";
-                _callbackOwners[relayId] = (ownerInvoker, callbackId);
-                args[parameter.Name] = relayId;
-                registered.Add(relayId);
-            }
+    internal CancellationToken[] GetCancellationTokens(string capabilityId, JsonObject? args, AtsMarshaller marshaller)
+    {
+        if (args is null || !_capabilities.TryGetValue(capabilityId, out var registration))
+        {
+            return [];
         }
 
-        return registered;
+        return registration.ProjectedCapability.Parameters
+            .Where(parameter => parameter.Type?.TypeId == AtsConstants.CancellationToken)
+            .Select(parameter => (CancellationToken)marshaller.UnmarshalFromJson(
+                args[parameter.Name], typeof(CancellationToken),
+                new AtsMarshaller.UnmarshalContext { CapabilityId = capabilityId, ParameterName = parameter.Name })!)
+            .ToArray();
+    }
+
+    internal void RemoveGuestCallbacks(JsonRpcCallbackInvoker invoker)
+    {
+        lock (_registrationGate)
+        {
+            invoker.StopAcceptingCallbacks();
+            RemoveCallbackOwners(owner => ReferenceEquals(owner.Invoker, invoker));
+        }
+    }
+
+    private void RemoveCallbackOwners(Func<CallbackOwner, bool> predicate)
+    {
+        foreach (var (id, owner) in _callbackOwners)
+        {
+            if (predicate(owner) && _callbackOwners.TryRemove(id, out _))
+            {
+                _logger.LogDebug("Retired guest callback relay {CallbackId} from integration invocation {InvocationId}, capability {CapabilityId}, host {Host}.",
+                    id, owner.InvocationId, owner.CapabilityId, owner.Host.GetHashCode());
+            }
+        }
+    }
+
+    private void RegisterCallbackOwners(ExternalCapabilityRegistration registration, JsonObject? args, JsonRpcCallbackInvoker? ownerInvoker, string invocationId)
+    {
+        if (args is null || ownerInvoker is null)
+        {
+            return;
+        }
+
+        lock (_registrationGate)
+        {
+            _shutdown.Token.ThrowIfCancellationRequested();
+            if (_unavailableHosts.ContainsKey(registration.ClientRpc))
+            {
+                throw new InvalidOperationException($"The integration host providing '{registration.CapabilityId}' was retired before callback admission.");
+            }
+
+            foreach (var parameter in registration.ProjectedCapability.Parameters.Where(parameter => parameter.IsCallback))
+            {
+                if (args[parameter.Name] is JsonValue value && value.TryGetValue<string>(out var callbackId) && !string.IsNullOrEmpty(callbackId))
+                {
+                    // Both ends own this relay. Integration code can retain it in a deferred
+                    // model callback, even if the export later fails after mutating the model.
+                    ownerInvoker.RegisterCallback();
+                    if (_integrationCallbackInvokers.TryGetValue(registration.ClientRpc, out var hostInvoker))
+                    {
+                        hostInvoker.RegisterCallback();
+                    }
+                    var relayId = $"external_callback_{Guid.NewGuid():N}";
+                    _callbackOwners[relayId] = new CallbackOwner(registration.ClientRpc, ownerInvoker, callbackId, invocationId, registration.CapabilityId);
+                    args[parameter.Name] = relayId;
+                    _logger.LogDebug("Registered guest callback relay {CallbackId} for integration invocation {InvocationId}, capability {CapabilityId}, host {Host}.",
+                        relayId, invocationId, registration.CapabilityId, registration.ClientRpc.GetHashCode());
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -505,6 +640,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
                 registration.TrySetCanceled(_shutdown.Token);
             }
             _pendingRegistrations.Clear();
+            _callbackOwners.Clear();
         }
     }
 
@@ -548,11 +684,25 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
             ?? throw new JsonException("Integration host capabilities must not be null.");
     }
 
-    private static AtsCapabilityInfo? TryCreateProjectedCapability(ExternalCapabilityProjection capability)
+    private static bool SupportsInvocationIds(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty("protocolVersion", out var version))
+        {
+            return false;
+        }
+        if (version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out var value) || value != 2)
+        {
+            throw new JsonException("Integration host protocolVersion must be 2 when supplied.");
+        }
+        return true;
+    }
+
+    private static AtsCapabilityInfo CreateProjectedCapability(ExternalCapabilityProjection capability)
     {
         if (capability.ReturnType is null)
         {
-            return null;
+            throw new JsonException(
+                $"Integration capability '{capability.Id}' must declare returnType; use '{AtsConstants.Void}' for a void method.");
         }
 
         return new AtsCapabilityInfo
@@ -616,8 +766,12 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
         public required string CapabilityId { get; init; }
         public required JsonRpc ClientRpc { get; init; }
         public required JsonElement Signature { get; init; }
-        public AtsCapabilityInfo? ProjectedCapability { get; init; }
+        public bool SupportsInvocationIds { get; init; }
+        public required AtsCapabilityInfo ProjectedCapability { get; init; }
     }
+
+    private sealed record CallbackOwner(
+        JsonRpc Host, JsonRpcCallbackInvoker Invoker, string CallbackId, string InvocationId, string CapabilityId);
 
     private sealed class ExternalCapabilityProjection
     {

@@ -4,6 +4,7 @@
 using System.Text.Json.Nodes;
 using Aspire.TypeSystem;
 using Aspire.Hosting.RemoteHost.Ats;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Aspire.Hosting.RemoteHost.Tests;
@@ -59,7 +60,7 @@ public class CallbackProxyTests
     [InlineData(true)]
     public void CreateProxy_RetiringConnectionRejectsNewAndCachedCallbacks(bool createdCallback)
     {
-        var invoker = new JsonRpcCallbackInvoker();
+        using var invoker = new JsonRpcCallbackInvoker(NullLogger<JsonRpcCallbackInvoker>.Instance);
         using var factory = CreateFactory(invoker);
         if (createdCallback)
         {
@@ -76,7 +77,7 @@ public class CallbackProxyTests
     {
         for (var attempt = 0; attempt < 32; attempt++)
         {
-            var invoker = new JsonRpcCallbackInvoker();
+            using var invoker = new JsonRpcCallbackInvoker(NullLogger<JsonRpcCallbackInvoker>.Instance);
             using var factory = CreateFactory(invoker);
             var creation = Task.Run(() =>
             {

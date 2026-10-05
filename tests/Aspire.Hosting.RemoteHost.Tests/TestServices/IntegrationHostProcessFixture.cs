@@ -54,7 +54,9 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
         _hostAssembly = Path.Combine(_directory.FullName, "bin", BuildConfiguration, "net10.0", "LifetimeTestHost.dll");
     }
 
-    internal async Task<IntegrationHostServerProcess> StartAsync(bool failStartup = false, bool skipRegistration = false, bool useAppHostExecutable = false, bool missingCommand = false)
+    internal async Task<IntegrationHostServerProcess> StartAsync(
+        bool failStartup = false, bool skipRegistration = false, bool useAppHostExecutable = false, bool missingCommand = false,
+        TimeSpan? invocationTimeout = null)
     {
         var directory = _directory.CreateSubdirectory(Guid.NewGuid().ToString("N")[..8]);
         var script = Path.Combine(directory.FullName, "host.js");
@@ -62,6 +64,7 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
         await File.WriteAllTextAsync(Path.Combine(directory.FullName, "appsettings.json"), JsonSerializer.Serialize(new
         {
             AtsAssemblies = new[] { "LifetimeTestHost" },
+            IntegrationHost = new { InvocationTimeout = invocationTimeout ?? TimeSpan.FromSeconds(60) },
             IntegrationHosts = new[]
             {
                 new { Language = "test/node", PackageName = "lifetime-test", HostEntryPoint = script }
@@ -244,8 +247,13 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
                         fs.writeFileSync('worker-pid', String(child.pid));
                         send({ jsonrpc: '2.0', id: message.id, result: String(child.pid) });
                     } else if (args.action === 'block') {
+                        fs.appendFileSync('side-effects', 'once\n');
                         fs.writeFileSync('host-blocked', '');
                         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+                    } else if (args.action === 'stall') {
+                        fs.appendFileSync('side-effects', 'once\n');
+                        fs.writeFileSync('host-blocked', '');
+                        // Keep the socket alive but never answer this request or its cancellation.
                     } else {
                         send({ jsonrpc: '2.0', id: message.id, result: `generation-${generation}` });
                     }

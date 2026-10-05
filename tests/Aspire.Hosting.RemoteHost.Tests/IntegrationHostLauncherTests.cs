@@ -72,10 +72,16 @@ public class IntegrationHostLauncherTests
         using var firstConnection = new IntegrationHostTestConnection(_ =>
         {
             discoveryStarted.TrySetResult();
-            return Task.FromResult(JsonSerializer.SerializeToElement(new[] { new { id = "test/first" } }));
+            return Task.FromResult(JsonSerializer.SerializeToElement(new[]
+            {
+                new { id = "test/first", returnType = new { typeId = "void", category = "Primitive" } }
+            }));
         });
         using var secondConnection = new IntegrationHostTestConnection(
-            JsonSerializer.SerializeToElement(new[] { new { id = "test/second" } }));
+            JsonSerializer.SerializeToElement(new[]
+            {
+                new { id = "test/second", returnType = new { typeId = "void", category = "Primitive" } }
+            }));
         registry.AddIntegrationHost(firstConnection.ServerRpc);
 
         var initialization = launcher.InitializeHostsAsync(

@@ -11,6 +11,32 @@ namespace Aspire.Hosting.RemoteHost.Tests;
 public class IntegrationHostProcessTests(IntegrationHostProcessFixture fixture) : IClassFixture<IntegrationHostProcessFixture>
 {
     [Theory]
+    [InlineData("stall")]
+    [InlineData("block")]
+    public async Task StalledInvocation_ReportsTimeoutReapsWorkersAndRecoversWithoutReplay(string action)
+    {
+        await using var server = await fixture.StartAsync(invocationTimeout: TimeSpan.FromSeconds(5));
+        await server.ReadyAsync();
+        var host = Assert.Single(server.HostProcessIds);
+        var worker = int.Parse((await server.InvokeAsync("worker")).GetString()!);
+
+        var failedCall = await server.InvokeAsync(action).WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+        var error = failedCall.GetProperty("$error").GetProperty("message").GetString()!;
+        Assert.StartsWith("Integration capability 'test.external/value' (invocation ", error);
+        Assert.Contains("timed out after 00:00:05", error);
+        await server.WaitForRecoveryAsync("generation-2");
+
+        await IntegrationHostServerProcess.AssertExitedAsync(host);
+        await IntegrationHostServerProcess.AssertExitedAsync(worker);
+        Assert.Equal("once\n", await File.ReadAllTextAsync(Path.Combine(server.Directory, "side-effects")));
+        Assert.Equal(2, server.HostProcessIds.Length);
+        await server.DisposeAsync();
+        Assert.Contains("stalled: capability test.external/value", server.Diagnostics);
+        Assert.Contains("In-flight work is not replayed", server.Diagnostics);
+        Assert.Contains("recovered after restart attempt 1; capabilities rediscovered.", server.Diagnostics);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task UnexpectedExit_RestartsAndRediscoversWithoutReplayingSideEffects(bool useAppHostExecutable)

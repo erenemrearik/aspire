@@ -48,6 +48,7 @@ internal sealed class RemoteAppHostService
     {
         _clientRpc = clientRpc;
         _callbackInvoker.SetConnection(clientRpc);
+        clientRpc.Disconnected += (_, _) => _externalCapabilityRegistry.RemoveGuestCallbacks(_callbackInvoker);
     }
 
     /// <summary>
@@ -118,9 +119,10 @@ internal sealed class RemoteAppHostService
     /// </summary>
     /// <param name="capabilityId">The capability ID (e.g., "aspire.redis/addRedis@1").</param>
     /// <param name="args">The arguments as a JSON object.</param>
+    /// <param name="cancellationToken">Cancellation of the incoming RPC request.</param>
     /// <returns>The result as JSON, or an error object.</returns>
     [JsonRpcMethod("invokeCapability")]
-    public async Task<JsonNode?> InvokeCapabilityAsync(string capabilityId, JsonObject? args)
+    public async Task<JsonNode?> InvokeCapabilityAsync(string capabilityId, JsonObject? args, CancellationToken cancellationToken)
     {
         using var activity = _profilingTelemetry.StartJsonRpcInvokeCapability(capabilityId, args);
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -128,7 +130,7 @@ internal sealed class RemoteAppHostService
         {
             _authenticationState.ThrowIfNotAuthenticated();
             _logger.LogDebug(">> invokeCapability({CapabilityId}) args: {Args}", capabilityId, args?.ToJsonString() ?? "null");
-            var result = await _capabilityDispatcher.InvokeAsync(capabilityId, args, _callbackInvoker).ConfigureAwait(false);
+            var result = await _capabilityDispatcher.InvokeAsync(capabilityId, args, _callbackInvoker, cancellationToken).ConfigureAwait(false);
             _logger.LogDebug("   invokeCapability({CapabilityId}) result: {Result}", capabilityId, result?.ToJsonString() ?? "null");
             return result;
         }
@@ -216,21 +218,15 @@ internal sealed class RemoteAppHostService
     /// </summary>
     /// <param name="callbackId">The relay ID supplied to the integration host.</param>
     /// <param name="args">Positional argument payload shaped as <c>{ p0, p1, ... }</c>.</param>
+    /// <param name="cancellationToken">Cancellation of the incoming RPC request.</param>
     /// <returns>The result returned by the guest's callback, or <c>null</c> for void callbacks.</returns>
     [JsonRpcMethod("invokeGuestCallback")]
-    public async Task<JsonNode?> InvokeGuestCallbackAsync(string callbackId, JsonObject? args)
+    public async Task<JsonNode?> InvokeGuestCallbackAsync(string callbackId, JsonObject? args, CancellationToken cancellationToken)
     {
         _authenticationState.ThrowIfNotAuthenticated();
-        _logger.LogDebug(">> invokeGuestCallback({CallbackId})", callbackId);
-
-        var owner = _externalCapabilityRegistry.ResolveCallbackOwner(callbackId)
-            ?? throw new InvalidOperationException(
-                $"No owning guest connection is currently registered for callback '{callbackId}'. " +
-                "The callback id must be in scope of an in-flight external capability invocation.");
-
-        var result = await owner.Invoker.InvokeAsync<JsonNode?>(owner.CallbackId, args, CancellationToken.None).ConfigureAwait(false);
-        _logger.LogDebug("<< invokeGuestCallback({CallbackId})", callbackId);
-        return result;
+        return await _externalCapabilityRegistry.InvokeGuestCallbackAsync(
+            _clientRpc ?? throw new InvalidOperationException("Guest callbacks require an active integration host connection."),
+            callbackId, args, cancellationToken).ConfigureAwait(false);
     }
 
     #endregion

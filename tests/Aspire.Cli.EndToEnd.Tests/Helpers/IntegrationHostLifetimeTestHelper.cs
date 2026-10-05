@@ -23,9 +23,13 @@ internal static class IntegrationHostLifetimeTestHelper
             Path.Combine(directory, "integration", "processes.jsonl"),
             Path.Combine(evidence.FullName, "processes.jsonl"),
             overwrite: true);
-        if (target is "server" or "cli" or "crashloop" or "callback")
+        if (target is "server" or "cli" or "crashloop" or "callback" or "guestcallback")
         {
             File.Copy(Path.Combine(directory, "restart.log"), Path.Combine(evidence.FullName, "restart.log"), overwrite: true);
+        }
+        if (target == "stall")
+        {
+            File.Copy(Path.Combine(directory, "probe-stalled.log"), Path.Combine(evidence.FullName, "probe-stalled.log"), overwrite: true);
         }
         if (target == "install")
         {
@@ -40,7 +44,7 @@ internal static class IntegrationHostLifetimeTestHelper
         return evidence.FullName;
     }
 
-    internal static void WriteFixture(string directory, string repoRoot, bool integrationOwnedCallback)
+    internal static void WriteFixture(string directory, string repoRoot, string target)
     {
         var integration = Directory.CreateDirectory(Path.Combine(directory, "integration"));
         File.Copy(
@@ -61,7 +65,17 @@ internal static class IntegrationHostLifetimeTestHelper
               }
             }
             """);
-        var probeSource = integrationOwnedCallback ? "await builder.integrationOwnedProbe();" : """
+        var probeSource = target switch
+        {
+            "callback" => "await builder.integrationOwnedProbe();",
+            "guestcallback" => """
+                await builder.integrationGuestProbe(async () => {
+                    const generation = await builder.integrationGeneration();
+                    fs.writeFileSync('probe-result', generation);
+                    return generation;
+                });
+                """,
+            _ => """
             const probe = await builder.addParameter('probe');
             // Keep this callback in the guest so host-only recovery can rediscover
             // the integration without recreating the resource model.
@@ -70,7 +84,8 @@ internal static class IntegrationHostLifetimeTestHelper
                 fs.writeFileSync('probe-result', generation);
                 return { success: true };
             });
-            """;
+            """
+        };
         File.WriteAllText(Path.Combine(directory, "apphost.mts"), $$"""
             import * as fs from 'node:fs';
             import { createBuilder } from './.aspire/modules/aspire.mjs';
@@ -197,7 +212,14 @@ internal static class IntegrationHostLifetimeTestHelper
                 returnType: { typeId: 'string', category: 'Primitive' },
                 parameters: []
             }
-        }, async () => `generation-${generation}`);
+        }, async () => {
+            if (fs.existsSync('stall-invocation') && generation === Number(fs.readFileSync('stall-invocation', 'utf8'))) {
+                fs.appendFileSync('stalled-side-effects', 'once\n');
+                console.log(`LIFETIME_STALLED generation=${generation} runtime=${process.pid}`);
+                await new Promise(() => {});
+            }
+            return `generation-${generation}`;
+        });
 
         const integrationOwnedProbe = AspireExport<{ builder: DistributedApplicationBuilder }, string>({
             id: 'e2e.lifetime/ownedProbe',
@@ -213,8 +235,39 @@ internal static class IntegrationHostLifetimeTestHelper
             }
         }, async ({ builder }) => {
             const probe = await builder.addParameter('probe');
-            await probe.withCommand('probe', 'Probe integration-owned callback', async () => {
+            // Deliberately leave a real generated fluent call unawaited: export completion
+            // must drain it before the guest starts the resource model.
+            probe.withCommand('probe', 'Probe integration-owned callback', async () => {
                 fs.writeFileSync('../probe-result', `generation-${generation}`);
+                return { success: true };
+            });
+            return `generation-${generation}`;
+        });
+
+        const integrationGuestProbe = AspireExport<{
+            builder: DistributedApplicationBuilder,
+            configure: () => Promise<string>
+        }, string>({
+            id: 'e2e.lifetime/guestProbe',
+            method: 'integrationGuestProbe',
+            description: 'Retains a guest callback in an integration-owned resource command',
+            projection: {
+                capabilityKind: 'Method',
+                targetTypeId: builderType.typeId,
+                targetType: builderType,
+                targetParameterName: 'builder',
+                returnType: { typeId: 'string', category: 'Primitive' },
+                parameters: [{
+                    name: 'configure',
+                    isCallback: true,
+                    callbackParameters: [],
+                    callbackReturnType: { typeId: 'string', category: 'Primitive' }
+                }]
+            }
+        }, async ({ builder, configure }) => {
+            const probe = await builder.addParameter('probe');
+            probe.withCommand('probe', 'Probe deferred guest callback', async () => {
+                await configure();
                 return { success: true };
             });
             return `generation-${generation}`;
@@ -222,7 +275,7 @@ internal static class IntegrationHostLifetimeTestHelper
 
         await runIntegrationHost({
             packageName: '@e2e/lifetime',
-            integrations: [defineIntegration({ name: 'LifetimeIntegration', capabilities: [integrationGeneration, integrationOwnedProbe] })]
+            integrations: [defineIntegration({ name: 'LifetimeIntegration', capabilities: [integrationGeneration, integrationOwnedProbe, integrationGuestProbe] })]
         });
         """;
 
@@ -312,6 +365,24 @@ internal static class IntegrationHostLifetimeTestHelper
                 fs.writeFileSync('integration/crash-loop', String(snapshot().generation));
                 terminate(snapshot().runtime);
                 break;
+            case 'stall':
+                fs.writeFileSync('integration/stall-invocation', String(snapshot().generation));
+                break;
+            case 'stall-diagnostics': {
+                const log = fs.readFileSync('session.log', 'utf8');
+                assert.ok(log.includes('LIFETIME_STALLED'));
+                assert.ok(log.includes('stalled: capability e2e.lifetime/generation'));
+                assert.ok(log.includes('In-flight work is not replayed'));
+                assert.ok(log.includes('Still executing e2e.lifetime/generation'));
+                assert.ok(log.includes('awaiting integration code'));
+                // Server and runtime logs share the opaque invocation ID, without argument payloads.
+                const matches = [...log.matchAll(/Integration invocation ([a-f0-9]{32}) stalled: capability e2e\.lifetime\/generation/g)];
+                assert.equal(matches.length, 1);
+                assert.ok(log.includes(`Dispatching e2e.lifetime/generation (invocation ${matches[0][1]}, PID`));
+                assert.ok(fs.readFileSync('probe-stalled.log', 'utf8').includes('timed out'));
+                assert.equal(fs.readFileSync('integration/stalled-side-effects', 'utf8'), 'once\n');
+                break;
+            }
             case 'exhausted': {
                 const log = fs.readFileSync('session.log', 'utf8');
                 assert.ok(log.includes('LIFETIME_CRASH_LOOP'));

@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Logging;
 using StreamJsonRpc;
 
 namespace Aspire.Hosting.RemoteHost;
@@ -9,7 +10,7 @@ namespace Aspire.Hosting.RemoteHost;
 /// <summary>
 /// Callback invoker that uses JSON-RPC to invoke callbacks on a remote client.
 /// </summary>
-internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker
+internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IAsyncDisposable
 {
     private static readonly TimeSpan s_callbackTimeout = TimeSpan.FromSeconds(60);
 
@@ -17,6 +18,18 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker
     private readonly object _callbackGate = new();
     private bool _acceptingCallbacks = true;
     private bool _hasCallbacks;
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly ILogger<JsonRpcCallbackInvoker> _logger;
+    private Task _retirement = Task.CompletedTask;
+    private bool _disposed;
+
+    public JsonRpcCallbackInvoker(ILogger<JsonRpcCallbackInvoker> logger)
+    {
+        _logger = logger;
+        LifetimeToken = _lifetime.Token;
+    }
+
+    internal CancellationToken LifetimeToken { get; }
 
     internal void RegisterCallback()
     {
@@ -33,7 +46,13 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker
         {
             // Serialize retirement with proxy creation. A late RPC must not attach
             // a callback from a dead host after its supervisor decides it can recover.
-            _acceptingCallbacks = false;
+            if (_acceptingCallbacks)
+            {
+                _acceptingCallbacks = false;
+                // Cancellation callbacks can retire other connections. Do not execute
+                // them inline while holding the callback or registry admission gates.
+                _retirement = _lifetime.CancelAsync();
+            }
             return _hasCallbacks;
         }
     }
@@ -45,32 +64,48 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker
     public void SetConnection(JsonRpc clientRpc)
     {
         _clientRpc = clientRpc;
+        clientRpc.Disconnected += (_, _) => StopAcceptingCallbacks();
     }
 
     /// <inheritdoc />
-    public bool IsConnected => _clientRpc != null;
+    public bool IsConnected => _clientRpc is not null && !_clientRpc.Completion.IsCompleted;
 
     /// <inheritdoc />
-    public async Task<TResult> InvokeAsync<TResult>(string callbackId, JsonNode? args, CancellationToken cancellationToken = default)
+    public Task<TResult> InvokeAsync<TResult>(string callbackId, JsonNode? args, CancellationToken cancellationToken = default)
+        => InvokeAsync<TResult>(callbackId, args, cancellationToken, s_callbackTimeout);
+
+    internal async Task<TResult> InvokeAsync<TResult>(string callbackId, JsonNode? args, CancellationToken cancellationToken, TimeSpan timeout)
     {
-        if (_clientRpc == null)
+        if (_clientRpc is null)
         {
             throw new InvalidOperationException("No client connection available for callback invocation");
         }
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(s_callbackTimeout);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, LifetimeToken);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        _logger.LogDebug("Callback {CallbackId} started on connection {Host}, timeout {Timeout}.",
+            callbackId, _clientRpc.GetHashCode(), timeout);
 
         try
         {
             return await _clientRpc.InvokeWithCancellationAsync<TResult>(
                 "invokeCallback",
                 [callbackId, args],
-                cts.Token).ConfigureAwait(false);
+                cts.Token).WaitAsync(timeout, cts.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TimeoutException ex)
         {
-            throw new TimeoutException($"Callback '{callbackId}' timed out after {s_callbackTimeout.TotalSeconds}s");
+            cts.Cancel();
+            StopAcceptingCallbacks();
+            _clientRpc.Dispose();
+            _logger.LogError(ex, "Callback {CallbackId} stalled on connection {Host} after {Elapsed}, timeout {Timeout}. Retired its owner connection.",
+                callbackId, _clientRpc.GetHashCode(), System.Diagnostics.Stopwatch.GetElapsedTime(started), timeout);
+            throw new TimeoutException($"Callback '{callbackId}' timed out after {timeout.TotalSeconds}s; its owner connection was retired.", ex);
+        }
+        finally
+        {
+            _logger.LogDebug("Callback {CallbackId} finished on connection {Host} after {Elapsed}.",
+                callbackId, _clientRpc.GetHashCode(), System.Diagnostics.Stopwatch.GetElapsedTime(started));
         }
     }
 
@@ -78,5 +113,33 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker
     public async Task InvokeAsync(string callbackId, JsonNode? args, CancellationToken cancellationToken = default)
     {
         await InvokeAsync<object?>(callbackId, args, cancellationToken).ConfigureAwait(false);
+    }
+
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public async ValueTask DisposeAsync()
+    {
+        StopAcceptingCallbacks();
+        lock (_callbackGate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
+        }
+        try
+        {
+            await _retirement.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Callback owner cancellation failed while disposing connection {Host}.", _clientRpc?.GetHashCode());
+            throw;
+        }
+        finally
+        {
+            _lifetime.Dispose();
+        }
     }
 }
