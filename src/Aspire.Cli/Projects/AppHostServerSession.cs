@@ -21,7 +21,7 @@ namespace Aspire.Cli.Projects;
 /// <see cref="IAppHostServerProject.RunAsync"/>. Termination is requested either by cancelling the
 /// <c>stopRequested</c> token passed to the constructor, or by calling <see cref="DisposeAsync"/>.
 /// Both routes cancel the same internal linked CTS, which the drive loop passes to
-/// <see cref="IProcessExecution.WaitForExitAsync(CancellationToken)"/>; the execution runs the
+/// <see cref="Aspire.Shared.IChildProcess.WaitForExitAsync(CancellationToken)"/>; the execution runs the
 /// shared shutdown ladder (graceful signal → bounded wait → tree-kill, or force-kill fallback)
 /// from inside that call. The session itself never spawns or kills — there is exactly one shutdown
 /// driver, and it lives in <see cref="ProcessExecution"/>.

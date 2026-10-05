@@ -8,15 +8,61 @@ using Aspire.Cli.Tests.Acquisition;
 using Aspire.Cli.Tests.TestServices;
 using Aspire.Cli.Tests.Utils;
 using Aspire.Hosting;
+using Aspire.TestUtilities;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aspire.Cli.Tests.DotNet;
 
 [Collection(EnvVarMutatingTestCollection.Name)]
-public sealed class ProcessExecutionFactoryEnvironmentTests
+public sealed class ProcessExecutionFactoryEnvironmentTests(ITestOutputHelper outputHelper)
 {
     private const string SelectionOrigin = "explicit-launch-configuration";
     private const string ControlEnvVarName = "ASPIRE_TEST_PROCESS_EXECUTION_FACTORY_CONTROL";
+
+    [Fact]
+    public async Task CreateExecution_FromStartInfo_PreservesRawArguments()
+    {
+        var output = new List<string>();
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            Arguments = "--version",
+            WorkingDirectory = WorkingDirectory.FullName
+        };
+        await using var execution = CreateFactory().CreateExecution(startInfo, new ProcessInvocationOptions
+        {
+            StandardOutputCallback = output.Add
+        });
+        Assert.True(await execution.StartAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0, await execution.WaitForExitAsync(TestContext.Current.CancellationToken));
+        Assert.Matches(@"^\d+\.\d+\.\d+", Assert.Single(output));
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task CreateExecution_WindowsBatchShim_PreservesLiteralArgumentText()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows batch commands require cmd.exe.");
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var directory = workspace.WorkspaceRoot.CreateSubdirectory("literal %TEMP%! with spaces");
+        await File.WriteAllTextAsync(Path.Combine(directory.FullName, "argv.cjs"),
+            "for (const arg of process.argv.slice(2)) console.log(arg);");
+        var shim = ProcessTestHelpers.CreateScript(directory, "npm", "exit 0",
+            """
+            @echo off
+            node "%~dp0argv.cjs" %*
+            """);
+        string[] arguments = ["literal %PATH%! & value", "", "a^b|c"];
+        var startInfo = new ProcessStartInfo { WorkingDirectory = directory.FullName };
+        ProcessStartInfoHelper.SetCommand(startInfo, shim, arguments, isWindows: true);
+        var output = new List<string>();
+        await using var execution = CreateFactory().CreateExecution(startInfo, new ProcessInvocationOptions
+        {
+            StandardOutputCallback = output.Add
+        });
+        Assert.True(await execution.StartAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0, await execution.WaitForExitAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(arguments, output);
+    }
 
     [Fact]
     public void InvocationScopedEnvVarNames_ContainsExpectedVariables()

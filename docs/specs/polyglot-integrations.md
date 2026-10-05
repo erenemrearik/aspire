@@ -92,8 +92,8 @@ The JSON contains `execute` and optional `installDependencies` commands. For exa
 ```json
 {
   "execute": {
-    "command": "npx",
-    "args": ["--no-install", "tsx", "{entryPoint}"]
+    "command": "node",
+    "args": ["--import", "tsx", "{entryPoint}"]
   },
   "installDependencies": {
     "command": "npm",
@@ -263,13 +263,17 @@ Three components participate in every AppHost run. Their responsibilities are de
 
 ### Process containment
 
-Ownership is not the same as the OS parent tree. On Unix, the guardian establishes a new session and process group before launching the runtime. Both the guardian and the server can terminate that group even if an npm wrapper has already exited and its descendants have been reparented. On Windows, the guardian enrolls itself in a kill-on-close job before spawning the runtime; descendants inherit the job without a breakaway allowance. Killing the guardian therefore tears down its workers as well.
+Ownership is not the same as the OS parent tree. On Unix, the guardian establishes a new session and process group before launching the runtime. Both the guardian and the server can terminate that group even if the runtime has already exited and its descendants have been reparented. On Windows, the guardian enrolls itself in a kill-on-close job before spawning the runtime; descendants inherit the job without a breakaway allowance. Killing the guardian therefore tears down its workers as well.
+
+TypeScript integration hosts launch directly as `node --import tsx <entryPoint>`, without an npm, npx, or tsx wrapper process. The CLI and AppHost server source-share the guardian, strict process-scope cleanup, executable resolution, and command formatter. `ChildProcess` extracts launch, output forwarding, root-exit observation, and handle ownership from the CLI's existing `ProcessExecution`; the CLI adapter retains its environment/redaction rules and central graceful-shutdown ladder. The guardian uses the existing `ParentProcessLivenessMonitor` and stable process-start-time helper instead of a separate polling implementation. Windows batch commands still require an interpreter, but npm and MSBuild tasks use the same formatter, including the .NET Framework argument-quoting path.
+
+Dependency installation remains a CLI restore operation, but `npm install` now runs under the same contained guardian with the CLI as owner. Abrupt CLI death therefore reaps npm, lifecycle scripts, and their workers even if a script's event loop is blocked. The guardian privately hands off the command's exit code before terminating its scope, because Unix group termination also kills the guardian. An installation succeeds only after both command completion and process-scope cleanup have been verified. Runtime-host recovery never installs dependencies.
 
 The guardian's server-liveness monitor runs in a separate process, so a blocked integration event loop cannot prevent cleanup after server death. Socket-close and signal handlers in the host runtime are cooperative graceful-shutdown mechanisms, not the sole orphan protection. Host-created workers must remain inside their process scope; intentionally escaping containment is unsupported.
 
 Application executables and containers created through the hosting model belong to DCP, not to the integration host's process scope. Container deletion is performed through the container runtime. Explicitly persistent containers can intentionally survive a session and are not accidental orphans.
 
-CLI end-to-end coverage in `IntegrationHostLifetimeTests` kills the runtime, its npm/tsx wrapper, the guardian, the AppHost server, and the owning CLI. It records kernel process identities, checks that old scopes and workers are reaped, preserves diagnostics, and invokes a resource command through the rediscovered integration. Guardian and owner-death cases also block the runtime's event loop to rule out cooperative shutdown as the only cleanup mechanism. Callback-free runtime-scope failures recover automatically; callback-owner failure, server death, or CLI death ends the session and requires an explicit `aspire start`. Callback-owner coverage invokes an integration-owned resource command before the crash, verifies that no misleading host-only recovery occurs, and invokes the reconstructed command after explicit restart.
+CLI end-to-end coverage in `IntegrationHostLifetimeTests` kills the runtime, the guardian, the AppHost server, and the owning CLI, and separately kills the CLI during a blocked dependency-install lifecycle script. It records kernel process identities, checks that old scopes and workers are reaped, preserves diagnostics, and invokes resource commands after recovery or explicit restart. Runtime records assert that Node's direct parent is the guardian, ruling out accidental wrapper reintroduction. Guardian and owner-death cases block the runtime's event loop to rule out cooperative shutdown as the only cleanup mechanism. The install case verifies stdout/stderr capture, cleanup of npm and script workers, then successful explicit restore and resource invocation. Callback-free runtime-scope failures recover automatically; callback-owner failure, server death, or CLI death ends the session and requires an explicit `aspire start`. Callback-owner coverage invokes an integration-owned resource command before the crash, verifies that no misleading host-only recovery occurs, and invokes the reconstructed command after explicit restart.
 
 Crash-loop coverage verifies the three-attempt budget, original runtime diagnostics, a nonzero CLI exit, and explicit restart after the fault is removed. Each scenario retains its own terminal recording, process ledger, session log, and resource-command output under `TestResults/recordings/aspire-cli-e2e/`, including successful runs.
 

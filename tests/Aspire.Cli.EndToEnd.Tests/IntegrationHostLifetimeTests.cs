@@ -15,7 +15,7 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
 
     [Fact]
     [CaptureWorkspaceOnFailure]
-    public Task WrapperCrash_ReapsWorkersAndRecoversCommands() => RunScenarioAsync("wrapper");
+    public Task DependencyInstallCliCrash_ReapsBlockedScriptAndWorkersAndAllowsRestore() => RunScenarioAsync("install");
 
     [Fact]
     [CaptureWorkspaceOnFailure]
@@ -53,6 +53,18 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
         await auto.InstallAspireCliAsync(strategy, counter);
         await auto.RunCommandAsync("aspire init --language typescript --non-interactive", counter, TimeSpan.FromMinutes(3));
         IntegrationHostLifetimeTestHelper.WriteFixture(workspace.WorkspaceRoot.FullName, repoRoot, target == "callback");
+        if (target == "install")
+        {
+            IntegrationHostLifetimeTestHelper.WriteInstallCrashFixture(workspace.WorkspaceRoot.FullName);
+            await auto.RunCommandAsync(
+                "aspire restore --non-interactive --log-file \"$PWD/install-session.log\" > install.log 2>&1 & echo $! > install-cli.pid",
+                counter);
+            await auto.ExecuteCommandUntilOutputAsync(counter, "node process-control.mjs install-ready", "INSTALL_READY",
+                timeout: TimeSpan.FromMinutes(3));
+            await auto.RunCommandAsync("node process-control.mjs install-kill", counter);
+            await auto.RunCommandAsync("node process-control.mjs install-stopped", counter, TimeSpan.FromSeconds(75));
+            await auto.RunCommandAsync("grep 'INSTALL_LIFETIME' install-session.log", counter);
+        }
         await auto.RunCommandAsync("aspire restore --non-interactive", counter, TimeSpan.FromMinutes(3));
 
         // A foreground run launched in the test shell's background retains the real
@@ -74,9 +86,12 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
             await auto.RunCommandAsync("node process-control.mjs block", counter, TimeSpan.FromSeconds(75));
         }
         var killTarget = target == "callback" ? "runtime" : target;
-        await auto.RunCommandAsync(
-            target == "crashloop" ? "node process-control.mjs crashloop" : $"node process-control.mjs kill {killTarget}",
-            counter);
+        if (target != "install")
+        {
+            await auto.RunCommandAsync(
+                target == "crashloop" ? "node process-control.mjs crashloop" : $"node process-control.mjs kill {killTarget}",
+                counter);
+        }
         if (target is "server" or "cli" or "crashloop" or "callback")
         {
             await auto.RunCommandAsync("node process-control.mjs stopped", counter, TimeSpan.FromSeconds(75));
@@ -99,7 +114,7 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
             }
             await auto.RunCommandAsync("aspire start --non-interactive > restart.log 2>&1", counter, TimeSpan.FromMinutes(3));
         }
-        else
+        else if (target != "install")
         {
             await auto.RunCommandAsync("node process-control.mjs recovered", counter, TimeSpan.FromSeconds(75));
         }

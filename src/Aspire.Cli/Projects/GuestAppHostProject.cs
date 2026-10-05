@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Hashing;
 using System.Net.Sockets;
 using System.Text.Json;
@@ -20,6 +21,7 @@ using Aspire.Cli.Telemetry;
 using Aspire.Cli.Utils;
 using Aspire.Hosting;
 using Aspire.Hosting.Backchannel;
+using Aspire.Shared;
 using Aspire.Shared.UserSecrets;
 using Aspire.TypeSystem;
 using Microsoft.Extensions.Configuration;
@@ -43,6 +45,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
     private readonly IAppHostServerProjectFactory _appHostServerProjectFactory;
     private readonly ICertificateService _certificateService;
     private readonly IDotNetCliRunner _runner;
+    private readonly IProcessExecutionFactory _processExecutionFactory;
     private readonly IPackagingService _packagingService;
     private readonly IConfiguration _configuration;
     private readonly IFeatures _features;
@@ -76,6 +79,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         IAppHostServerProjectFactory appHostServerProjectFactory,
         ICertificateService certificateService,
         IDotNetCliRunner runner,
+        IProcessExecutionFactory processExecutionFactory,
         IPackagingService packagingService,
         IConfiguration configuration,
         IFeatures features,
@@ -97,6 +101,7 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         _appHostServerProjectFactory = appHostServerProjectFactory;
         _certificateService = certificateService;
         _runner = runner;
+        _processExecutionFactory = processExecutionFactory;
         _packagingService = packagingService;
         _configuration = configuration;
         _features = features;
@@ -1012,43 +1017,63 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
     internal async Task<bool> InstallIntegrationHostPackageAsync(string name, string npmPath, string hostDir, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        using var nullInput = File.OpenNullHandle();
-        var startInfo = NpmRunner.CreateNpmProcessStartInfo(npmPath, ["install"], hostDir, _environment, nullInput);
-        var result = await ProcessCaptureRunner.RunAsync(
-            startInfo,
-            Timeout.InfiniteTimeSpan,
-            CaptureOutputAsync,
-            static () => false,
-            _logger,
-            cancellationToken);
-
-        // ProcessCaptureRunner kills and disposes the process tree before returning cancellation.
-        cancellationToken.ThrowIfCancellationRequested();
-        if (result.FailureKind is not null || result.ExitCode != 0 || !result.Capture)
+        var resultDirectory = Directory.CreateTempSubdirectory("aspire-integration-install-");
+        try
         {
-            _logger.LogError(
-                "`npm install` for integration host '{Name}' failed with exit code {ExitCode} " +
-                "(cwd: {HostDir}, output captured: {OutputCaptured}). {FailureMessage}",
-                name, result.ExitCode, hostDir, result.Capture, result.FailureMessage);
-            return false;
-        }
+            var exitCodePath = Path.Combine(resultDirectory.FullName, "exit-code");
+            var startInfo = NpmRunner.CreateNpmProcessStartInfo(npmPath, ["install"], hostDir, _environment, null);
+            await using var execution = _processExecutionFactory.CreateExecution(
+                ProcessSupervisor.CreateStartInfo(startInfo, exitCodePath),
+                new ProcessInvocationOptions
+                {
+                    StandardOutputCallback = line => _logger.LogInformation("[npm install: {Name}] {Line}", name, line),
+                    StandardErrorCallback = line => _logger.LogWarning("[npm install: {Name}] {Line}", name, line)
+                });
+            _logger.LogInformation("Installing dependencies for integration host '{Name}': {Command} install (cwd: {Directory}).", name, npmPath, hostDir);
+            if (!await execution.StartAsync(cancellationToken).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException($"Could not start dependency installation for integration host '{name}' (cwd: {hostDir}).");
+            }
+            var scope = new ProcessScope(execution, _logger, $"npm install: {name}");
+            Exception? failure = null;
+            int supervisorExitCode;
+            try
+            {
+                supervisorExitCode = await scope.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+                throw;
+            }
+            finally
+            {
+                await scope.DisposeAsync(failure).ConfigureAwait(false);
+            }
 
-        return true;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(exitCodePath))
+            {
+                _logger.LogError(
+                    "`npm install` for integration host '{Name}' did not report completion (supervisor exit code {ExitCode}, cwd: {Directory}). Check its startup diagnostics.",
+                    name, supervisorExitCode, hostDir);
+                return false;
+            }
+            // The private completion file contains one invariant decimal exit code, e.g. "0" or
+            // "23". It is authoritative only after the guardian and its process scope are reaped.
+            var exitCode = int.Parse(await File.ReadAllTextAsync(exitCodePath, cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
+            if (exitCode != 0)
+            {
+                _logger.LogError("`npm install` for integration host '{Name}' failed with exit code {ExitCode} (cwd: {Directory}).", name, exitCode, hostDir);
+                return false;
+            }
+            _logger.LogInformation("Installed dependencies for integration host '{Name}'; process scope cleanup completed.", name);
 
-        async Task<bool> CaptureOutputAsync(Process process, CancellationToken captureCancellationToken)
-        {
-            await Task.WhenAll(
-                LogOutputAsync(process.StandardOutput, LogLevel.Information, captureCancellationToken),
-                LogOutputAsync(process.StandardError, LogLevel.Warning, captureCancellationToken));
             return true;
         }
-
-        async Task LogOutputAsync(StreamReader reader, LogLevel level, CancellationToken captureCancellationToken)
+        finally
         {
-            while (await reader.ReadLineAsync(captureCancellationToken) is { } line)
-            {
-                _logger.Log(level, "[npm install: {Name}] {Line}", name, line);
-            }
+            resultDirectory.Delete(recursive: true);
         }
     }
 

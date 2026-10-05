@@ -135,6 +135,18 @@ public class IntegrationHostProcessTests(IntegrationHostProcessFixture fixture) 
     }
 
     [Fact]
+    public async Task MissingCommand_FailsPromptlyWithContextualInstallationDiagnostics()
+    {
+        await using var server = await fixture.StartAsync(missingCommand: true);
+        await server.Exit.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(0, server.ExitCode);
+        Assert.Contains("Cannot launch integration host 'lifetime-test' [test/node]", server.Diagnostics);
+        Assert.Contains("Command 'aspire-missing-integration-runtime' not found. Please ensure it is installed and in your PATH.", server.Diagnostics);
+        Assert.False(File.Exists(Path.Combine(server.Directory, "host-pids")));
+    }
+
+    [Fact]
     public async Task StartupExit_FailsPromptlyAndPreservesRuntimeDiagnostics()
     {
         await using var server = await fixture.StartAsync(failStartup: true);

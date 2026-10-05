@@ -327,8 +327,8 @@ internal sealed class TypeScriptLanguageSupport : ILanguageSupport
         using var document = JsonDocument.Parse("""
             {
               "execute": {
-                "command": "npx",
-                "args": ["--no-install", "tsx", "{entryPoint}"]
+                "command": "node",
+                "args": ["--import", "tsx", "{entryPoint}"]
               },
               "installDependencies": {
                 "command": "npm",

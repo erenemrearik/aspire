@@ -54,7 +54,7 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
         _hostAssembly = Path.Combine(_directory.FullName, "bin", BuildConfiguration, "net10.0", "LifetimeTestHost.dll");
     }
 
-    internal async Task<IntegrationHostServerProcess> StartAsync(bool failStartup = false, bool skipRegistration = false, bool useAppHostExecutable = false)
+    internal async Task<IntegrationHostServerProcess> StartAsync(bool failStartup = false, bool skipRegistration = false, bool useAppHostExecutable = false, bool missingCommand = false)
     {
         var directory = _directory.CreateSubdirectory(Guid.NewGuid().ToString("N")[..8]);
         var script = Path.Combine(directory.FullName, "host.js");
@@ -74,6 +74,10 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
         if (skipRegistration)
         {
             await File.WriteAllTextAsync(Path.Combine(directory.FullName, "skip-registration"), "");
+        }
+        if (missingCommand)
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "missing-command"), "");
         }
 
         return new IntegrationHostServerProcess(directory.FullName, _hostAssembly, useAppHostExecutable);
@@ -128,7 +132,7 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
         using Microsoft.Extensions.DependencyInjection;
         using Microsoft.Extensions.Hosting;
 
-        if (Environment.GetEnvironmentVariable("ASPIRE_INTEGRATION_HOST_SUPERVISOR_COMMAND") is not null)
+        if (Environment.GetEnvironmentVariable("ASPIRE_PROCESS_SUPERVISOR_COMMAND") is not null)
         {
             await RemoteHostServer.RunAsync(args);
             return;
@@ -150,7 +154,11 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
             public RuntimeSpec GetRuntimeSpec() => throw new NotSupportedException();
             public JsonElement GetIntegrationHostSpec() => JsonSerializer.SerializeToElement(new
             {
-                execute = new { command = "node", args = new[] { "{entryPoint}" } }
+                execute = new
+                {
+                    command = File.Exists("missing-command") ? "aspire-missing-integration-runtime" : "node",
+                    args = new[] { "{entryPoint}" }
+                }
             });
         }
 

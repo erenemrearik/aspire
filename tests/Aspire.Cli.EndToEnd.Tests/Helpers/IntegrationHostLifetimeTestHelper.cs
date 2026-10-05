@@ -27,6 +27,15 @@ internal static class IntegrationHostLifetimeTestHelper
         {
             File.Copy(Path.Combine(directory, "restart.log"), Path.Combine(evidence.FullName, "restart.log"), overwrite: true);
         }
+        if (target == "install")
+        {
+            foreach (var file in new[] { "install-session.log", "install.log" })
+            {
+                File.Copy(Path.Combine(directory, file), Path.Combine(evidence.FullName, file), overwrite: true);
+            }
+            File.Copy(Path.Combine(directory, "integration", "install-processes.json"),
+                Path.Combine(evidence.FullName, "install-processes.json"), overwrite: true);
+        }
 
         return evidence.FullName;
     }
@@ -85,6 +94,47 @@ internal static class IntegrationHostLifetimeTestHelper
         File.WriteAllText(configPath, config.ToJsonString());
     }
 
+    internal static void WriteInstallCrashFixture(string directory)
+    {
+        var integrationDirectory = Path.Combine(directory, "integration");
+        var manifestPath = Path.Combine(integrationDirectory, "package.json");
+        var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
+        manifest["scripts"] = new JsonObject { ["postinstall"] = "node install-lifetime.mjs" };
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+        File.WriteAllText(Path.Combine(integrationDirectory, "block-install"), "");
+        File.WriteAllText(Path.Combine(integrationDirectory, "install-lifetime.mjs"), InstallSource);
+    }
+
+    private const string InstallSource = """
+        import * as fs from 'node:fs';
+        import { spawn } from 'node:child_process';
+
+        if (!fs.existsSync('block-install')) {
+            console.log('INSTALL_RECOVERED');
+            process.exit(0);
+        }
+        const worker = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' });
+        // /proc/<pid>/stat fields after the last ')' start with state, PPID, and later start ticks.
+        function identity(pid) {
+            const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+            const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+            return { pid, started: fields[19], parent: Number(fields[1]) };
+        }
+        const owned = [identity(process.pid), identity(worker.pid)];
+        let ancestor = identity(process.ppid);
+        while (!fs.readFileSync(`/proc/${ancestor.pid}/environ`).includes('ASPIRE_PROCESS_SUPERVISOR_COMMAND=')) {
+            owned.push(ancestor);
+            ancestor = identity(ancestor.parent);
+        }
+        owned.push(ancestor);
+        const cli = identity(ancestor.parent);
+        console.log(`INSTALL_LIFETIME_READY guardian=${ancestor.pid} cli=${cli.pid}`);
+        console.error('INSTALL_LIFETIME_STDERR');
+        fs.writeFileSync('install-processes.json', JSON.stringify({ cli, owned }));
+        // Block the lifecycle script's event loop so cleanup cannot rely on its signal handlers.
+        while (true) {}
+        """;
+
     private const string HostSource = """
         import * as fs from 'node:fs';
         import { spawn } from 'node:child_process';
@@ -106,14 +156,14 @@ internal static class IntegrationHostLifetimeTestHelper
         }
         const owned = [identity(process.pid), identity(worker.pid!)];
         let ancestor = identity(process.ppid);
-        while (!fs.readFileSync(`/proc/${ancestor.pid}/environ`).includes('ASPIRE_INTEGRATION_HOST_SUPERVISOR_COMMAND=')) {
+        while (!fs.readFileSync(`/proc/${ancestor.pid}/environ`).includes('ASPIRE_PROCESS_SUPERVISOR_COMMAND=')) {
             owned.push(ancestor);
             ancestor = identity(ancestor.parent);
         }
         owned.push(ancestor);
         const server = identity(ancestor.parent);
         fs.appendFileSync('processes.jsonl', JSON.stringify({
-            generation, runtime: identity(process.pid), wrapper: identity(process.ppid),
+            generation, runtime: identity(process.pid),
             supervisor: ancestor, server, cli: identity(server.parent), owned
         }) + '\n');
         console.log(`LIFETIME_READY generation=${generation} runtime=${process.pid} worker=${worker.pid} supervisor=${ancestor.pid}`);
@@ -210,6 +260,27 @@ internal static class IntegrationHostLifetimeTestHelper
         }
 
         switch (operation) {
+            case 'install-ready': {
+                assert.ok(fs.existsSync('integration/install-processes.json'));
+                const record = JSON.parse(fs.readFileSync('integration/install-processes.json', 'utf8'));
+                assert.equal(record.cli.pid, Number(fs.readFileSync('install-cli.pid', 'utf8')));
+                assert.ok(record.owned.every(exists));
+                const log = fs.readFileSync('install-session.log', 'utf8');
+                assert.ok(log.includes('INSTALL_LIFETIME_READY'));
+                assert.ok(log.includes('INSTALL_LIFETIME_STDERR'));
+                console.log('INSTALL_READY');
+                break;
+            }
+            case 'install-kill':
+                terminate(JSON.parse(fs.readFileSync('integration/install-processes.json', 'utf8')).cli);
+                break;
+            case 'install-stopped': {
+                const record = JSON.parse(fs.readFileSync('integration/install-processes.json', 'utf8'));
+                await until(() => [...record.owned, record.cli].every(original => !exists(original)),
+                    'dependency-install guardian, npm, blocked lifecycle script and worker reaped after CLI death');
+                fs.unlinkSync('integration/block-install');
+                break;
+            }
             case 'ready':
                 assert.equal(JSON.parse(execFileSync('aspire', ['describe', 'probe', '--format', 'json'], {
                     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
@@ -221,6 +292,8 @@ internal static class IntegrationHostLifetimeTestHelper
                 break;
             case 'snapshot': {
                 const current = records().at(-1);
+                assert.equal(current.runtime.parent, current.supervisor.pid,
+                    'TypeScript integrations must launch directly under the guardian, without npm or tsx wrapper processes');
                 current.guest = identity(Number(fs.readFileSync('guest.pid', 'utf8')));
                 assert.ok(current.guest);
                 assert.ok(current.owned.every(exists));
@@ -259,7 +332,7 @@ internal static class IntegrationHostLifetimeTestHelper
             case 'recovered': {
                 const before = snapshot();
                 await until(() => records().at(-1).generation > before.generation, 'replacement integration host');
-                await until(() => before.owned.every(original => !exists(original)), 'old guardian, wrappers, runtime, and worker reaped');
+                await until(() => before.owned.every(original => !exists(original)), 'old guardian, runtime, and worker reaped');
                 assert.ok(exists(before.server), 'Recovery must preserve the AppHost server');
                 assert.ok(exists(before.guest), 'Recovery must preserve the guest and its callbacks');
                 await until(() => fs.readFileSync('session.log', 'utf8').includes('capabilities rediscovered.'), 'recovery diagnostic');

@@ -224,7 +224,7 @@ public class IntegrationHostLauncherTests
         var startInfo = IntegrationHostLauncher.CreateProcessStartInfo(
             command, ["--no-install", "tsx", "{entryPoint}", "", "literal %PATH%! & value"], entryPoint, isWindows: true);
 
-        Assert.Equal("cmd.exe", startInfo.FileName);
+        Assert.Equal(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", startInfo.FileName);
         Assert.Empty(startInfo.ArgumentList);
         Assert.Equal(
             "/D /V:OFF /S /C \"\"%ASPIRE_COMMAND_SHIM_PATH%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_0%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_1%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_2%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_3%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_4%\"\"",

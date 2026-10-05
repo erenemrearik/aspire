@@ -209,9 +209,9 @@ internal sealed class NpmRunner(IEnvironment environment, ILogger<NpmRunner> log
     /// <param name="workingDirectory">Working directory for the npm process.</param>
     /// <param name="environment">Environment used to detect the host platform.</param>
     /// <param name="standardInput">
-    /// Handle given to npm as stdin; callers pass a null-device handle and keep it alive until the process starts.
+    /// Null-device handle kept alive until launch, or null when the shared process runner assigns stdin.
     /// </param>
-    internal static ProcessStartInfo CreateNpmProcessStartInfo(string npmPath, string[] args, string workingDirectory, IEnvironment environment, SafeFileHandle standardInput)
+    internal static ProcessStartInfo CreateNpmProcessStartInfo(string npmPath, string[] args, string workingDirectory, IEnvironment environment, SafeFileHandle? standardInput)
     {
         var startInfo = new ProcessStartInfo
         {

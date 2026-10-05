@@ -91,11 +91,15 @@ internal sealed class ProcessExecutionFactory : IProcessExecutionFactory
 
         // Same redaction boundary as the ArgumentList-building overload: anything after the first
         // "--" is application input forwarded to the AppHost and must not be logged verbatim.
-        effectiveLogger.LogDebug("Running {FileName} in {WorkingDirectory} with args: {Args}", startInfo.FileName, startInfo.WorkingDirectory, AppHostArgumentRedactor.RedactToString(startInfo.ArgumentList));
+        effectiveLogger.LogDebug("Running {FileName} in {WorkingDirectory} with args: {Args}", startInfo.FileName, startInfo.WorkingDirectory,
+            string.IsNullOrEmpty(startInfo.Arguments) ? AppHostArgumentRedactor.RedactToString(startInfo.ArgumentList) : "[raw command arguments]");
 
         // Only the caller's command line and environment are used; the launch mode (stdio, console,
         // job, detach) always comes from the options so every child is spawned the same way.
         var childStartInfo = CreateProcessStartInfo(startInfo.FileName, startInfo.ArgumentList, startInfo.WorkingDirectory, options);
+        // Batch shims carry cmd's command line in Arguments, not ArgumentList. Preserve it without
+        // logging raw values, which do not have a reliable forwarded-AppHost redaction boundary.
+        childStartInfo.Arguments = startInfo.Arguments;
 
         // Replace (not overlay) the env block so callers that did startInfo.Environment.Remove(key)
         // see that removal honored — e.g. PrebuiltAppHostServer.CreateStartInfo explicitly removes
@@ -122,7 +126,7 @@ internal sealed class ProcessExecutionFactory : IProcessExecutionFactory
 
     /// <summary>
     /// Maps the launch options onto a <see cref="ProcessStartInfo"/>. Standard handles are assigned by
-    /// <see cref="ProcessExecution.StartAsync"/> so an execution that is never started holds no handles.
+    /// <see cref="Aspire.Shared.ChildProcess.StartAsync"/> so an execution that is never started holds no handles.
     /// </summary>
     internal static ProcessStartInfo CreateProcessStartInfo(string fileName, IEnumerable<string> arguments, string workingDirectory, ProcessInvocationOptions options)
     {

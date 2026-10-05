@@ -6,9 +6,9 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32.SafeHandles;
 
-namespace Aspire.Hosting.RemoteHost.Language;
+namespace Aspire.Shared;
 
-internal static partial class IntegrationHostSupervisor
+internal static partial class ProcessSupervisor
 {
     [SupportedOSPlatform("windows")]
     private static unsafe SafeWaitHandle CreateWindowsJob()
@@ -16,7 +16,7 @@ internal static partial class IntegrationHostSupervisor
         var handle = CreateJobObjectW(IntPtr.Zero, null);
         if (handle == IntPtr.Zero)
         {
-            throw new Win32Exception(Marshal.GetLastPInvokeError(), "Could not create the integration host process job.");
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), "Could not create the supervised process job.");
         }
         var job = new SafeWaitHandle(handle, ownsHandle: true);
         var limits = new ExtendedLimitInformation
@@ -24,15 +24,15 @@ internal static partial class IntegrationHostSupervisor
             BasicLimitInformation = new BasicLimitInformation { LimitFlags = 0x2000 }
         };
         // Enroll the guardian before launching the runtime, avoiding the race where
-        // an npm wrapper creates children before its process is assigned to a job.
-        // No breakaway flag: workers must not escape the integration's lifetime.
+        // a package-manager lifecycle script creates children before job enrollment.
+        // No breakaway flag: workers must not escape the owner's lifetime.
         // https://learn.microsoft.com/windows/win32/procthread/job-objects
         if (!SetInformationJobObject(job, 9, &limits, (uint)sizeof(ExtendedLimitInformation)) ||
             !AssignProcessToJobObject(job, new IntPtr(-1)))
         {
             var error = Marshal.GetLastPInvokeError();
             job.Dispose();
-            throw new Win32Exception(error, "Could not contain the integration host supervisor in its process job.");
+            throw new Win32Exception(error, "Could not contain the process supervisor in its job.");
         }
 
         return job;

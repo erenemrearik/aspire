@@ -8,6 +8,8 @@ using Aspire.Cli.Telemetry;
 using Aspire.Cli.Utils;
 using Microsoft.Extensions.Logging;
 
+using Aspire.Shared;
+
 namespace Aspire.Cli.Projects;
 
 /// <summary>

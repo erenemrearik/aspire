@@ -303,9 +303,9 @@ public sealed class TypeScriptLanguageSupportTests(ITestOutputHelper outputHelpe
             Assert.Equal(typeof(JsonElement), hook.ReturnType);
 
             var payload = Assert.IsType<JsonElement>(hook.Invoke(provider, null));
-            Assert.Equal("npx", payload.GetProperty("execute").GetProperty("command").GetString());
+            Assert.Equal("node", payload.GetProperty("execute").GetProperty("command").GetString());
             Assert.Equal(
-                ["--no-install", "tsx", "{entryPoint}"],
+                ["--import", "tsx", "{entryPoint}"],
                 payload.GetProperty("execute").GetProperty("args").EnumerateArray().Select(arg => Assert.IsType<string>(arg.GetString())).ToArray());
             Assert.Equal("npm", payload.GetProperty("installDependencies").GetProperty("command").GetString());
         }

@@ -99,8 +99,8 @@ public class CodeGenerationResolverTests
         var spec = LanguageService.GetIntegrationHostSpec(languageSupport);
 
         Assert.NotNull(spec);
-        Assert.Equal("npx", spec.Execute.Command);
-        Assert.Equal(["--no-install", "tsx", "{entryPoint}"], spec.Execute.Args);
+        Assert.Equal("node", spec.Execute.Command);
+        Assert.Equal(["--import", "tsx", "{entryPoint}"], spec.Execute.Args);
         Assert.NotNull(spec.InstallDependencies);
         Assert.Equal("npm", spec.InstallDependencies.Command);
         Assert.Equal(["install"], spec.InstallDependencies.Args);

@@ -6,6 +6,7 @@ using Aspire.Hosting.RemoteHost.Ats;
 using Aspire.Hosting.RemoteHost.CodeGeneration;
 using Aspire.Hosting.RemoteHost.Diagnostics;
 using Aspire.Hosting.RemoteHost.Language;
+using Aspire.Shared;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -33,9 +34,9 @@ public static class RemoteHostServer
     /// <returns>A task that completes when the server has stopped.</returns>
     public static async Task RunAsync(string[] args)
     {
-        if (IntegrationHostSupervisor.IsSupervisor)
+        if (ProcessSupervisor.IsSupervisor)
         {
-            await IntegrationHostSupervisor.RunAsync().ConfigureAwait(false);
+            await ProcessSupervisor.RunAsync().ConfigureAwait(false);
             return;
         }
 

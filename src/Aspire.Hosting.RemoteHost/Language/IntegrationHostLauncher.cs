@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using Aspire.Hosting.RemoteHost.Ats;
+using Aspire.Shared;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -145,14 +146,14 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
                 var registration = _externalCapabilityRegistry.ExpectHostRegistration(registrationId);
                 using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 JsonRpc? connection = null;
-                IntegrationHostProcess? process = null;
-                Exception failure;
+                ProcessScope? process = null;
+                Exception? failure = null;
                 long? healthySince = null;
                 var wasStable = false;
                 var hasCallbacks = false;
                 try
                 {
-                    process = Launch(descriptor, registrationId);
+                    process = await LaunchAsync(descriptor, registrationId, attemptCancellation.Token).ConfigureAwait(false);
                     var registered = registration.WaitAsync(s_perHostRegistrationTimeout, attemptCancellation.Token);
                     if (await Task.WhenAny(registered, process.Exit).ConfigureAwait(false) == process.Exit)
                     {
@@ -222,13 +223,13 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
                     }
                     if (process is not null)
                     {
-                        await process.DisposeAsync().ConfigureAwait(false);
+                        await process.DisposeAsync(failure).ConfigureAwait(false);
                     }
                 }
 
                 if (!_readyTcs.Task.IsCompletedSuccessfully)
                 {
-                    _startupFailure.TrySetResult(failure);
+                    _startupFailure.TrySetResult(failure!);
                     return;
                 }
                 cancellationToken.ThrowIfCancellationRequested();
@@ -292,7 +293,7 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
     }
 
     private static InvalidOperationException CreateExitException(
-        IntegrationHostDescriptor descriptor, IntegrationHostProcess process, int exitCode)
+        IntegrationHostDescriptor descriptor, ProcessScope process, int exitCode)
         => new(
             $"Integration host supervisor for '{descriptor.PackageName}' (PID {process.ProcessId}, entry '{descriptor.HostEntryPoint}') " +
             $"exited with code {exitCode}. Check IntegrationHost[{descriptor.PackageName}] diagnostics for the runtime's original exit code and stderr.");
@@ -328,7 +329,7 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
         return result;
     }
 
-    private IntegrationHostProcess Launch(IntegrationHostDescriptor descriptor, string registrationId)
+    private async Task<ProcessScope> LaunchAsync(IntegrationHostDescriptor descriptor, string registrationId, CancellationToken cancellationToken)
     {
         var socketPath = _configuration["REMOTE_APP_HOST_SOCKET_PATH"];
         if (string.IsNullOrEmpty(socketPath))
@@ -346,8 +347,11 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
         }
 
         // Dependency restore belongs to the CLI's restore phase, not to runtime recovery.
-        var command = PathLookupHelper.FindFullPathFromPath(hostSpec.Execute.Command) ?? hostSpec.Execute.Command;
-        var startInfo = CreateProcessStartInfo(command, hostSpec.Execute.Args, descriptor.HostEntryPoint, OperatingSystem.IsWindows());
+        if (!CommandPathResolver.TryResolveCommand(hostSpec.Execute.Command, out var command, out var error))
+        {
+            throw new InvalidOperationException($"Cannot launch integration host '{descriptor.PackageName}' [{descriptor.Language}]: {error}");
+        }
+        var startInfo = CreateProcessStartInfo(command!, hostSpec.Execute.Args, descriptor.HostEntryPoint, OperatingSystem.IsWindows());
         startInfo.Environment["REMOTE_APP_HOST_SOCKET_PATH"] = socketPath;
         startInfo.Environment[RegistrationIdVariable] = registrationId;
         var token = _configuration[KnownConfigNames.RemoteAppHostToken];
@@ -359,7 +363,22 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
         _logger.LogInformation(
             "Launching integration host '{Name}' [{Language}]: {Command} (entry: {EntryPoint}, cwd: {Directory}).",
             descriptor.PackageName, descriptor.Language, command, descriptor.HostEntryPoint, startInfo.WorkingDirectory);
-        var process = IntegrationHostProcess.Start(IntegrationHostSupervisor.CreateStartInfo(startInfo), _logger, descriptor.PackageName);
+        var execution = new ChildProcess(
+            ProcessSupervisor.CreateStartInfo(startInfo), _logger, new ChildProcessOptions
+            {
+                StandardOutputCallback = line => _logger.LogInformation("IntegrationHost[{Name}]: {Line}", descriptor.PackageName, line),
+                StandardErrorCallback = line => _logger.LogWarning("IntegrationHost[{Name}]: {Line}", descriptor.PackageName, line)
+            }, OperatingSystem.IsWindows());
+        try
+        {
+            await execution.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            await execution.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+        var process = new ProcessScope(execution, _logger, descriptor.PackageName);
         _logger.LogInformation("Started integration host supervisor '{Name}' (PID {Pid}).", descriptor.PackageName, process.ProcessId);
 
         return process;
@@ -386,7 +405,7 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
     {
         lock (_lifetimeGate)
         {
-            return _stopTask ??= StopCoreAsync();
+            return (_stopTask ??= StopCoreAsync()).WaitAsync(cancellationToken);
         }
     }
 
