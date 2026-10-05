@@ -1,0 +1,65 @@
+{
+  "run_id": 37250324248,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/37250324248",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-05T02:08:22Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20620,
+    "title": "Preserve multiline quoted values in Docker Compose env files",
+    "author": "Benziza",
+    "state": "closed",
+    "head_branch": "fix/docker-compose-multiline-env",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20620",
+    "merged_at": "2026-10-05T01:09:44Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "62f2a13ef282411e4cc5bfc5457e71abc1e2a3f6",
+    "failed_sha": "0a42e2c6ae37033a14c62b2e265e9bf950ce68b8",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "0a42e2c6ae37033a14c62b2e265e9bf950ce68b8",
+        "message": "Preserve multiline quoted values in Docker Compose env files (#20620) ## Description Publishing Docker Compose output into a directory containing a multiline quoted `.env` value currently drops continuation lines and the closing quote. The resulting file can no longer be parsed by Docker Compose. This preserves the complete raw quoted value, including its original line endings, escaped quotes, blank lines, and embedded `#`/`=` characters. Unterminated quoted values now fail during loading, befor",
+        "html_url": "https://github.com/microsoft/aspire/commit/0a42e2c6ae37033a14c62b2e265e9bf950ce68b8",
+        "pull_request": {
+          "number": 20620,
+          "title": "Preserve multiline quoted values in Docker Compose env files",
+          "url": "https://github.com/microsoft/aspire/pull/20620",
+          "merged_at": "2026-10-05T01:09:44Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (macos-latest)",
+      "id": 111576891154,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37250324248/job/111576891154",
+      "classification": "flaky-test",
+      "reason": "A single test (GitRepositoryTests.GetIncludedFilesAsync_DeletedTrackedFile_StillReturned) timed out after 30s; all other 5910 tests passed. The failing test's git-include logic is unrelated to the merged PR's Docker Compose env-file parsing change.",
+      "failed_steps": [
+        "Run tests (Linux/macOS)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Cli.Tests.Git.GitRepositoryTests.GetIncludedFilesAsync_DeletedTrackedFile_StillReturned",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (macos-latest)",
+      "error": "System.TimeoutException : The operation at /Users/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Git/GitRepositoryTests.cs:95 timed out after reaching the limit of 30000ms.",
+      "stack_trace": "at Microsoft.AspNetCore.InternalTesting.AsyncTestHelpers.TimeoutAfter[T](Task`1 task, TimeSpan timeout, String filePath, Int32 lineNumber) in /Users/runner/work/aspire/aspire/tests/Shared/AsyncTestHelpers.cs:line 160\n   at Aspire.Cli.Tests.Git.GitRepositoryTests.GetIncludedFilesAsync_DeletedTrackedFile_StillReturned() in /Users/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Git/GitRepositoryTests.cs:line 95\n--- End of stack trace from previous location ---",
+      "standard_output": "Temporary workspace created at: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/Aspire.Cli.Tests/Workspace/pipfowrx.kim\nInitializing git repository at: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/Aspire.Cli.Tests/Workspace/pipfowrx.kim\nDisposing temporary workspace at: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/Aspire.Cli.Tests/Workspace/pipfowrx.kim",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "30s timeout on a git subprocess operation unrelated to the merged Docker Compose env-parsing change; 5910/5944 tests passed in the same run, consistent with environment-induced slowness on the macOS runner."
+    }
+  ],
+  "causes": [
+    "aspire-cli-tests-git-getincludedfilesasync-deletedtrackedfile-timeout"
+  ]
+}
