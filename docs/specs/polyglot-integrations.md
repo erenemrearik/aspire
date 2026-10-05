@@ -1,6 +1,6 @@
 # Polyglot Integrations
 
-> **Status:** Spike Specification
+> **Status:** Implementation and architectural direction
 > **Audience:** Aspire contributors working on the AppHost server, integration host protocol, CLI orchestration, and guest-language SDK projection.
 > **Related:** [Polyglot AppHost Support](./polyglot-apphost.md) — the sibling spec that covers the *guest AppHost* side (how a TypeScript/Python/Go AppHost talks to the .NET AppHost server over JSON-RPC, how ATS projects the built-in .NET integrations into each language's generated SDK, how codegen works, how the CLI wires up guest runtimes). **This** spec is about the integrations themselves: how an integration authored in any language projects into any consumer's SDK, and how an out-of-process integration host plugs into the same pipeline that scans in-process .NET assemblies.
 
@@ -289,6 +289,8 @@ Crash-loop coverage verifies the three-attempt budget, original runtime diagnost
 
 ## Architecture
 
+### Current implementation
+
 ```mermaid
 flowchart TB
     CLI["<b>Aspire CLI</b><br/>· parses aspire.config.json<br/>· writes server appsettings.json<br/>&nbsp;&nbsp;(AtsAssemblies + IntegrationHosts)<br/>· restores deps (dotnet + npm / ...)<br/>· spawns server<br/>· runs guest AppHost"]
@@ -314,6 +316,52 @@ flowchart TB
 ```
 
 .NET integrations live in an in-process assembly load context the server owns; non-.NET integrations live in dedicated host processes the server owns. Both kinds feed the same Phase 1 gather and are reachable through the same Phase 2 dispatcher. The CLI never touches either — it only manages the server itself.
+
+### Single runtime representation
+
+The architecture depends on having **one representation at the runtime level**, not separate models for each integration language. Today, that representation is the server's C# objects. Managed integrations operate on those objects directly, while guest AppHosts and external integrations use projected APIs and handles to reach the same objects. ATS describes the API surface, but is not yet the runtime object model.
+
+The future model is **an ATS-native runtime representation, backed by core C# primitives but expressed in ATS**. Core contracts must represent types, values, resource identity, relationships, handles, capabilities, and callback semantics without depending on arbitrary CLR objects. The backing C# primitives implement those semantics; their CLR shapes are implementation details, not the cross-language contract.
+
+| | Current implementation | Future model |
+|---|---|---|
+| Shared runtime representation | C# objects | ATS entities and values, backed by core C# primitives |
+| Host access | Direct CLR APIs or generated handle-based APIs | Language projections of the core ATS contracts |
+| Identity and state | Owned by the server's CLR object model | Owned by one ATS runtime model |
+
+**Projections are how hosts use the core APIs; they are not separate runtime models.** C#, TypeScript, and other projections are language-specific facades over the same ATS identities and state. A C# integration host must use the projected contract rather than receive live CLR objects from the server. There is no parallel CLR model to synchronize with an ATS model.
+
+### Future direction: a Native AOT server
+
+An ATS-native runtime representation establishes the boundary needed to AOT-compile the server without rewriting it in another language. Integration-defined runtime shapes can be expressed as ATS data rather than requiring the server to load arbitrary CLR types. The server implements the core ATS contracts using AOT-safe primitives, dispatch, and serialization, and retains ownership of the runtime model and process lifetimes.
+
+```mermaid
+flowchart TB
+    Core["ATS-native core contracts<br/>Types, values, resources, capabilities, callbacks"]
+    Bindings["AOT-safe core bindings<br/>Dispatch and serialization"]
+    CSharpProjection["C# projection of core APIs"]
+    TSProjection["TypeScript projection of core APIs"]
+    CSharpHost["C# integration host<br/>DLL loading, discovery, integration execution"]
+    TSHost["TypeScript integration host<br/>Discovery and integration execution"]
+    Guest["Guest AppHost<br/>Generated consumer SDK"]
+
+    subgraph Server["Native AOT AppHost server"]
+        Dispatch["ATS capability routing<br/>Session and process supervision"]
+        Model["Single ATS runtime model<br/>Backed by core C# primitives"]
+        Dispatch --> Model
+    end
+
+    Core --> Bindings --> Dispatch
+    Core --> CSharpProjection --> CSharpHost
+    Core --> TSProjection --> TSHost
+    Guest <-->|ATS calls and handles| Dispatch
+    CSharpHost <-->|Integration metadata, invocations, projected core calls| Dispatch
+    TSHost <-->|Integration metadata, invocations, projected core calls| Dispatch
+```
+
+Moving C# DLL discovery out of process makes metadata gathering independent of the server's CLR loader, but **discovery isolation alone does not establish this runtime boundary**. Moving today's CLR model into a managed worker would only relocate the existing server; it would not create the ATS-native runtime model described here.
+
+This is an architectural direction, not functionality delivered by this PR. It requires the ATS-native core representation, host projections that consume it, and AOT-safe server implementations. Existing C# integrations do not become remote or AOT-compatible merely by moving their discovery out of process.
 
 ---
 
@@ -366,7 +414,7 @@ This is *the* contract. It is not a translation layer from CLR to RPC — it is 
 - `owningTypeName`
 - `expandedTargetTypes`
 
-For this spike, external integrations reuse existing ATS type IDs (`IDistributedApplicationBuilder`, `ContainerResource`, `string`, `number`) instead of minting new ones. A future iteration will let hosts contribute their own handle and DTO type catalogs.
+In the current implementation, external integrations reuse existing ATS type IDs (`IDistributedApplicationBuilder`, `ContainerResource`, `string`, `number`) instead of minting new ones. A future iteration will let hosts contribute their own handle and DTO type catalogs.
 
 ---
 
