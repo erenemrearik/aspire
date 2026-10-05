@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Aspire.TestUtilities;
@@ -1169,6 +1170,179 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Empty(result["remaining"]!.AsArray());
         Assert.Null(result["stepOutputs"]!["publication_ready"]);
         Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData("package-lock.json", "root-field", false)]
+    [InlineData("npm-shrinkwrap.json", "root-field", false)]
+    [InlineData("package-lock.json", "encoded-root-field", false)]
+    [InlineData("package-lock.json", "package-field", false)]
+    [InlineData("npm-shrinkwrap.json", "package-field", false)]
+    [InlineData("package-lock.json", "root-flag", false)]
+    [InlineData("package-lock.json", "package-lockfile-version", false)]
+    [InlineData("package-lock.json", "misplaced-package", false)]
+    [InlineData("package-lock.json", "misplaced-dependency-map", false)]
+    [InlineData("package-lock.json", "misplaced-requires", false)]
+    [InlineData("package-lock.json", "engine-field", false)]
+    [InlineData("package-lock.json", "duplicate-version", false)]
+    [InlineData("package-lock.json", "metadata-array", false)]
+    [InlineData("package-lock.json", "unchanged-metadata-array", true)]
+    [InlineData("package-lock.json", "dependencies", true)]
+    [InlineData("package-lock.json", "devDependencies", true)]
+    [InlineData("package-lock.json", "optionalDependencies", true)]
+    [InlineData("npm-shrinkwrap.json", "peerDependencies", true)]
+    [InlineData("package-lock.json", "root-metadata", true)]
+    public async Task AgentOutputScrubValidatesJsonDependencyLocations(string basename, string scenario, bool accepted)
+    {
+        var path = $"extension/{basename}";
+        var baseText = PublicTextBase;
+        if (scenario is "metadata-array" or "unchanged-metadata-array")
+        {
+            var baseline = JsonNode.Parse(baseText)!;
+            baseline["metadata"] = new JsonArray(new JsonObject { ["version"] = "1.0.0" });
+            baseText = baseline.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        }
+        var head = JsonNode.Parse(baseText.Replace("4.17.20", "4.17.21", StringComparison.Ordinal).Replace("22.0.0", "22.1.0", StringComparison.Ordinal))!;
+        var package = head["packages"]!["node_modules/lodash"]!;
+        switch (scenario)
+        {
+            case "root-field":
+            case "encoded-root-field":
+                head["alert-42"] = "1.2.3";
+                break;
+            case "package-field":
+                package["alert-42"] = "1.2.3";
+                break;
+            case "root-flag":
+                head["dev"] = true;
+                break;
+            case "package-lockfile-version":
+                package["lockfileVersion"] = 3;
+                break;
+            case "misplaced-package":
+                head["node_modules/alert-42"] = new JsonObject { ["version"] = "1.2.3" };
+                break;
+            case "misplaced-dependency-map":
+                head["dependencies"] = new JsonObject { ["alert-42"] = "1.2.3" };
+                break;
+            case "misplaced-requires":
+                head["requires"] = new JsonObject { ["alert-42"] = "1.2.3" };
+                break;
+            case "engine-field":
+                package["engines"] = new JsonObject { ["alert-42"] = "1.2.3" };
+                break;
+            case "duplicate-version":
+            case "unchanged-metadata-array":
+                break;
+            case "metadata-array":
+                head["metadata"]![0]!["version"] = "42.0.0";
+                break;
+            case "root-metadata":
+                head["lockfileVersion"] = 3;
+                head["requires"] = true;
+                break;
+            default:
+                package[scenario] = new JsonObject { ["@types/node"] = "^22.1.0" };
+                break;
+        }
+        var text = head.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        if (scenario == "encoded-root-field")
+        {
+            text = text.Replace("\"alert-42\"", "\"\\u0061lert-42\"", StringComparison.Ordinal);
+        }
+        else if (scenario == "duplicate-version")
+        {
+            text = text.Replace("\"version\": \"4.17.21\"", "\"version\": \"42.0.0\",\n      \"version\": \"4.17.21\"", StringComparison.Ordinal);
+        }
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = output["body"]!.GetValue<string>().Replace("extension/package-lock.json", path, StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["baseFiles"] = new JsonObject { [path] = baseText },
+            ["generatedPatch"] = new JsonObject
+            {
+                ["headFiles"] = new JsonObject { [path] = text },
+                ["message"] = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21\n@types/node 22.0.0 -> 22.1.0\n",
+            },
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        if (accepted)
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Empty(result["failures"]!.AsArray());
+            Assert.Single(result["outputs"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+            Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
+        }
+        else
+        {
+            Assert.Equal(["aw-auto-sec-security-updates.patch unsupported-lockfile-text"],
+                result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Equal(["auto-sec agent output scrub failed: aw-auto-sec-security-updates.patch unsupported-lockfile-text"],
+                result["failures"]!.AsArray().Select(n => n!.GetValue<string>()));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Empty(result["remaining"]!.AsArray());
+            Assert.Null(result["stepOutputs"]!["publication_ready"]);
+            Assert.Empty(result["publications"]!.AsArray());
+        }
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData("package-lock.json", 1)]
+    [InlineData("package-lock.json", 2)]
+    [InlineData("package-lock.json", 3)]
+    [InlineData("npm-shrinkwrap.json", 1)]
+    [InlineData("npm-shrinkwrap.json", 2)]
+    [InlineData("npm-shrinkwrap.json", 3)]
+    public async Task AgentOutputScrubPreservesRecognizedNpmLockfileVersions(string basename, int version)
+    {
+        var path = $"extension/{basename}";
+        var baseline = new JsonObject { ["lockfileVersion"] = version, ["requires"] = true };
+        if (version <= 2)
+        {
+            baseline["dependencies"] = new JsonObject
+            {
+                ["lodash"] = new JsonObject
+                {
+                    ["version"] = "4.17.20",
+                    ["requires"] = new JsonObject { ["@types/node"] = "^22.0.0" },
+                    ["dependencies"] = new JsonObject { ["@types/node"] = new JsonObject { ["version"] = "22.0.0" } },
+                },
+                ["@types/node"] = new JsonObject { ["version"] = "22.0.0" },
+            };
+        }
+        if (version >= 2)
+        {
+            baseline["packages"] = JsonNode.Parse(PublicTextBase)!["packages"]!.DeepClone();
+        }
+        var baseText = baseline.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = output["body"]!.GetValue<string>().Replace("extension/package-lock.json", path, StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["baseFiles"] = new JsonObject { [path] = baseText },
+            ["generatedPatch"] = new JsonObject
+            {
+                ["headFiles"] = new JsonObject { [path] = baseText.Replace("4.17.20", "4.17.21", StringComparison.Ordinal).Replace("22.0.0", "22.1.0", StringComparison.Ordinal) },
+                ["message"] = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21\n@types/node 22.0.0 -> 22.1.0\n",
+            },
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        Assert.Empty(result["value"]!["violations"]!.AsArray());
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Single(result["outputs"]!.AsArray());
+        Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
     }
 
     [Theory]

@@ -480,6 +480,9 @@ Skip alerts the existing auto-sec PR already fixes.
   new entries: the manifest gate permits only version-token replacements. If a
   fix requires a new override, mark the alert `blocked: update-failed`.
   Keep the registry the lockfile already uses.
+  In JSON lockfiles, add dependency data only inside recognized npm dependency maps
+  or package entries. Do not add arbitrary metadata keys, even when their values
+  look like versions, and do not duplicate JSON properties.
 - **yarn** (`yarn.lock`): use `yarn up <name>@<version> --mode=update-lockfile`
   (Berry) or `yarn upgrade <name>@<version> --ignore-scripts` (classic), whichever
   matches the directory, or update an existing `resolutions` version for transitive

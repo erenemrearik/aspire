@@ -2178,7 +2178,9 @@ function checkPatchContents(patchText, readBaseTexts = () => [], rebuiltFiles = 
         if (isLockfile(path)
             && !addedLines.some(line => PUBLIC_FORBIDDEN_TOKEN.test(line))
             && !addedLines.some(hasLockfileComment)
-            && addedLines.some(line => !isPublicLockfileLine(path, line))) {
+            && (addedLines.some(line => !isPublicLockfileLine(path, line))
+                || (METADATA_LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase())
+                    && head !== null && !isPublicJsonLockfileChanges(normalizedBase, head)))) {
             violations.push({ path, reason: 'unsupported-lockfile-text' });
         }
     }
@@ -2311,6 +2313,104 @@ function isPublicLockfileLine(path, line) {
     return false;
 }
 
+// Changed npm lockfile subtrees must occupy schema-defined locations. For example,
+//   {"packages": {"": {"dependencies": {"lodash": "^4.17.21"}}}}
+// permits a package/version pair, but {"alert-42": "1.2.3"} at the root does not.
+// Unchanged pre-existing metadata is not reclassified; new or edited metadata must
+// satisfy this closed subset of the npm v1/v2/v3 structure.
+// https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json
+function isPublicJsonLockfileChanges(baseText, headText) {
+    const base = readJson(baseText);
+    const head = readJson(headText);
+    const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (!object(base) || !object(head)) {
+        return false;
+    }
+    // JSON.parse keeps only the last duplicate property. An earlier value could then
+    // carry unchecked text in the public patch while the parsed document looks safe.
+    // Tokenize strings atomically so braces and colons inside values are not structure.
+    const tokens = headText.match(/"(?:\\.|[^"\\])*"|[{}[\]:]/g) ?? [];
+    const objects = [];
+    for (let index = 0; index < tokens.length; index++) {
+        const token = tokens[index];
+        if (token === '{' || token === '[') {
+            objects.push(token === '{' ? new Set() : null);
+        } else if (token === '}' || token === ']') {
+            objects.pop();
+        } else if (token.startsWith('"') && tokens[index + 1] === ':') {
+            const keys = objects.at(-1);
+            const key = JSON.parse(token);
+            if (!keys || keys.has(key)) {
+                return false;
+            }
+            keys.add(key);
+        }
+    }
+    const fields = {
+        root: { name: 'name', version: 'version', lockfileVersion: 'lockfileVersion', requires: 'boolean', packages: 'packages', dependencies: 'legacyDependencies' },
+        package: {
+            name: 'name', version: 'version', resolved: 'resolved', integrity: 'integrity',
+            dependencies: 'versions', devDependencies: 'versions', optionalDependencies: 'versions', peerDependencies: 'versions',
+            engines: 'engines', peerDependenciesMeta: 'peerMetadata',
+            dev: 'boolean', optional: 'boolean', devOptional: 'boolean', peer: 'boolean',
+            hasInstallScript: 'boolean', hasShrinkwrap: 'boolean', inBundle: 'boolean', link: 'boolean', bundled: 'boolean',
+        },
+        peerEntry: { optional: 'boolean' },
+    };
+    const childKind = (kind, key) => {
+        switch (kind) {
+            case 'packages': return key === '' || /^(?:node_modules\/(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.+-]*\/?)+$/.test(key) ? 'package' : null;
+            case 'legacyDependencies': return PUBLIC_PACKAGE_NAME.test(key) ? 'legacyPackage' : null;
+            case 'versions': return PUBLIC_PACKAGE_NAME.test(key) ? 'version' : null;
+            case 'engines': return ['node', 'npm', 'yarn', 'pnpm', 'bun', 'deno'].includes(key) ? 'version' : null;
+            case 'peerMetadata': return PUBLIC_PACKAGE_NAME.test(key) ? 'peerEntry' : null;
+            case 'legacyPackage':
+                if (key === 'requires') {
+                    return 'versions';
+                }
+                if (key === 'dependencies') {
+                    return 'legacyDependencies';
+                }
+                kind = 'package';
+                break;
+        }
+        return fields[kind] && Object.hasOwn(fields[kind], key) ? fields[kind][key] : null;
+    };
+    const valid = (kind, value) => {
+        if (kind === 'boolean') {
+            return typeof value === 'boolean';
+        }
+        if (kind === 'lockfileVersion') {
+            return [1, 2, 3].includes(value);
+        }
+        if (kind === 'version') {
+            return isPublicLockfileVersion(value);
+        }
+        if (['name', 'resolved', 'integrity'].includes(kind)) {
+            return typeof value === 'string' && isPublicJsonLockfileLine(JSON.stringify({ [kind]: value }).slice(1, -1));
+        }
+        return kind !== null && object(value)
+            && Object.entries(value).every(([key, child]) => valid(childKind(kind, key), child));
+    };
+    return jsonDifferencePaths(base, head).every(keys => {
+        let kind = 'root';
+        let value = head;
+        for (const key of keys) {
+            if (!object(value)) {
+                return false;
+            }
+            if (!Object.hasOwn(value, key)) {
+                // Removed values add no public text.
+                return true;
+            }
+            kind = childKind(kind, key);
+            value = value[key];
+        }
+        return valid(kind, value);
+    });
+}
+
+// This is a lexical filter; isPublicJsonLockfileChanges authorizes field locations.
 // npm's pretty-printed lockfiles contain structural lines and typed dependency data:
 //   "node_modules/lodash": {    "version": "4.17.21",    "integrity": "sha512-<base64>"
 // Do not accept arbitrary metadata ("note": "alert 42: prototype pollution") merely

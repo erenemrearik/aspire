@@ -115,8 +115,11 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   Code-writing requests are mutually exclusive, and version policy is checked
   separately for each patch artifact so overlapping paths cannot hide an update.
   All lockfile additions accept only recognized dependency-data syntax, not new
-  free-text metadata. New override/resolution entries and unsupported lockfile
-  metadata require human intervention and are reported as `update-failed`.
+  free-text metadata. JSON additions also require schema-defined locations in the
+  reconstructed npm lockfile, not merely package/version-shaped keys; duplicate
+  properties are rejected because parsing would discard earlier values. Unchanged
+  pre-existing metadata is preserved. New override/resolution entries and unsupported
+  lockfile metadata require human intervention and are reported as `update-failed`.
   Compound npm selector edits also require human intervention: reducing `>=1 <2`
   to its first bound cannot prove changes to the other bounds non-breaking.
   Public summary rows are bound to reconstructed manifest/package/version changes,
