@@ -94,7 +94,13 @@ internal static class PackageSourceOverrideMappings
             mappings.Add(new PackageMapping(PackageMapping.AllPackages, fallbackSource));
         }
 
-        return [.. mappings.DistinctBy(static mapping => $"{mapping.PackageFilter}\0{mapping.Source}")];
+        // Equivalent mappings must not select different isolated restore caches. Preserve the
+        // first source spelling, but deduplicate using the same identity as alias resolution.
+        return
+        [
+            .. mappings.DistinctBy(static mapping =>
+                (mapping.PackageFilter.ToUpperInvariant(), PackageSourceIdentity.Normalize(mapping.Source)))
+        ];
     }
 
     internal static string GetEffectivePackagePattern(string? packagePattern)

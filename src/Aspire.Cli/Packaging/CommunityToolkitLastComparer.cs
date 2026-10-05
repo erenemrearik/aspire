@@ -3,7 +3,11 @@
 
 namespace Aspire.Cli.Packaging;
 
-internal sealed class CommunityToolkitFirstComparer : IComparer<string>
+/// <summary>
+/// Orders integration names case-insensitively within groups, placing CommunityToolkit names last in ascending order.
+/// Descending order reverses both the group priority and the alphabetical order.
+/// </summary>
+internal sealed class CommunityToolkitLastComparer : IComparer<string>
 {
     public int Compare(string? x, string? y)
     {

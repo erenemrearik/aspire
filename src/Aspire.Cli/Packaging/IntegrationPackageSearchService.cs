@@ -238,7 +238,7 @@ internal sealed class IntegrationPackageSearchService(
             .Select(p => (p.FriendlyName, p.Package, p.Channel, SearchScore: GetIntegrationSearchScore(searchTerm, p)))
             .Where(p => p.SearchScore > FuzzyMatchThreshold)
             .OrderByDescending(p => p.SearchScore)
-            .ThenByDescending(p => p.FriendlyName, new CommunityToolkitFirstComparer());
+            .ThenByDescending(p => p.FriendlyName, new CommunityToolkitLastComparer());
     }
 
     public static (string FriendlyName, NuGetPackage Package, PackageChannel Channel, double SearchScore) SelectPreferredIntegrationPackage(IEnumerable<(string FriendlyName, NuGetPackage Package, PackageChannel Channel, double SearchScore)> packages)

@@ -3,6 +3,7 @@
 
 using System.Xml.Linq;
 using Aspire.Cli.Packaging;
+using NuGet.Configuration;
 
 namespace Aspire.Cli.Tests.Packaging;
 
@@ -78,6 +79,15 @@ public class TemporaryNuGetConfigTests
             "https://example.com/feed/index.json"
         ],
             sources);
+
+        var settings = Settings.LoadSpecificSettings(config.ConfigFile.DirectoryName!, config.ConfigFile.Name);
+        var nativeMapping = PackageSourceMapping.GetPackageSourceMapping(settings);
+
+        Assert.Equal(
+            sources,
+            new PackageSourceProvider(settings).LoadPackageSources().Select(source => source.Source));
+        Assert.Equal(["aspire-0"], nativeMapping.GetConfiguredPackageSources("Upper.Example"));
+        Assert.Equal(["aspire-1"], nativeMapping.GetConfiguredPackageSources("Lower.Example"));
     }
 
     [Fact]

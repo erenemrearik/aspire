@@ -80,9 +80,17 @@ public class NuGetPackageOperationConfigurationTests(ITestOutputHelper outputHel
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SourceOverridePreservesSelectedAliasCredentialsAndTransportSettings(bool disabled)
+    [InlineData(false, "http://example.test/private/v3/index.json")]
+    [InlineData(true, "http://example.test/private/v3/index.json")]
+    [InlineData(false, "HTTP://EXAMPLE.TEST/private/v3/index.json")]
+    [InlineData(true, "HTTP://EXAMPLE.TEST/private/v3/index.json")]
+    [InlineData(false, "http://example.test:80/private/v3/index.json")]
+    [InlineData(true, "http://example.test:80/private/v3/index.json")]
+    [InlineData(false, "http://example.test/private/./v3/index.json")]
+    [InlineData(true, "http://example.test/private/./v3/index.json")]
+    [InlineData(false, "http://example.test/private/v3/%69ndex.json")]
+    [InlineData(true, "http://example.test/private/v3/%69ndex.json")]
+    public async Task SourceOverridePreservesSelectedAliasCredentialsAndTransportSettings(bool disabled, string sourceOverride)
     {
         const string sourceUrl = "http://example.test/private/v3/index.json";
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
@@ -127,7 +135,7 @@ public class NuGetPackageOperationConfigurationTests(ITestOutputHelper outputHel
 
         using var configuration = await CreateService().CreatePackageOperationConfigurationAsync(
             workspace.WorkspaceRoot,
-            PackageSourceOverrideMappings.CreateForSourceOnlyOperations(sourceUrl),
+            PackageSourceOverrideMappings.CreateForSourceOnlyOperations(sourceOverride),
             restrictToSelectedSources: true,
             TestContext.Current.CancellationToken);
 

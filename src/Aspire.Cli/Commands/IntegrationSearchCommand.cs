@@ -98,7 +98,7 @@ internal abstract class IntegrationDiscoveryCommand : BaseCommand
 
             var packagesWithShortName = packagesWithChannels
                 .Select(IntegrationPackageSearchService.GenerateFriendlyName)
-                .OrderBy(p => p.FriendlyName, new CommunityToolkitFirstComparer())
+                .OrderBy(p => p.FriendlyName, new CommunityToolkitLastComparer())
                 .ToArray();
 
             var polyglotFilterRemovedAllIntegrations = false;
@@ -155,7 +155,7 @@ internal abstract class IntegrationDiscoveryCommand : BaseCommand
             .Select(IntegrationPackageSearchService.SelectPreferredIntegrationPackage);
 
         var orderedMatches = searchTerm is null
-            ? matches.OrderBy(p => p.FriendlyName, new CommunityToolkitFirstComparer()).ThenBy(p => p.Package.Id, StringComparer.OrdinalIgnoreCase)
+            ? matches.OrderBy(p => p.FriendlyName, new CommunityToolkitLastComparer()).ThenBy(p => p.Package.Id, StringComparer.OrdinalIgnoreCase)
             : matches;
 
         var results = orderedMatches
