@@ -730,6 +730,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     private const string PublicTextBase = "{\n  \"packages\": {\n    \"node_modules/lodash\": {\n      \"version\": \"4.17.20\",\n      \"dev\": true\n    },\n\n\n    \"node_modules/@types/node\": {\n      \"version\": \"22.0.0\",\n      \"dev\": true\n    }\n  }\n}\n";
 
+    // Preserve mbox's "-- " signature separator without trailing source whitespace.
     private static string PublicTextPatch => """
         From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001
         From: "github-actions[bot]" <github-actions[bot]@users.noreply.github.com>
@@ -756,10 +757,12 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         -      "version": "22.0.0",
         +      "version": "22.1.0",
                "dev": true
-        -- 
+        --
         2.43.0
 
-        """.Replace("index 1111111..", $"index {GitBlobId(PublicTextBase)[..7]}..", StringComparison.Ordinal);
+        """.ReplaceLineEndings("\n")
+        .Replace("\n--\n", "\n-- \n", StringComparison.Ordinal)
+        .Replace("index 1111111..", $"index {GitBlobId(PublicTextBase)[..7]}..", StringComparison.Ordinal);
 
     private const string PublicTextBody = """
         This is an automated pull request created by the auto-sec workflow.

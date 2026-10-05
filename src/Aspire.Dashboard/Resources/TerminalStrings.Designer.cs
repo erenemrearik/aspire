@@ -121,6 +121,40 @@ namespace Aspire.Dashboard.Resources {
             get {
                 return ResourceManager.GetString("TerminalTitle", resourceCulture);
             }
+
+        }
+
+        public static string TerminalsPageTitle {
+            get {
+                return ResourceManager.GetString("TerminalsPageTitle", resourceCulture);
+            }
+        }
+
+        public static string TerminalsHeader {
+            get {
+                return ResourceManager.GetString("TerminalsHeader", resourceCulture);
+            }
+        }
+
+        public static string TerminalsSelectResourceToolbar {
+            get {
+                return ResourceManager.GetString("TerminalsSelectResourceToolbar", resourceCulture);
+            }
+        }
+
+        public static string TerminalsSettings {
+            get {
+                return ResourceManager.GetString("TerminalsSettings", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Select a resource to view its terminal.
+        /// </summary>
+        public static string TerminalsSelectAResource {
+            get {
+                return ResourceManager.GetString("TerminalsSelectAResource", resourceCulture);
+            }
         }
 
         public static string TerminalToolbarDecreaseFontSize {
@@ -207,9 +241,9 @@ namespace Aspire.Dashboard.Resources {
             }
         }
 
-        public static string TerminalFocusControlsHint {
+        public static string TerminalFocusControlsDescription {
             get {
-                return ResourceManager.GetString("TerminalFocusControlsHint", resourceCulture);
+                return ResourceManager.GetString("TerminalFocusControlsDescription", resourceCulture);
             }
         }
 

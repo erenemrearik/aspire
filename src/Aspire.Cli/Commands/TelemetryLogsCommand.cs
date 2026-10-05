@@ -193,7 +193,7 @@ internal sealed class TelemetryLogsCommand : BaseCommand
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream);
 
-        await foreach (var line in reader.ReadLinesAsync(cancellationToken))
+        await foreach (var line in reader.ReadLinesWithDisconnectHandlingAsync(_interactionService, cancellationToken))
         {
             if (format == OutputFormat.Json)
             {

@@ -118,9 +118,9 @@
     <PackageVersion Include="Grpc.Tools" Version="2.83.0" />
     <!-- Keep compatible with @hex1b/web-terminal in src/Aspire.Dashboard/package.json.
          Native-only Hex1b builds can differ without changing the web terminal package. -->
-    <PackageVersion Include="Hex1b" Version="0.171.0" />
-    <PackageVersion Include="Hex1b.McpServer" Version="0.171.0" />
-    <PackageVersion Include="Hex1b.Tool" Version="0.171.0" />
+    <PackageVersion Include="Hex1b" Version="0.172.0" />
+    <PackageVersion Include="Hex1b.McpServer" Version="0.172.0" />
+    <PackageVersion Include="Hex1b.Tool" Version="0.172.0" />
     <PackageVersion Include="Humanizer.Core" Version="3.0.10" />
     <PackageVersion Include="KubernetesClient" Version="19.0.2" />
     <PackageVersion Include="Markdig" Version="1.3.2" />
@@ -327,6 +327,9 @@
     <PackageVersion Update="Microsoft.AspNetCore.TestHost" Version="$(MicrosoftAspNetCoreTestHostNet11Version)" />
     <PackageVersion Update="Microsoft.Extensions.Caching.Memory" Version="$(MicrosoftExtensionsCachingMemoryNet11Version)" />
     <PackageVersion Update="Microsoft.Extensions.Configuration.Binder" Version="$(MicrosoftExtensionsConfigurationBinderNet11Version)" />
+    <PackageVersion Update="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="$(MicrosoftExtensionsConfigurationEnvironmentVariablesNet11Version)" />
+    <PackageVersion Update="Microsoft.Extensions.FileSystemGlobbing" Version="$(MicrosoftExtensionsFileSystemGlobbingNet11Version)" />
+    <PackageVersion Update="Microsoft.Extensions.Features" Version="$(MicrosoftExtensionsFeaturesNet11Version)" />
     <PackageVersion Update="Microsoft.Extensions.Http" Version="$(MicrosoftExtensionsHttpNet11Version)" />
     <PackageVersion Update="Microsoft.Extensions.Logging" Version="$(MicrosoftExtensionsLoggingNet11Version)" />
   </ItemGroup>
