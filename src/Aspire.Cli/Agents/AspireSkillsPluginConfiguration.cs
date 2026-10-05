@@ -18,7 +18,7 @@ internal static class AspireSkillsPluginConfiguration
 
     public static AgentConfigurationEdit Apply(JsonObject root, IReadOnlyList<JsonObject> settings)
     {
-        JsonObject? pinnedSource = null;
+        JsonObject? selectedSource = null;
         foreach (var config in settings.Append(root))
         {
             var plugins = AgentConfigurationJson.OptionalObject(config, "enabledPlugins");
@@ -41,32 +41,30 @@ internal static class AspireSkillsPluginConfiguration
                     return AgentConfigurationEdit.Blocked(AgentCommandStrings.Configuration_Conflict);
                 }
 
-                // In particular, do not shadow a user's release/commit pin by adding an
-                // unpinned project marketplace. Keep the source object exactly as declared.
-                if (source.ContainsKey("ref") || source.ContainsKey("sha") || pinnedSource is null)
+                // Keep inherited release/commit pins unless the destination declares its own source.
+                if (ReferenceEquals(config, root) || source.ContainsKey("ref") || source.ContainsKey("sha") || selectedSource is null)
                 {
-                    pinnedSource = source;
+                    selectedSource = source;
                 }
             }
         }
 
-        var targetMarketplaces = AgentConfigurationJson.OptionalObject(root, "extraKnownMarketplaces");
-        var desiredSource = targetMarketplaces?[MarketplaceName]?["source"]?.AsObject() ?? pinnedSource ?? new JsonObject
+        selectedSource ??= new JsonObject
         {
             ["source"] = "github",
             ["repo"] = Repository
         };
-        if (settings.Append(root).Any(config => HasMarketplacePolicyConflict(config, desiredSource)))
+        if (settings.Append(root).Any(config => HasMarketplacePolicyConflict(config, selectedSource)))
         {
             return AgentConfigurationEdit.Blocked(AgentCommandStrings.Configuration_PolicyBlocked);
         }
 
-        targetMarketplaces ??= AgentConfigurationJson.Object(root, "extraKnownMarketplaces");
+        var targetMarketplaces = AgentConfigurationJson.Object(root, "extraKnownMarketplaces");
         if (!targetMarketplaces.ContainsKey(MarketplaceName))
         {
             targetMarketplaces[MarketplaceName] = new JsonObject
             {
-                ["source"] = desiredSource.DeepClone()
+                ["source"] = selectedSource.DeepClone()
             };
         }
 

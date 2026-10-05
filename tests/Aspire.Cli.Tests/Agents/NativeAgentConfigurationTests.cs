@@ -232,10 +232,14 @@ public class NativeAgentConfigurationTests(ITestOutputHelper output) : IDisposab
         Assert.Equal(policy, await File.ReadAllTextAsync(managed));
     }
 
-    [Fact]
-    public async Task Claude_StrictMarketplacePolicyChecksTheDestinationSourceRatherThanAnInheritedPin()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Claude_StrictMarketplacePolicyChecksTheDestinationSourceRatherThanAnInheritedPin(bool pinnedDestination)
     {
-        const string source = """{"source":"github","repo":"microsoft/aspire-skills","ref":"approved-release"}""";
+        var source = pinnedDestination
+            ? """{"source":"github","repo":"microsoft/aspire-skills","ref":"approved-release"}"""
+            : """{"source":"github","repo":"microsoft/aspire-skills"}""";
         await AgentConfigurationTestContext.WriteAsync(Path.Combine(_context.ClaudeManagedDirectory, "managed-settings.json"),
             $$"""{"strictKnownMarketplaces":[{{source}}]}""");
         var user = Path.Combine(_context.ClaudeDirectory, "settings.json");

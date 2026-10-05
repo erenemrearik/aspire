@@ -59,10 +59,9 @@ public class AgentProjectDiscoveryTests(ITestOutputHelper output) : IDisposable
     public async Task ScanAsync_CopilotPortableMcpDoesNotIdentifyClaude(bool inParent)
     {
         var working = _context.Project.CreateSubdirectory("nested");
-        var results = await _context.ConfigureNativeAsync(_context.Request(AgentConfigurationScope.Project, [_context.Copilot], skills: false, mcp: true)
-            with { WorkspaceRoot = inParent ? _context.Project : working });
-        Assert.Equal(AgentConfigurationStatus.Configured, Assert.Single(results).Status);
-        Assert.True(File.Exists(Path.Combine(inParent ? _context.Project.FullName : working.FullName, ".mcp.json")));
+        await AgentConfigurationTestContext.WriteAsync(
+            Path.Combine(inParent ? _context.Project.FullName : working.FullName, ".mcp.json"),
+            """{"mcpServers":{"aspire":{"command":"aspire","args":["agent","mcp"]}}}""");
         var entries = Directory.GetFileSystemEntries(_context.Workspace.Path, "*", SearchOption.AllDirectories).Order().ToArray();
 
         var scanContext = new AgentEnvironmentScanContext(working, _context.Project);

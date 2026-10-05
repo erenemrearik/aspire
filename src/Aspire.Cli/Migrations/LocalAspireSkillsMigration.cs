@@ -26,8 +26,8 @@ internal sealed class LocalAspireSkillsMigration(
     public async Task<MigrationDescriptor?> DetectAsync(MigrationContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var root = GetWorkspaceRoot(context);
         var workingDirectory = context.AppHostFile?.Directory ?? executionContext.WorkingDirectory;
+        var root = GetWorkspaceRoot(workingDirectory);
 
         var scan = await LocalAspireSkills.FindAsync(workingDirectory, root, agents, executionContext, environment, cancellationToken);
         if (scan.Files.Count == 0 && scan.Errors.Count == 0)
@@ -57,8 +57,8 @@ internal sealed class LocalAspireSkillsMigration(
     public async Task ApplyAsync(MigrationContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var root = GetWorkspaceRoot(context);
         var workingDirectory = context.AppHostFile?.Directory ?? executionContext.WorkingDirectory;
+        var root = GetWorkspaceRoot(workingDirectory);
 
         // Re-detect after the update confirmation; files can disappear or change meanwhile.
         // The old installer supplied no version/ownership marker. Neither a skill name nor
@@ -86,9 +86,8 @@ internal sealed class LocalAspireSkillsMigration(
         }
     }
 
-    private DirectoryInfo GetWorkspaceRoot(MigrationContext context)
+    private DirectoryInfo GetWorkspaceRoot(DirectoryInfo start)
     {
-        var start = context.AppHostFile?.Directory ?? executionContext.WorkingDirectory;
         DirectoryInfo? solutionRoot = null;
 
         // Resolve from the selected AppHost, not a different repository containing the CLI's
