@@ -2457,6 +2457,121 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             guarded[guarded.IndexOf("  other_job:", StringComparison.Ordinal)..]);
     }
 
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task CallHarnessAwaitsAsyncGateResults()
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "checkPatchVersionPolicy",
+            ["args"] = new JsonArray(new JsonArray()),
+        });
+
+        Assert.Empty(result["value"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("\n", "      - run: echo future")]
+    [InlineData("\r\n", "      - run: echo future")]
+    [InlineData("\n", "      - name: Print firewall logs")]
+    [InlineData("\r\n", "      - name: Print firewall logs")]
+    public async Task PublicationGuardHandlesTerminalSingleLineSteps(string newline, string terminal)
+    {
+        var workflow = PublicationGuardFixture.ReplaceLineEndings("\n");
+        workflow = (workflow[..workflow.IndexOf("  other_job:", StringComparison.Ordinal)].TrimEnd('\n')
+            + "\n" + terminal).ReplaceLineEndings(newline);
+        var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
+
+        Assert.Null(result["error"]);
+        var guarded = result["value"]!.GetValue<string>();
+        Assert.Equal(guarded, result["repeated"]!.GetValue<string>());
+        AssertPublicationGuards(guarded);
+        AssertSafeUploadPaths(guarded);
+        if (terminal.Contains("name:", StringComparison.Ordinal))
+        {
+            Assert.Equal("echo \"Auto-sec withholds agent-writable telemetry.\"",
+                PublicationSteps(guarded).Last().Children[new YamlScalarNode("run")].ToString());
+        }
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("\n", false)]
+    [InlineData("\r\n", false)]
+    [InlineData("\n", true)]
+    [InlineData("\r\n", true)]
+    public async Task PublicationGuardRewritesUploadPathAtEndOfFile(string newline, bool blankLine)
+    {
+        var workflow = PublicationGuardFixture.ReplaceLineEndings("\n");
+        if (blankLine)
+        {
+            workflow = workflow.Replace("            /tmp/gh-aw/aw-prompts/prompt.txt", "\n            /tmp/gh-aw/aw-prompts/prompt.txt", StringComparison.Ordinal);
+        }
+        workflow = workflow[..workflow.IndexOf("  other_job:", StringComparison.Ordinal)].TrimEnd('\n').ReplaceLineEndings(newline);
+        var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
+
+        var guarded = result["value"]!.GetValue<string>();
+        Assert.Equal(guarded, result["repeated"]!.GetValue<string>());
+        AssertPublicationGuards(guarded);
+        AssertSafeUploadPaths(guarded);
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task PublicationGuardInsertsConditionAfterHeaderWithMixedNewlines()
+    {
+        var workflow = PublicationGuardFixture.ReplaceLineEndings("\n").Replace(
+            "        run: echo future\n",
+            "        run: |\n          echo first\r\n          echo second\n",
+            StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
+
+        var guarded = result["value"]!.GetValue<string>();
+        Assert.Equal(guarded, result["repeated"]!.GetValue<string>());
+        AssertPublicationGuards(guarded);
+        var step = Assert.Single(PublicationSteps(guarded),
+            step => step.Children[new YamlScalarNode("name")].ToString() == "Future publication");
+        Assert.Equal("echo first\necho second\n", step.Children[new YamlScalarNode("run")].ToString().ReplaceLineEndings("\n"));
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("\n", true)]
+    [InlineData("\n", false)]
+    [InlineData("\r\n", true)]
+    [InlineData("\r\n", false)]
+    public async Task PublicationGuardReplacesEveryTelemetryConsumer(string newline, bool conditional)
+    {
+        var workflow = PublicationGuardFixture.ReplaceLineEndings("\n");
+        var telemetry = string.Concat(s_privateTelemetryStepNames.Select((name, index) =>
+            $"      - name: {name}\n        id: private_telemetry_{index}\n"
+            + (conditional ? "        if: always()\n" : "")
+            + "        uses: actions/github-script@example\n        env:\n          INPUT_PATH: /tmp/private-input\n"
+            + "        with:\n          script: |\n            console.log('untrusted telemetry');\n"));
+        workflow = workflow.Replace(
+            "      - name: Append agent step summary\n        if: always()\n        run: echo summary\n",
+            telemetry, StringComparison.Ordinal).ReplaceLineEndings(newline);
+        var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
+
+        var guarded = result["value"]!.GetValue<string>();
+        Assert.Equal(guarded, result["repeated"]!.GetValue<string>());
+        AssertPublicationGuards(guarded);
+        var steps = PublicationSteps(guarded);
+        for (var i = 0; i < s_privateTelemetryStepNames.Length; i++)
+        {
+            var step = Assert.Single(steps, step => step.Children[new YamlScalarNode("name")].ToString() == s_privateTelemetryStepNames[i]);
+            Assert.Equal(["id", "if", "name", "run"], step.Children.Keys.Select(key => key.ToString()).Order(StringComparer.Ordinal));
+            Assert.Equal($"private_telemetry_{i}", step.Children[new YamlScalarNode("id")].ToString());
+            Assert.Equal(conditional
+                ? "(always()) && steps.auto_sec_scrub.outcome == 'success' && steps.auto_sec_scrub.outputs.publication_ready == 'true'"
+                : "(success()) && steps.auto_sec_scrub.outcome == 'success' && steps.auto_sec_scrub.outputs.publication_ready == 'true'",
+                step.Children[new YamlScalarNode("if")].ToString());
+            Assert.Equal("echo \"Auto-sec withholds agent-writable telemetry.\"", step.Children[new YamlScalarNode("run")].ToString());
+        }
+    }
+
     [Theory]
     [RequiresTools(["node"])]
     [InlineData("missing-agent")]
@@ -2465,6 +2580,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("publication-before-scrub")]
     [InlineData("missing-upload")]
     [InlineData("missing-upload-path")]
+    [InlineData("duplicate-condition")]
+    [InlineData("empty-condition")]
     public async Task PublicationGuardRejectsUnexpectedCompilerLayout(string scenario)
     {
         var workflow = PublicationGuardFixture.ReplaceLineEndings("\n");
@@ -2477,10 +2594,21 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 .Replace("name: Append agent step summary\n        if: always()", "name: Renamed summary\n        if: always()", StringComparison.Ordinal),
             "missing-upload" => workflow.Replace("name: Upload agent artifacts", "name: Renamed upload", StringComparison.Ordinal),
             "missing-upload-path" => workflow.Replace("          path: |", "          renamed-path: |", StringComparison.Ordinal),
+            "duplicate-condition" => workflow.Replace("      - name: Future publication\n",
+                "      - name: Future publication\n        if: always()\n        if: success()\n", StringComparison.Ordinal),
+            "empty-condition" => workflow.Replace("      - name: Future publication\n",
+                "      - name: Future publication\n        if:\n", StringComparison.Ordinal),
             _ => throw new InvalidOperationException(),
         };
         var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
-        Assert.StartsWith("auto-sec publication guard:", result["error"]!.GetValue<string>());
+        if (scenario is "duplicate-condition" or "empty-condition")
+        {
+            Assert.Equal("auto-sec publication guard: expected one guarded step condition", result["error"]!.GetValue<string>());
+        }
+        else
+        {
+            Assert.StartsWith("auto-sec publication guard:", result["error"]!.GetValue<string>());
+        }
     }
 
     private const string PublicationGuardFixture = """
@@ -2544,18 +2672,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [Fact]
     public void CompiledTelemetryConsumersReportWithholdingWithoutReadingFiles()
     {
-        string[] names =
-        [
-            "Append agent step summary",
-            "Parse agent logs for step summary",
-            "Parse MCP Gateway logs for step summary",
-            "Print firewall logs",
-            "Parse token usage for step summary",
-            "Print AWF reflect summary",
-            "Generate observability summary",
-        ];
         var steps = PublicationSteps(File.ReadAllText(Path.Combine(RepoRoot.Path, ".github", "workflows", "auto-sec.lock.yml")));
-        foreach (var name in names)
+        foreach (var name in s_privateTelemetryStepNames)
         {
             var step = Assert.Single(steps, step => step.Children[new YamlScalarNode("name")].ToString() == name);
             Assert.Equal("echo \"Auto-sec withholds agent-writable telemetry.\"", step.Children[new YamlScalarNode("run")].ToString());
@@ -2564,6 +2682,17 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             Assert.False(step.Children.ContainsKey(new YamlScalarNode("with")));
         }
     }
+
+    private static readonly string[] s_privateTelemetryStepNames =
+    [
+        "Append agent step summary",
+        "Parse agent logs for step summary",
+        "Parse MCP Gateway logs for step summary",
+        "Print firewall logs",
+        "Parse token usage for step summary",
+        "Print AWF reflect summary",
+        "Generate observability summary",
+    ];
 
     private static void AssertSafeUploadPaths(string workflow)
     {

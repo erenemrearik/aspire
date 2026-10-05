@@ -175,7 +175,7 @@ async function main() {
 
     switch (request.mode) {
         case 'call': {
-            const value = gate[request.fn](...request.args.map(reviveDates));
+            const value = await gate[request.fn](...request.args.map(reviveDates));
             result = { value: value instanceof Set ? [...value].sort() : value };
             break;
         }

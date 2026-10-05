@@ -47,23 +47,29 @@ function guardPublications(workflow) {
     // summary or upload must not bypass the boundary on a compiler upgrade.
     for (const step of steps.slice(scrubIndex + 1).reverse()) {
         const condition = /^        if: ([^\r\n]+)\r?$/m.exec(step[0]);
+        const newline = /\r?\n/.exec(step[0])?.[0] ?? (job[0].startsWith('  agent:\r\n') ? '\r\n' : '\n');
         let guardedStep = step[0];
         if (condition) {
             if (!condition[1].endsWith(` && ${PUBLICATION_GUARD}`)) {
                 guardedStep = guardedStep.replace(condition[0], `        if: (${condition[1]}) && ${PUBLICATION_GUARD}${condition[0].endsWith('\r') ? '\r' : ''}`);
             }
         } else {
-            const newline = step[0].includes('\r\n') ? '\r\n' : '\n';
-            guardedStep = step[0].replace(newline, `${newline}        if: (success()) && ${PUBLICATION_GUARD}${newline}`);
+            // Insert after the header, including a one-line step at EOF. Searching
+            // for any newline can instead insert into a mixed-newline script body.
+            guardedStep = step[0].replace(/^([^\r\n]+)(?:\r?\n|$)/,
+                `$1${newline}        if: (success()) && ${PUBLICATION_GUARD}${newline}`);
+        }
+        const guardedConditions = [...guardedStep.matchAll(/^        if:([^\r\n]*)\r?$/gm)];
+        const guardedCondition = guardedConditions[0]?.[1].trim();
+        if (guardedConditions.length !== 1 || !guardedCondition?.endsWith(` && ${PUBLICATION_GUARD}`)) {
+            throw new Error('auto-sec publication guard: expected one guarded step condition');
         }
         const name = /^      - name: ([^\r\n]+)\r?$/m.exec(step[0])?.[1];
         if (PRIVATE_TELEMETRY_STEPS.has(name)) {
             // Deleted telemetry must not become fabricated zero metrics, nor should
             // framework summaries read agent-writable files outside the artifact root.
             // https://github.com/github/gh-aw/blob/v0.89.17/actions/setup/js/generate_observability_summary.cjs
-            const newline = step[0].includes('\r\n') ? '\r\n' : '\n';
             const id = /^        id: ([^\r\n]+)\r?$/m.exec(step[0])?.[1];
-            const guardedCondition = /^        if: ([^\r\n]+)\r?$/m.exec(guardedStep)[1];
             guardedStep = `      - name: ${name}${newline}${id ? `        id: ${id}${newline}` : ''}`
                 + `        if: ${guardedCondition}${newline}        run: echo "Auto-sec withholds agent-writable telemetry."${newline}`;
         }
@@ -71,11 +77,14 @@ function guardPublications(workflow) {
             // The generic compiler upload includes writable prompts, telemetry and logs.
             // Publish only scrubbed outputs and the two authenticated patch filenames.
             const paths = SAFE_OUTPUT_PATHS.concat(step[0].startsWith('      - name: Upload agent artifacts') ? SAFE_PATCH_PATHS : []);
-            const pathBlock = /^          path: \|\r?\n(?:            [^\r\n]*\r?\n)+/m;
+            // Literal scalars can contain unindented blank lines and end at EOF:
+            //   path: |\n            /tmp/output\n\n            /tmp/private
+            // Consume the complete scalar so a trailing path cannot survive.
+            // https://yaml.org/spec/1.2.2/#812-literal-style
+            const pathBlock = /^          path: \|\r?\n(?=            )(?:            [^\r\n]*(?:\r?\n|(?![\s\S]))|[ \t]*\r?\n)+/m;
             if (!pathBlock.test(guardedStep)) {
                 throw new Error('auto-sec publication guard: expected upload path block');
             }
-            const newline = step[0].includes('\r\n') ? '\r\n' : '\n';
             guardedStep = guardedStep.replace(pathBlock, `          path: |${newline}${paths.map(file => `            ${file}${newline}`).join('')}`);
         }
         guardedJob = guardedJob.slice(0, step.index) + guardedStep + guardedJob.slice(step.index + step[0].length);

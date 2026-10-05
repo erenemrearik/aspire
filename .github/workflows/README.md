@@ -16,6 +16,10 @@ gh aw compile
 node .github/workflows/auto-sec/publication-guard.js
 ```
 
+Each compilation replaces `auto-sec.lock.yml` with raw compiler output, so run
+`publication-guard.js` after every compile pass. Compare the hardened outputs of
+both passes to check that the complete generation sequence is idempotent.
+
 `gh aw fix` is a dry run unless `--write` is supplied. Its write mode also refreshes
 authoring agents and skills; apply source migrations deliberately rather than
 adding unrelated scaffolding. Keep the pinned `setup-cli` action and its `version`
