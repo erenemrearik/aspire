@@ -242,8 +242,8 @@ jobs:
             polyglot-rust
 
   validate_typescript:
-    name: TypeScript SDK Validation
-    if: ${{ github.repository == 'microsoft/aspire' }} (Node ${{ matrix.node-version }}.x)
+    name: TypeScript SDK Validation (Node ${{ matrix.node-version }}.x)
+    if: ${{ github.repository == 'microsoft/aspire' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
