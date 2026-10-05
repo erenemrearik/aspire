@@ -12,6 +12,9 @@
       }
     }
   },
+  "features": {
+    "experimentalHostingIntegrations": true
+  },
   "packages": {
     "Aspire.Hosting.Redis": "",
     "@spike/aspire-kafka": {

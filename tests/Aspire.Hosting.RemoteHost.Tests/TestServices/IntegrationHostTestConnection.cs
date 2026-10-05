@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Nerdbank.Streams;
 using StreamJsonRpc;
@@ -64,7 +65,12 @@ internal sealed class IntegrationHostTestConnection : IDisposable
 
     public JsonRpc ServerRpc { get; }
     public string? LastInvocationId { get; private set; }
-    public JsonRpcCallbackInvoker CallbackInvoker { get; } = new(NullLogger<JsonRpcCallbackInvoker>.Instance);
+    public JsonRpcCallbackInvoker CallbackInvoker { get; } = new(
+        NullLogger<JsonRpcCallbackInvoker>.Instance,
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ASPIRE_INTEGRATION_HOSTS_ENABLED"] = "true"
+        }).Build());
 
     public void Dispose()
     {

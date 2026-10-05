@@ -31,6 +31,9 @@ Add these entries to `aspire.config.json`, keeping the AppHost's other packages:
 
 ```json
 {
+  "features": {
+    "experimentalHostingIntegrations": true
+  },
   "packages": {
     "Aspire.Hosting.JavaScript": "",
     "@aspire/nuxt": {
@@ -41,7 +44,7 @@ Add these entries to `aspire.config.json`, keeping the AppHost's other packages:
 }
 ```
 
-Run `aspire restore` to discover the integration and regenerate the consumer SDK. Registry-name resolution through `aspire add` is not implemented for npm hosts yet; the explicit installed entry-point path is required.
+Run `aspire restore` to discover the integration and regenerate the consumer SDK. External hosting integrations are disabled by default; the feature setting above opts this AppHost in. Registry-name resolution through `aspire add` is not implemented for npm hosts yet; the explicit installed entry-point path is required.
 
 ## Usage example
 

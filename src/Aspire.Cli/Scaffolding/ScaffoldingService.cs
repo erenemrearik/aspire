@@ -47,6 +47,7 @@ internal sealed class ScaffoldingService : IScaffoldingService
     private readonly ILogger<ScaffoldingService> _logger;
     private readonly CliExecutionContext _executionContext;
     private readonly ProfilingTelemetry _profilingTelemetry;
+    private readonly IFeatures _features;
 
     public ScaffoldingService(
         IAppHostServerProjectFactory appHostServerProjectFactory,
@@ -56,7 +57,8 @@ internal sealed class ScaffoldingService : IScaffoldingService
         IEnvironment environment,
         ILogger<ScaffoldingService> logger,
         CliExecutionContext executionContext,
-        ProfilingTelemetry profilingTelemetry)
+        ProfilingTelemetry profilingTelemetry,
+        IFeatures features)
     {
         _appHostServerProjectFactory = appHostServerProjectFactory;
         _serverSessionFactory = serverSessionFactory;
@@ -66,6 +68,7 @@ internal sealed class ScaffoldingService : IScaffoldingService
         _logger = logger;
         _executionContext = executionContext;
         _profilingTelemetry = profilingTelemetry;
+        _features = features;
     }
 
     /// <inheritdoc />
@@ -124,6 +127,12 @@ internal sealed class ScaffoldingService : IScaffoldingService
         // Include the code generation package for scaffolding and code gen
         var codeGenPackage = await _languageDiscovery.GetPackageForLanguageAsync(language.LanguageId, cancellationToken);
         var integrations = config.GetIntegrationReferences(sdkVersion, directory.FullName).ToList();
+        if (integrations.Any(i => i.Source == IntegrationSource.Npm)
+            && !KnownFeatures.IsHostingIntegrationsEnabled(_features, config))
+        {
+            throw new InvalidOperationException(ErrorStrings.HostingIntegrationsFeatureNotEnabled);
+        }
+
         if (codeGenPackage is not null)
         {
             var codeGenVersion = config.GetEffectiveSdkVersion(sdkVersion);

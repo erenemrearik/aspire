@@ -40,6 +40,20 @@ An integration only needs to do two things:
 
 Anything that can do both — a TypeScript package, a Python module, a Go binary, or a .NET assembly — can be an Aspire integration. The AppHost server coordinates (1) into a single `AtsContext`, projects that context into a guest-language SDK, and routes (2) back to the owning integration at runtime.
 
+### Experimental opt-in and compatibility
+
+External hosting integrations are disabled by default. Consumers must enable `features.experimentalHostingIntegrations` in `aspire.config.json`, or run:
+
+```bash
+aspire config set features.experimentalHostingIntegrations true
+```
+
+The CLI rejects npm hosting references before installing integration dependencies or preparing the SDK when the feature is disabled. Authoring a core SDK without external hosting references does not require this opt-in. The CLI generates `ASPIRE_INTEGRATION_HOSTS_ENABLED=true` only for servers with npm hosting references; a server configured with integration hosts without that setting fails startup explicitly.
+
+Ordinary polyglot sessions retain connection-scoped handles and callback timeouts that cancel only the individual invocation, leaving the connection usable. Opted-in integration sessions share handles across guest and integration-host connections, dispose those handles at server shutdown, and retire a callback owner's connection on timeout before recovery. Enabling the CLI feature alone does not change the server lifetime policy for an AppHost without external integrations.
+
+The shared child-process implementation remains common to all CLI paths. Its lazy launch, stdin ownership, output draining, graceful-shutdown budget, cancellation, and detached-process behavior are not feature-specific; regression tests cover these contracts instead of maintaining separate process runners.
+
 ---
 
 ## Problem Statement

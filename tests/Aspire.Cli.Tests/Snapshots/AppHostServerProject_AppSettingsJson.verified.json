@@ -12,5 +12,6 @@
       "Aspire.Hosting.PostgreSQL",
       "Aspire.Hosting.CodeGeneration.TypeScript"
   ],
+  "ASPIRE_INTEGRATION_HOSTS_ENABLED": false,
   "IntegrationHosts": []
 }

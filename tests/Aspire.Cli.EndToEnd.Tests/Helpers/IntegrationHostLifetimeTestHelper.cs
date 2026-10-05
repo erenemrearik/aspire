@@ -99,6 +99,8 @@ internal static class IntegrationHostLifetimeTestHelper
 
         var configPath = Path.Combine(directory, "aspire.config.json");
         var config = JsonNode.Parse(File.ReadAllText(configPath))!.AsObject();
+        config["features"] ??= new JsonObject();
+        config["features"]!.AsObject()["experimentalHostingIntegrations"] = true;
         config["packages"] ??= new JsonObject();
         var packages = config["packages"]!.AsObject();
         packages["@e2e/lifetime"] = new JsonObject

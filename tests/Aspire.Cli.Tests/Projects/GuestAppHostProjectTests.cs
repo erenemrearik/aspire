@@ -54,6 +54,64 @@ public class GuestAppHostProjectTests : IDisposable
     }
 
     [Theory]
+    [InlineData(null)]
+    [InlineData("false")]
+    public async Task NpmIntegrationHosts_DisabledFeatureRejectsBeforeSdkPreparation(string? enabled)
+    {
+        var root = _workspace.WorkspaceRoot;
+        await File.WriteAllTextAsync(Path.Combine(root.FullName, "apphost.mts"), "// test apphost");
+        new AspireConfigFile
+        {
+            Packages = new Dictionary<string, PackageEntry>
+            {
+                ["@test/integration"] = PackageEntry.Npm("integration/host.mts")
+            }
+        }.Save(root.FullName);
+        var project = CreateGuestAppHostProject(
+            configuration: new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["features:experimentalHostingIntegrations"] = enabled
+            }).Build(),
+            appHostServerProjectFactory: new TestAppHostServerProjectFactory
+            {
+                CreateAsyncCallback = (_, _) => throw new InvalidOperationException("SDK preparation must not start.")
+            });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            project.BuildAndGenerateSdkAsync(root, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal(ErrorStrings.HostingIntegrationsFeatureNotEnabled, exception.Message);
+    }
+
+    [Fact]
+    public async Task NpmIntegrationHosts_ProjectOptInWorksOutsideCliConfigurationScope()
+    {
+        var root = _workspace.WorkspaceRoot;
+        await File.WriteAllTextAsync(Path.Combine(root.FullName, "apphost.mts"), "// test apphost");
+        new AspireConfigFile
+        {
+            Features = new Dictionary<string, bool>
+            {
+                [KnownFeatures.ExperimentalHostingIntegrations] = true
+            },
+            Packages = new Dictionary<string, PackageEntry>
+            {
+                ["@test/integration"] = PackageEntry.Npm("integration/host.mts")
+            }
+        }.Save(root.FullName);
+        var project = CreateGuestAppHostProject(
+            appHostServerProjectFactory: new TestAppHostServerProjectFactory
+            {
+                CreateAsyncCallback = (_, _) => throw new InvalidOperationException("Project opt-in accepted.")
+            });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            project.BuildAndGenerateSdkAsync(root, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal("Project opt-in accepted.", exception.Message);
+    }
+
+    [Theory]
     [InlineData("restore", 0, 0)]
     [InlineData("restore", 4, 0)]
     [InlineData("restore", 0, 3)]
@@ -167,6 +225,10 @@ public class GuestAppHostProjectTests : IDisposable
         var project = CreateGuestAppHostProject(
             appHostServerProjectFactory: projectFactory,
             serverSessionFactory: sessionFactory,
+            configuration: new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["features:experimentalHostingIntegrations"] = "true"
+            }).Build(),
             languageId: "test/runtime");
         var cancellationToken = TestContext.Current.CancellationToken;
         var buildCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -64,6 +64,7 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
         await File.WriteAllTextAsync(Path.Combine(directory.FullName, "appsettings.json"), JsonSerializer.Serialize(new
         {
             AtsAssemblies = new[] { "LifetimeTestHost" },
+            ASPIRE_INTEGRATION_HOSTS_ENABLED = true,
             IntegrationHost = new { InvocationTimeout = invocationTimeout ?? TimeSpan.FromSeconds(60) },
             IntegrationHosts = new[]
             {

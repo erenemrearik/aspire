@@ -74,6 +74,13 @@ internal sealed class IntegrationHostLauncher : IHostedService, IAsyncDisposable
         try
         {
             initializationCancellation.Token.ThrowIfCancellationRequested();
+            if (_configuration.GetSection("IntegrationHosts").GetChildren().Any()
+                && !_configuration.GetValue<bool>(KnownConfigNames.IntegrationHostsEnabled))
+            {
+                throw new InvalidOperationException(
+                    $"Integration hosts require {KnownConfigNames.IntegrationHostsEnabled}=true.");
+            }
+
             if (_configuration.GetValue<bool>(KnownConfigNames.IntegrationHostBootstrap))
             {
                 _logger.LogDebug("Skipping integration hosts while bootstrapping the managed SDK.");

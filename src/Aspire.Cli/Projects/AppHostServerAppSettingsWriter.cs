@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Aspire.Cli.Configuration;
+using Aspire.Hosting;
 
 namespace Aspire.Cli.Projects;
 
@@ -60,6 +61,7 @@ internal static class AppHostServerAppSettingsWriter
               "AtsAssemblies": [
                 {{assembliesJson}}
               ],
+              "{{KnownConfigNames.IntegrationHostsEnabled}}": {{(integrationHostEntries.Count > 0 ? "true" : "false")}},
               "IntegrationHosts": {{integrationHostsJson}}
             }
             """;

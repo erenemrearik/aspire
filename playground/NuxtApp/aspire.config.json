@@ -3,6 +3,9 @@
     "path": "apphost.mts",
     "language": "typescript/nodejs"
   },
+  "features": {
+    "experimentalHostingIntegrations": true
+  },
   "packages": {
     "Aspire.Hosting.JavaScript": "",
     "Aspire.Hosting.Docker": "",

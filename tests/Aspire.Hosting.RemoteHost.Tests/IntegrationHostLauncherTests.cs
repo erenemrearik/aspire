@@ -21,6 +21,7 @@ public class IntegrationHostLauncherTests
         using var services = new ServiceCollection().BuildServiceProvider();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
+            ["ASPIRE_INTEGRATION_HOSTS_ENABLED"] = "true",
             ["ASPIRE_INTEGRATION_HOST_BOOTSTRAP"] = "true",
             ["IntegrationHosts:0:PackageName"] = "needs-generated-sdk"
         }).Build();
@@ -42,6 +43,7 @@ public class IntegrationHostLauncherTests
         using var services = new ServiceCollection().BuildServiceProvider();
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
+            ["ASPIRE_INTEGRATION_HOSTS_ENABLED"] = "true",
             ["IntegrationHosts:0:PackageName"] = "missing-language-and-entrypoint"
         }).Build();
         var launcher = new IntegrationHostLauncher(
@@ -57,6 +59,33 @@ public class IntegrationHostLauncherTests
             launcher.ReadyAsync(TestContext.Current.CancellationToken));
 
         Assert.Same(startupException, readinessException);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_DisabledIntegrationHostsFaultReadinessBeforeBootstrap(bool bootstrap)
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ASPIRE_INTEGRATION_HOST_BOOTSTRAP"] = bootstrap.ToString(),
+            ["IntegrationHosts:0:PackageName"] = "disabled-integration"
+        }).Build();
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        await using var launcher = new IntegrationHostLauncher(
+            new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
+            registry, configuration,
+            new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance),
+            NullLogger<IntegrationHostLauncher>.Instance);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            launcher.StartAsync(TestContext.Current.CancellationToken));
+        var readinessException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            launcher.ReadyAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal("Integration hosts require ASPIRE_INTEGRATION_HOSTS_ENABLED=true.", exception.Message);
+        Assert.Same(exception, readinessException);
     }
 
     [Fact]

@@ -62,7 +62,7 @@ public static class RemoteHostServer
     {
         var builder = Host.CreateApplicationBuilder(args);
         ConfigureAppHostLogLevel(builder.Logging, builder.Configuration);
-        ConfigureServices(builder.Services);
+        ConfigureServices(builder.Services, builder.Configuration);
         ConfigureProfilingTelemetry(builder);
 
         return builder;
@@ -79,7 +79,7 @@ public static class RemoteHostServer
         }
     }
 
-    private static void ConfigureServices(IServiceCollection services)
+    private static void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         // Hosted services
         services.AddHostedService<OrphanDetector>();
@@ -97,11 +97,16 @@ public static class RemoteHostServer
         services.AddSingleton<CodeGeneratorResolver>();
         services.AddSingleton<LanguageSupportResolver>();
         services.AddSingleton<ExternalCapabilityRegistry>();
-        // Handles must be shared across guest and integration-host connections so external
-        // capabilities can resolve handles created by the originating guest. The tradeoff is
-        // that handle cleanup happens when the server shuts down instead of per connection.
-        // IDs are unguessable capability tokens; relaying a handle delegates access to it.
-        services.AddSingleton<HandleRegistry>();
+        if (configuration.GetValue<bool>(KnownConfigNames.IntegrationHostsEnabled))
+        {
+            // Integration hosts resolve handles created by the guest, so opted-in sessions
+            // share capability tokens and clean them up when the server shuts down.
+            services.AddSingleton<HandleRegistry>();
+        }
+        else
+        {
+            services.AddScoped<HandleRegistry>();
+        }
 
         // Scoped services
         services.AddScoped<CodeGenerationService>();

@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using StreamJsonRpc;
 
@@ -20,6 +21,7 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IA
     private bool _hasCallbacks;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ILogger<JsonRpcCallbackInvoker> _logger;
+    private readonly bool _retireOnTimeout;
     private Task _retirement = Task.CompletedTask;
     private bool _disposed;
 
@@ -27,6 +29,12 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IA
     {
         _logger = logger;
         LifetimeToken = _lifetime.Token;
+    }
+
+    public JsonRpcCallbackInvoker(ILogger<JsonRpcCallbackInvoker> logger, IConfiguration configuration)
+        : this(logger)
+    {
+        _retireOnTimeout = configuration.GetValue<bool>(KnownConfigNames.IntegrationHostsEnabled);
     }
 
     internal CancellationToken LifetimeToken { get; }
@@ -96,6 +104,15 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IA
         catch (TimeoutException ex)
         {
             cts.Cancel();
+            if (!_retireOnTimeout)
+            {
+                _logger.LogError(ex, "Callback {CallbackId} timed out on connection {Host} after {Elapsed}, timeout {Timeout}.",
+                    callbackId, _clientRpc.GetHashCode(), System.Diagnostics.Stopwatch.GetElapsedTime(started), timeout);
+                throw new TimeoutException($"Callback '{callbackId}' timed out after {timeout.TotalSeconds}s.", ex);
+            }
+
+            // A stalled integration callback can outlive its invocation and mutate shared
+            // handles. Retire its owner before admitting replacement integration hosts.
             StopAcceptingCallbacks();
             _clientRpc.Dispose();
             _logger.LogError(ex, "Callback {CallbackId} stalled on connection {Host} after {Elapsed}, timeout {Timeout}. Retired its owner connection.",

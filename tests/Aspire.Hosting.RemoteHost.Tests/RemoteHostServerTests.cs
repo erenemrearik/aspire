@@ -11,11 +11,31 @@ namespace Aspire.Hosting.RemoteHost.Tests;
 public class RemoteHostServerTests
 {
     [Fact]
-    public async Task HandleRegistry_IsSharedAcrossGuestAndIntegrationHostScopes()
+    public async Task HandleRegistry_DefaultSessionKeepsHandlesConnectionScoped()
     {
         var builder = RemoteHostServer.CreateBuilder([]);
         using var host = builder.Build();
-        var resource = new object();
+        using var resource = new CancellationTokenSource();
+        string handleId;
+
+        await using (var firstScope = host.Services.CreateAsyncScope())
+        {
+            handleId = firstScope.ServiceProvider.GetRequiredService<HandleRegistry>()
+                .Register(resource, "test/Disposable");
+        }
+
+        Assert.Throws<ObjectDisposedException>(() => resource.Token);
+        await using var secondScope = host.Services.CreateAsyncScope();
+        Assert.False(secondScope.ServiceProvider.GetRequiredService<HandleRegistry>()
+            .TryGet(handleId, out _, out _));
+    }
+
+    [Fact]
+    public async Task HandleRegistry_IsSharedAcrossGuestAndIntegrationHostScopes()
+    {
+        var builder = RemoteHostServer.CreateBuilder(["ASPIRE_INTEGRATION_HOSTS_ENABLED=true"]);
+        using var host = builder.Build();
+        using var resource = new CancellationTokenSource();
         string handleId;
 
         await using (var guestScope = host.Services.CreateAsyncScope())
@@ -27,6 +47,10 @@ public class RemoteHostServerTests
         await using var integrationScope = host.Services.CreateAsyncScope();
         var integrationHandles = integrationScope.ServiceProvider.GetRequiredService<HandleRegistry>();
         Assert.Same(resource, integrationHandles.GetObject(handleId));
+        _ = resource.Token;
+
+        host.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => resource.Token);
     }
 
     [Fact]

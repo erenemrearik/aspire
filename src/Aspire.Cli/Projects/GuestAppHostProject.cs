@@ -212,6 +212,12 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
     {
         var defaultSdkVersion = GetEffectiveSdkVersion();
         var integrations = config.GetIntegrationReferences(defaultSdkVersion, GetConfigDirectory(directory).FullName).ToList();
+        if (integrations.Any(i => i.Source == IntegrationSource.Npm)
+            && !KnownFeatures.IsHostingIntegrationsEnabled(_features, config))
+        {
+            throw new InvalidOperationException(ErrorStrings.HostingIntegrationsFeatureNotEnabled);
+        }
+
         var codeGenPackage = await _languageDiscovery.GetPackageForLanguageAsync(_resolvedLanguage.LanguageId, cancellationToken);
 
         // The config can already declare the code generation integration itself, most often as a
@@ -308,13 +314,12 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
 
     private async Task<bool> BuildAndGenerateSdkAsync(DirectoryInfo directory, AspireConfigFile config, string? packageSourceOverride = null, CancellationToken cancellationToken = default)
     {
-        var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
-
         // Step 1: Use the supplied config as the source of truth. Update uses an
         // in-memory config here so a failed generation does not leave
         // aspire.config.json pinned to versions the current CLI cannot run.
         var integrations = await GetIntegrationReferencesAsync(config, directory, cancellationToken);
         var sdkVersion = GetPrepareSdkVersion(config);
+        var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
 
         var (buildSuccess, buildOutput, _, _) = await PrepareAppHostServerAsync(appHostServerProject, sdkVersion, integrations, config.Channel, packageSourceOverride, cancellationToken);
         if (!buildSuccess)
@@ -510,12 +515,11 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
             }
 
             // Step 2: Build/prepare the AppHost server (dependency install happens after server starts)
-            var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
-
             // Load config - source of truth for SDK version and packages
             var config = LoadConfiguration(directory);
             var integrations = await GetIntegrationReferencesAsync(config, directory, cancellationToken);
             var sdkVersion = GetPrepareSdkVersion(config);
+            var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
 
             var buildResult = await _interactionService.ShowStatusAsync(
                 "Preparing Aspire server...",
@@ -1323,10 +1327,10 @@ internal sealed class GuestAppHostProject : IAppHostProject, IGuestAppHostSdkGen
         try
         {
             // Step 1: Load config - source of truth for SDK version and packages
-            var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
             var config = LoadConfiguration(directory);
             var integrations = await GetIntegrationReferencesAsync(config, directory, cancellationToken);
             var sdkVersion = GetPrepareSdkVersion(config);
+            var appHostServerProject = await _appHostServerProjectFactory.CreateAsync(directory.FullName, cancellationToken);
 
             // Prepare the AppHost server (build for dev mode, restore for prebuilt)
             var (prepareSuccess, prepareOutput, _, needsCodeGen) = await PrepareAppHostServerAsync(appHostServerProject, sdkVersion, integrations, config.Channel, cancellationToken: cancellationToken);

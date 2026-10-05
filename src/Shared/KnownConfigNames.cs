@@ -33,6 +33,7 @@ internal static class KnownConfigNames
     public const string UnixSocketPath = "ASPIRE_BACKCHANNEL_PATH";
     public const string RemoteAppHostToken = "ASPIRE_REMOTE_APPHOST_TOKEN";
     public const string IntegrationHostBootstrap = "ASPIRE_INTEGRATION_HOST_BOOTSTRAP";
+    public const string IntegrationHostsEnabled = "ASPIRE_INTEGRATION_HOSTS_ENABLED";
 
     // Identifies the RemoteHost server's parent (the CLI process that launched aspire-managed server).
     // Paired with RemoteAppHostProcessStarted so the RemoteHost orphan detector can verify PID + start

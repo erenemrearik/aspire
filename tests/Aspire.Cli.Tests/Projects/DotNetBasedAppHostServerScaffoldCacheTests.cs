@@ -164,6 +164,7 @@ public class DotNetBasedAppHostServerScaffoldCacheTests(ITestOutputHelper output
 
         Assert.False(File.Exists(assetsPath));
         using var settings = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(appSettingsPath));
+        Assert.True(settings.RootElement.GetProperty("ASPIRE_INTEGRATION_HOSTS_ENABLED").GetBoolean());
         var host = Assert.Single(settings.RootElement.GetProperty("IntegrationHosts").EnumerateArray());
         Assert.Equal("@test/integration", host.GetProperty("PackageName").GetString());
         Assert.Equal(secondHost, host.GetProperty("HostEntryPoint").GetString());
