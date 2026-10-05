@@ -94,6 +94,27 @@ public class AddParameterTests
     }
 
     [Fact]
+    public async Task OptionalParameterSetValueAsync_CanSetAndClearValue()
+    {
+        var parameter = new ParameterResource("optional", _ => throw new MissingParameterValueException("Parameter 'optional' is missing."), secret: false)
+        {
+            Required = false
+        };
+
+        Assert.False(parameter.TryGetCurrentValue(out _));
+
+        await parameter.SetValueAsync("configured").DefaultTimeout();
+
+        Assert.True(parameter.TryGetCurrentValue(out var configuredValue));
+        Assert.Equal("configured", configuredValue);
+
+        await parameter.SetValueAsync().DefaultTimeout();
+
+        Assert.False(parameter.TryGetCurrentValue(out _));
+        Assert.Null(await parameter.GetValueAsync(CancellationToken.None).DefaultTimeout());
+    }
+
+    [Fact]
     public async Task ParameterTrySetValue_CompletesParameterWithProgrammaticValue()
     {
         var parameter = new ParameterResource("test", _ => throw new MissingParameterValueException("Parameter 'test' is missing."), secret: false);

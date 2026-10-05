@@ -146,6 +146,16 @@ await customInputParam.withCustomInput({
     },
 });
 
+// optional parameter value management
+const optionalParam = await builder.addParameter("optional-value").withOptional();
+const _unsetOptionalValue: string | null = await optionalParam.tryGetCurrentValue();
+await optionalParam.setValueAsync({ value: "configured" });
+const _configuredOptionalValue: string | null = await optionalParam.tryGetCurrentValue();
+await optionalParam.setValueAsync();
+const _clearedOptionalValue: string | null = await optionalParam.tryGetCurrentValue();
+await optionalParam.withRequired({ required: true });
+await optionalParam.withRequired({ required: false });
+
 // ===================================================================
 // Container-specific methods on ContainerResource
 // ===================================================================
