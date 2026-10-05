@@ -25,6 +25,8 @@ The dashboard is configured when it starts up. Configuration includes frontend a
 
 How you configure the dashboard depends on whether it's started by the Aspire AppHost project or run in [standalone mode](https://aspire.dev/dashboard/standalone/).
 
+To export the dashboard's own traces, set `OTEL_EXPORTER_OTLP_ENDPOINT`. Exported traces use `aspire-dashboard` as the default `service.name`. Override it with `OTEL_SERVICE_NAME` or `service.name` in `OTEL_RESOURCE_ATTRIBUTES`, using environment variables, command line arguments, or JSON configuration. `OTEL_SERVICE_NAME` takes precedence when both settings specify a service name. The dashboard does not generate a `service.instance.id`, but preserves one supplied in `OTEL_RESOURCE_ATTRIBUTES`.
+
 ### Aspire AppHost
 
 The AppHost automatically configures the dashboard, but you can override values if needed. The recommended way to configure the dashboard from the Aspire AppHost is by adding environment variables to the _launchSettings.json_ file. The `:` delimiter must be replaced with double underscore (`__`) in environment variable names. For example, `Dashboard:TelemetryLimits:MaxLogCount` is `DASHBOARD__TELEMETRYLIMITS__MAXLOGCOUNT` as an environment variable.
@@ -75,6 +77,7 @@ Browser token authentication works by asking for a token. The token can either b
 | `Dashboard:Frontend:BrowserToken`<br/>Default: `null` | Specifies the browser token. If it isn't specified, the dashboard generates one. Tooling that automates login can specify a token and open a browser with the token in the query string. A new token should be generated each time the dashboard is launched. |
 | `Dashboard:Frontend:MaxConsoleLogCount`<br/>Default: `100,000` | The maximum number of console log messages retained in the viewer and database. The database limit is shared across resources. When the limit is exceeded, the oldest messages are removed. |
 | `Dashboard:Frontend:PublicUrl`<br/>Default: `null` | Specifies the public URL used to access the dashboard frontend and construct links to it. If a public URL isn't specified, the frontend endpoint is used instead. This setting is important when the dashboard is accessed through a proxy and its endpoint isn't directly reachable. |
+| `Dashboard:Frontend:DisableWebSocketCompression`<br/>Default: `false` | Disables compression for the Blazor WebSocket connection. Set to `true` when a reverse proxy, such as IIS ARR, doesn't support compressed WebSocket messages. Disabling compression increases WebSocket bandwidth usage. |
 | `Dashboard:Frontend:OpenIdConnect:NameClaimType`<br/>Default: `name` | Specifies one or more claim types used to display the authenticated user's full name. Can be a single claim type or a comma-delimited list. |
 | `Dashboard:Frontend:OpenIdConnect:UsernameClaimType`<br/>Default: `preferred_username` | Specifies one or more claim types used to display the authenticated user's username. Can be a single claim type or a comma-delimited list. |
 | `Dashboard:Frontend:OpenIdConnect:RequiredClaimType`<br/>Default: `null` | Specifies the claim that must be present for authorized users. Authorization fails without this claim. This value is optional. |

@@ -8,8 +8,8 @@
 // module owns is the window handle, so the page that opened it can focus it, close it, and find out when the user
 // closed it themselves.
 //
-// Keys are opaque strings chosen by the caller: a dock terminal id, or "resource:<name>:<replica>". They only have to
-// be stable and unique within the page.
+// Keys are opaque strings chosen by the caller: a dock terminal id, or "resource:<canonical-resource-name>".
+// They only have to be stable and unique within the page.
 // Dock windows also have a durable, generation-scoped record. After a document reload that record keeps the dock
 // on its placeholder until the independent page supplies its WindowProxy through a same-origin message.
 // A missing response is NOT proof of closure: background pages can be suspended indefinitely.
@@ -350,11 +350,10 @@ function newId() {
 }
 
 function terminalPath(baseUri, key) {
-    // Resource keys have the shape "resource:shell:with:colons:2". Only the final colon separates
-    // the replica; the entire resource name is escaped as one route segment. AppHost IDs are GUIDs.
-    const resource = /^resource:(.+):(\d+)$/.exec(key);
-    if (resource) {
-        return new URL(`terminal-window/resource/${encodeURIComponent(resource[1])}/${resource[2]}`, baseUri).pathname;
+    // Resource keys carry the exact resource instance (e.g. "resource:repl-abc123").
+    // Escape the entire instance as one route segment; AppHost IDs are GUIDs.
+    if (key.startsWith('resource:')) {
+        return new URL(`terminal-window/resource/${encodeURIComponent(key.slice('resource:'.length))}`, baseUri).pathname;
     }
     return new URL(`terminal-window/apphost/${encodeURIComponent(key)}`, baseUri).pathname;
 }

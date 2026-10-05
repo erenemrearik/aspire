@@ -54,6 +54,10 @@ public class MenuButtonItem
     public bool Checked { get; set; }
     public Func<Task>? OnClick { get; set; }
     public bool IsDisabled { get; set; }
+    /// <summary>
+    /// Gets or sets an optional stable identity used to preserve the rendered menu item across refreshes and reordering.
+    /// </summary>
+    public object? RenderKey { get; set; }
     public string Id { get; set; } = $"menu-item-{Guid.NewGuid():N}";
     public string? Class { get; set; }
     public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }

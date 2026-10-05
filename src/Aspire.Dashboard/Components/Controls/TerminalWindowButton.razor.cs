@@ -98,7 +98,7 @@ public partial class TerminalWindowButton : ComponentBase, IAsyncDisposable
             return;
         }
 
-        // A resource can disappear and later return with the same name/replica. Check that identity
+        // A resource can disappear and later return with the same instance name. Check that identity
         // again rather than treating an earlier adoption as permission to mount its new viewer.
         _processedKeys.IntersectWith(WindowKeysToAdopt);
 

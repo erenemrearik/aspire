@@ -26,7 +26,7 @@ public partial class TerminalDockTests
     public async Task ResourceWindow_DetachReturnAndRemovalNeverCloseTheResource(string pathBase)
     {
         var resources = Channel.CreateUnbounded<IReadOnlyList<ResourceViewModelChange>>();
-        var resource = TerminalSetupHelpers.CreateTerminalResource("shell-id", 2, 3, "shell: #1/?%+");
+        var resource = TerminalSetupHelpers.CreateTerminalResource("shell: #1/?%+", 2, 3);
         var client = new TestDashboardClient(isEnabled: true, initialResources: [resource],
             resourceChannelProvider: () => resources);
         Services.AddSingleton<NavigationManager>(new TestNavigationManager($"https://dashboard.example{pathBase}/"));
@@ -34,7 +34,7 @@ public partial class TerminalDockTests
         var cut = Render<TerminalDock>();
         await cut.InvokeAsync(cut.Instance.ToggleAsync);
         cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".terminal-dock-show-terminal")));
-        var key = "resource:shell: #1/?%+:2";
+        var key = "resource:shell: #1/?%+";
         var launcher = TerminalSetupHelpers.GetWindowLauncher(this, cut);
         Assert.Empty(cut.FindComponents<TerminalView>());
         await cut.Find(".terminal-dock-show-terminal").ClickAsync(new());
@@ -42,7 +42,7 @@ public partial class TerminalDockTests
         var original = cut.FindComponent<TerminalView>().Instance;
         var button = cut.FindComponent<TerminalWindowButton>().Instance;
         Assert.Equal(key, button.TerminalKey);
-        Assert.Equal("terminal-window/resource/shell%3A%20%231%2F%3F%25%2B/2", button.Url);
+        Assert.Equal("terminal-window/resource/shell%3A%20%231%2F%3F%25%2B", button.Url);
         Assert.False(button.Disabled);
 
         await cut.InvokeAsync(() => launcher.OnTerminalWindowOpenedAsync(key, "blocked"));
@@ -56,7 +56,6 @@ public partial class TerminalDockTests
         {
             var view = cut.FindComponent<TerminalView>().Instance;
             Assert.Equal("shell: #1/?%+", view.ResourceName);
-            Assert.Equal(2, view.ReplicaIndex);
             Assert.True(view.AutoFit);
         });
 
@@ -90,7 +89,7 @@ public partial class TerminalDockTests
         await cut.InvokeAsync(cut.Instance.ToggleAsync);
         cut.WaitForAssertion(() => Assert.Single(adoption.Invocations));
         var launcher = TerminalSetupHelpers.GetWindowLauncher(this, cut);
-        var key = "resource:shell:0";
+        var key = "resource:shell";
         if (trackingFailure)
         {
             adoption.SetException(new JSException("Storage denied"));

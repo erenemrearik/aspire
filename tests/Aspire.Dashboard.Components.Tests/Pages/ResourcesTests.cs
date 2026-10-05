@@ -28,6 +28,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Localization;
 using Microsoft.FluentUI.AspNetCore.Components;
+using Microsoft.JSInterop;
 using OpenTelemetry.Proto.Logs.V1;
 using Xunit;
 using TelemetryTestHelpers = Aspire.Tests.Shared.Telemetry.TelemetryTestHelpers;
@@ -135,13 +136,12 @@ public partial class ResourcesTests : DashboardTestContext
 
         await cut.InvokeAsync(() => grid.Instance.SortByColumnAsync(nameColumn.Instance, DataGridSortDirection.Descending));
 
-        Assert.False(grid.Instance.SortByAscending);
+        Assert.False(Assert.Single(grid.Instance.SortColumns).Ascending);
         Assert.Equal("descending", cut.Find("th[col-index='1']").GetAttribute("aria-sort"));
 
         var request = new GridItemsProviderRequest<ResourceGridViewModel>
         {
-            SortByColumn = nameColumn.Instance,
-            SortByAscending = false,
+            SortColumns = [new(nameColumn.Instance, Ascending: false)],
         };
         var result = await cut.InvokeAsync(() => cut.Instance.GetData(request).AsTask());
 
@@ -575,6 +575,27 @@ public partial class ResourcesTests : DashboardTestContext
 
         Assert.EndsWith("/?view=Parameters", Services.GetRequiredService<NavigationManager>().Uri, StringComparison.Ordinal);
         Assert.Empty(layout.DialogCloseListeners);
+    }
+
+    [Fact]
+    public async Task MobileParametersTab_DoesNotNavigateAfterCircuitDisconnects()
+    {
+        var viewport = new ViewportInformation(IsDesktop: false, IsUltraLowHeight: false, IsUltraLowWidth: false);
+        var sessionStorage = new TestSessionStorage
+        {
+            OnSetAsync = (_, _) => throw new JSDisconnectedException("The circuit disconnected.")
+        };
+        ResourceSetupHelpers.SetupResourcesPage(this, viewport, sessionStorage: sessionStorage);
+
+        var cut = Render<Components.Pages.Resources>(builder => builder.AddCascadingValue(viewport));
+        var tabs = cut.FindComponent<FluentTabs>().Instance;
+        var parametersTab = cut.FindComponents<FluentTab>().Single(tab => tab.Instance.Id == "tab-Parameters");
+        var navigation = Services.GetRequiredService<NavigationManager>();
+        var initialUri = navigation.Uri;
+
+        await cut.InvokeAsync(() => tabs.ActiveTabChanged.InvokeAsync(parametersTab.Instance));
+
+        Assert.Equal(initialUri, navigation.Uri);
     }
 
     [Theory]

@@ -30,13 +30,13 @@ public sealed class CompletionTests(ITestOutputHelper output)
         // genuinely fresh state. This still executes the packaged binary through Main, not a
         // command object, and does not depend on the installer's existing first-use sentinel.
         var home = workspace.CreateDirectory("completion-home");
-        const string legacyConfig = "{ \"features:terminalCommandsEnabled\": true }";
+        const string legacyConfig = "{ \"features:defaultWatchEnabled\": true }";
         await File.WriteAllTextAsync(Path.Combine(home.FullName, "globalsettings.json"), legacyConfig);
         const string localConfig = """
             {
               // Completion must preserve this file, including comments and flat keys.
-              "features:terminalCommandsEnabled": true,
-              "features": { "terminalCommandsEnabled": false }
+              "features:defaultWatchEnabled": true,
+              "features": { "defaultWatchEnabled": false }
             }
             """;
         var localConfigPath = Path.Combine(workspace.WorkspaceRoot.FullName, "aspire.config.json");

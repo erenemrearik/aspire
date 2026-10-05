@@ -8,7 +8,6 @@ using Spectre.Console;
 
 using Aspire.Cli.Bundles;
 using Aspire.Cli.Commands.Sdk;
-using Aspire.Cli.Configuration;
 using Aspire.Cli.Interaction;
 using Aspire.Cli.Resources;
 using Aspire.Cli.Utils;
@@ -173,6 +172,7 @@ internal sealed class RootCommand : BaseRootCommand
         TelemetryCommand telemetryCommand,
         ExportCommand exportCommand,
         DashboardCommand dashboardCommand,
+        TrayCommand trayCommand,
         DocsCommand docsCommand,
         SecretCommand secretCommand,
         SdkCommand sdkCommand,
@@ -184,7 +184,6 @@ internal sealed class RootCommand : BaseRootCommand
         ExtensionInternalCommand extensionInternalCommand,
         IBundleService bundleService,
         IInteractionService interactionService,
-        IFeatures features,
         IAnsiConsole ansiConsole,
         CliExecutionContext executionContext)
         : base(RootCommandStrings.Description)
@@ -229,12 +228,7 @@ internal sealed class RootCommand : BaseRootCommand
         Subcommands.Add(describeCommand);
         Subcommands.Add(logsCommand);
         Subcommands.Add(integrationCommand);
-        // 'aspire terminal' is hidden behind a feature flag while WithTerminal() is experimental.
-        // Toggle with `aspire config set features.terminalCommandsEnabled true`.
-        if (features.IsFeatureEnabled(KnownFeatures.TerminalCommandsEnabled, defaultValue: false))
-        {
-            Subcommands.Add(terminalCommand);
-        }
+        Subcommands.Add(terminalCommand);
         Subcommands.Add(addCommand);
         Subcommands.Add(publishCommand);
         Subcommands.Add(configCommand);
@@ -253,6 +247,7 @@ internal sealed class RootCommand : BaseRootCommand
         Subcommands.Add(exportCommand);
         Subcommands.Add(docsCommand);
         Subcommands.Add(dashboardCommand);
+        Subcommands.Add(trayCommand);
         Subcommands.Add(secretCommand);
 
 #if DEBUG

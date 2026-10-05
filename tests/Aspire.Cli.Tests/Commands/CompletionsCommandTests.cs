@@ -254,7 +254,7 @@ public class CompletionsCommandTests(ITestOutputHelper outputHelper)
         var home = workspace.CreateDirectory("aspire-home");
         var legacyConfig = Path.Combine(home.FullName, "globalsettings.json");
         File.WriteAllText(legacyConfig, """
-            { "features:terminalCommandsEnabled": false }
+            { "features:defaultWatchEnabled": false }
             """);
         var settingsPath = location switch
         {
@@ -266,8 +266,8 @@ public class CompletionsCommandTests(ITestOutputHelper outputHelper)
         File.WriteAllText(settingsPath, """
             {
               // Preserve the nested value and leave this file byte-for-byte unchanged.
-              "features:terminalCommandsEnabled": false,
-              "features": { "terminalCommandsEnabled": true },
+              "features:defaultWatchEnabled": false,
+              "features": { "defaultWatchEnabled": true },
             }
             """);
         var originalFiles = Directory.GetFiles(workspace.Path, "*", SearchOption.AllDirectories)
@@ -304,7 +304,6 @@ public class CompletionsCommandTests(ITestOutputHelper outputHelper)
                 Assert.Equal(string.Empty, error.ToString());
                 if (requestKind == "suggest")
                 {
-                    // This command is feature-gated, proving normalized settings were loaded.
                     Assert.Equal("terminal\n", output.ToString());
                 }
                 else

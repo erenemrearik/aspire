@@ -83,7 +83,7 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
     public required IDashboardClient DashboardClient { get; init; }
 
     [Inject]
-    public required IResourceRepository ResourceRepository { get; init; }
+    public required DashboardDataSource DataSource { get; init; }
 
     [Inject]
     public required ShortcutManager ShortcutManager { get; init; }
@@ -102,9 +102,6 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
 
     [Inject]
     public required IJSRuntime JS { get; init; }
-
-    [Inject]
-    public required NavigationManager NavigationManager { get; init; }
 
     public IReadOnlySet<AspireKeyboardShortcut> SubscribedShortcuts { get; } = new HashSet<AspireKeyboardShortcut>
     {
@@ -129,11 +126,6 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
     /// <summary>
     /// Shows the dock, or hides it if it is already showing.
     /// </summary>
-    /// <remarks>
-    /// Public so the header button can drive the dock. The keyboard shortcut alone is not enough: <c>`</c> is
-    /// suppressed whenever focus is in a terminal or any other text input, because it types <c>`</c> there, so the
-    /// dock needs an affordance that works regardless of where focus happens to be.
-    /// </remarks>
     public Task ToggleAsync() => InvokeAsync(() =>
     {
         if (_disposed || !DashboardClient.IsEnabled || DashboardClient.IsReadOnly)
@@ -168,12 +160,7 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
             [new(TelemetryPropertyKeys.TerminalDockTrigger, new AspireTelemetryProperty(trigger))], Logger);
         _hasBeenOpened = true;
         _isVisible = true;
-        if (_resourceWatchTask is null && DashboardClient.IsEnabled && !DashboardClient.IsReadOnly)
-        {
-            // The initial snapshot supplies resources accumulated before opening. Keep watching after collapse
-            // so reopening preserves the existing dock state without restarting its subscriptions.
-            _resourceWatchTask = Task.Run(() => WatchResourceTerminalsAsync(_cts.Token), _cts.Token);
-        }
+        _resourceWatchTask ??= Task.Run(() => WatchResourceTerminalsAsync(_cts.Token), _cts.Token);
     }
 
     protected override Task OnAfterRenderAsync(bool firstRender)
@@ -206,7 +193,7 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
             if (!_disposed)
             {
                 _tabNavigationRegistrationStarted = true;
-                await _jsModule.InvokeVoidAsync("registerTabNavigation", _dockElement).ConfigureAwait(true);
+                await _jsModule.InvokeVoidAsync("registerTabNavigation", _dockElement, _selfRef).ConfigureAwait(true);
             }
         }
         catch (JSDisconnectedException)
@@ -274,6 +261,36 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
 
     private bool IsPanelVisible => _terminals.Count == 0;
 
+    /// <summary>
+    /// Moves a dock tab relative to another tab without changing the active terminal or its viewer.
+    /// </summary>
+    /// <param name="terminalId">The terminal being moved.</param>
+    /// <param name="targetId">The terminal that anchors the new position.</param>
+    /// <param name="after">Whether to insert after the target instead of before it.</param>
+    /// <returns>A task that completes when the tab order is updated.</returns>
+    [JSInvokable]
+    public Task ReorderTerminalAsync(string terminalId, string targetId, bool after) => InvokeAsync(() =>
+    {
+        if (_disposed || terminalId == targetId)
+        {
+            return;
+        }
+
+        var sourceIndex = _terminals.FindIndex(t => t.TerminalId == terminalId);
+        var targetIndex = _terminals.FindIndex(t => t.TerminalId == targetId);
+        if (sourceIndex < 0 || targetIndex < 0)
+        {
+            Logger.LogDebug("Ignored reordering removed dock terminal {TerminalId} relative to {TargetId}.", terminalId, targetId);
+            return;
+        }
+
+        var terminal = _terminals[sourceIndex];
+        _terminals.RemoveAt(sourceIndex);
+        targetIndex = _terminals.FindIndex(t => t.TerminalId == targetId);
+        _terminals.Insert(targetIndex + (after ? 1 : 0), terminal);
+        StateHasChanged();
+    });
+
     private bool IsPaneActive(string terminalId) => terminalId == _activeTerminalId;
 
     private string GetTabId(string terminalId) => $"{_elementIdPrefix}-tab-{Uri.EscapeDataString(terminalId)}";
@@ -284,7 +301,7 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
 
     private string? ActiveTerminalWindowUrl => ActiveTerminal is { } terminal
         ? terminal.ResourceName is { } resourceName
-            ? $"terminal-window/resource/{Uri.EscapeDataString(resourceName)}/{terminal.ReplicaIndex}"
+            ? $"terminal-window/resource/{Uri.EscapeDataString(resourceName)}"
             : $"terminal-window/apphost/{Uri.EscapeDataString(terminal.TerminalId)}"
         : null;
 
@@ -451,10 +468,14 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
                     if (update.KindCase == WatchTerminalsUpdate.KindOneofCase.Snapshot)
                     {
                         var previousActiveIndex = _terminals.FindIndex(t => t.TerminalId == _activeTerminalId);
-                        var resources = _terminals.Where(t => t.IsResource).ToArray();
+                        // Preserve this browser's reordered tabs, including resource tabs, across snapshots.
+                        var snapshotById = update.Snapshot.Terminals.ToDictionary(t => t.TerminalId, StringComparer.Ordinal);
+                        var ordered = _terminals.Where(t => t.IsResource || snapshotById.ContainsKey(t.TerminalId))
+                            .Select(t => t.IsResource ? t : DockTerminal.FromAppHost(snapshotById[t.TerminalId])).ToList();
+                        var existingIds = ordered.Select(t => t.TerminalId).ToHashSet(StringComparer.Ordinal);
+                        ordered.AddRange(update.Snapshot.Terminals.Where(t => !existingIds.Contains(t.TerminalId)).Select(DockTerminal.FromAppHost));
                         _terminals.Clear();
-                        _terminals.AddRange(update.Snapshot.Terminals.Select(DockTerminal.FromAppHost));
-                        _terminals.AddRange(resources);
+                        _terminals.AddRange(ordered);
                         if (!_terminals.Any(t => t.TerminalId == _activeTerminalId))
                         {
                             // Snapshots can also remove the active tab; use the same adjacent fallback as removal.
@@ -518,7 +539,8 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
     {
         try
         {
-            var (snapshot, subscription) = await ResourceRepository.SubscribeResourcesAsync(cancellationToken).ConfigureAwait(false);
+            await DashboardClient.WhenResourcesReady.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var (snapshot, subscription) = await DataSource.ResourceRepository.SubscribeResourcesAsync(cancellationToken).ConfigureAwait(false);
             await InvokeAsync(async () =>
             {
                 if (_disposed)
@@ -572,16 +594,14 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
     {
         var terminals = _resourceByName.Values
             .Where(resource => !resource.IsResourceHidden(showHiddenResources: false) &&
-                resource.HasTerminal() && resource.TryGetTerminalReplicaInfo(out _, out _))
+                ResourceSelectHelpers.HasUsableTerminal(resource))
             .OrderBy(resource => resource, ResourceViewModelNameComparer.Instance)
             .Select(resource =>
             {
-                resource.TryGetTerminalReplicaInfo(out var replicaIndex, out _);
                 return new DockTerminal(
-                    TerminalWindow.GetResourceWindowKey(resource.DisplayName, replicaIndex),
+                    $"resource:{resource.Name}",
                     ResourceViewModel.GetResourceName(resource, _resourceByName),
-                    resource.DisplayName,
-                    replicaIndex);
+                    resource.Name);
             })
             .ToArray();
 
@@ -593,8 +613,13 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
 
         var previousActiveIndex = _terminals.FindIndex(t => t.TerminalId == _activeTerminalId);
         var removed = _terminals.Where(t => t.IsResource && !terminals.Any(next => next.TerminalId == t.TerminalId)).ToArray();
-        _terminals.RemoveAll(t => t.IsResource);
-        _terminals.AddRange(terminals);
+        var resourceById = terminals.ToDictionary(t => t.TerminalId, StringComparer.Ordinal);
+        var ordered = _terminals.Where(t => !t.IsResource || resourceById.ContainsKey(t.TerminalId))
+            .Select(t => t.IsResource ? resourceById[t.TerminalId] : t).ToList();
+        var existingIds = ordered.Select(t => t.TerminalId).ToHashSet(StringComparer.Ordinal);
+        ordered.AddRange(terminals.Where(t => !existingIds.Contains(t.TerminalId)));
+        _terminals.Clear();
+        _terminals.AddRange(ordered);
         if (!_terminals.Any(t => t.TerminalId == _activeTerminalId))
         {
             _activeTerminalId = _terminals.Count > 0
@@ -708,7 +733,7 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
         }
         catch (OperationCanceledException)
         {
-            // Expected when stopping the watches.
+            // Expected when stopping the watch.
         }
 
         if (_jsInitializationTask is { } initialization)
@@ -785,11 +810,11 @@ public sealed partial class TerminalDock : ComponentBase, IGlobalKeydownListener
         }
     }
 
-    private sealed record DockTerminal(string TerminalId, string Title, string? ResourceName, int ReplicaIndex)
+    private sealed record DockTerminal(string TerminalId, string Title, string? ResourceName)
     {
         public bool IsResource => ResourceName is not null;
 
         public static DockTerminal FromAppHost(TerminalDescriptor descriptor)
-            => new(descriptor.TerminalId, descriptor.Title, null, 0);
+            => new(descriptor.TerminalId, descriptor.Title, null);
     }
 }

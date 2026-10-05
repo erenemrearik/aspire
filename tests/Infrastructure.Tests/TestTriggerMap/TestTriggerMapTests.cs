@@ -56,6 +56,34 @@ public sealed class TestTriggerMapTests
     }
 
     [Theory]
+    [InlineData("eng/scripts/tray-registration-control/control.cpp")]
+    [InlineData("eng/scripts/tray-registration-control/run.ps1")]
+    public void TrayRegistrationControlRunsInUnconditionalNativeArchiveJobs(string path)
+    {
+        Assert.Contains(s_map.Ignore, pattern => TestTriggerMap.GlobMatches(pattern, path));
+    }
+
+    [Theory]
+    [InlineData("eng/scripts/generate-template-cgmanifest.ps1")]
+    public void TemplateManifestInputsSelectInfrastructureCoverage(string path)
+    {
+        var result = SelectWithRealMap(path);
+
+        Assert.False(result.SelectsAll);
+        Assert.Equal(["Infrastructure.Tests"], result.TestProjects);
+        Assert.Empty(result.Jobs);
+    }
+
+    [Fact]
+    public void TemplateManifestBuildTargetSelectsInfrastructureCoverage()
+    {
+        var result = SelectWithRealMap("src/Aspire.ProjectTemplates/Aspire.ProjectTemplates.csproj");
+
+        Assert.False(result.SelectsAll);
+        Assert.Contains("Infrastructure.Tests", result.TestProjects);
+    }
+
+    [Theory]
     [InlineData("eng/WarningPolicy.proj")]
     [InlineData("eng/build.ps1")]
     [InlineData("eng/build.sh")]
@@ -70,6 +98,27 @@ public sealed class TestTriggerMapTests
             .ToArray();
 
         Assert.Equal(["ALL"], targets);
+    }
+
+    [Fact]
+    public void MtpExitCodeNormalizerRuleSelectsAllConsumers()
+    {
+        var rule = Assert.Single(
+            s_map.PathRules,
+            rule => rule.Paths.Any(path => path.Contains("normalize-mtp-exit-code", StringComparison.Ordinal)));
+
+        Assert.Equal(["ALL", "job:deployment-e2e"], rule.Targets);
+    }
+
+    [Fact]
+    public void DeploymentTestRunnerSelectsDeploymentWorkflow()
+    {
+        const string path = ".github/workflows/run-deployment-test.sh";
+        var targets = s_map.PathRules
+            .Where(rule => rule.Paths.Any(glob => TestTriggerMap.GlobMatches(glob, path)))
+            .SelectMany(rule => rule.Targets);
+
+        Assert.Contains("job:deployment-e2e", targets);
     }
 
     [Fact]
@@ -643,11 +692,23 @@ public sealed class TestTriggerMapTests
         },
         {
             "tools/CreateLayout/Program.cs",
-            ["test:Aspire.Cli.EndToEnd.Tests", "job:cli-starter-validation", "job:extension-e2e", "job:winget-installer", "job:homebrew-installer"]
+            ["test:Aspire.Cli.EndToEnd.Tests", "test:Infrastructure.Tests", "job:cli-starter-validation", "job:extension-e2e", "job:winget-installer", "job:homebrew-installer"]
         },
         {
             "eng/Bundle.proj",
-            ["test:Aspire.Cli.EndToEnd.Tests", "job:cli-starter-validation", "job:extension-e2e", "job:winget-installer", "job:homebrew-installer"]
+            ["test:Aspire.Cli.EndToEnd.Tests", "test:Infrastructure.Tests", "job:cli-starter-validation", "job:extension-e2e", "job:winget-installer", "job:homebrew-installer"]
+        },
+        {
+            "tools/CreateLayout/verify-tray-payload.sh",
+            ["test:Aspire.Cli.EndToEnd.Tests", "test:Infrastructure.Tests", "job:cli-starter-validation", "job:extension-e2e", "job:winget-installer", "job:homebrew-installer"]
+        },
+        {
+            "tools/CreateLayout/verify-windows-tray-payload.ps1",
+            ["test:Aspire.Cli.EndToEnd.Tests", "test:Infrastructure.Tests", "job:cli-starter-validation", "job:extension-e2e", "job:winget-installer", "job:homebrew-installer"]
+        },
+        {
+            "src/Aspire.Tray/Windows/publish.ps1",
+            ["test:Aspire.Cli.EndToEnd.Tests", "test:Infrastructure.Tests", "job:cli-starter-validation", "job:extension-e2e", "job:winget-installer", "job:homebrew-installer"]
         },
         {
             "playground/JavaSpringBoot/JavaSpringBoot.AppHost.Java/aspire.config.json",
@@ -707,9 +768,12 @@ public sealed class TestTriggerMapTests
     }
 
     [Theory]
+    [InlineData("src/Aspire.Dashboard/Components/Controls/TerminalTitle.razor.js")]
     [InlineData("src/Aspire.Dashboard/Components/Layout/TerminalDock.razor.js")]
     [InlineData("src/Aspire.Dashboard/wwwroot/js/app-terminalwindow.js")]
     [InlineData("tests/Aspire.Dashboard.Components.Tests/JavaScript/TerminalWindow.test.mjs")]
+    [InlineData("tests/Aspire.Dashboard.Components.Tests/JavaScript/TerminalTitle.test.mjs")]
+    [InlineData("tests/Aspire.Dashboard.Components.Tests/JavaScript/TerminalDock.test.mjs")]
     public void DashboardTerminalScriptInputsSelectInfrastructureTests(string path)
     {
         var result = SelectWithRealMap(path);
@@ -942,6 +1006,22 @@ public sealed class TestTriggerMapTests
         Assert.False(result.SelectsAll);
         Assert.Equal(
             ["Aspire.Cli.EndToEnd.Tests", "Aspire.Templates.Tests"],
+            result.TestProjects.Order(StringComparer.Ordinal));
+        Assert.Equal(
+            ["job:deployment-e2e", "job:homebrew-installer", "job:winget-installer"],
+            result.Jobs.Order(StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("src/Aspire.ProjectTemplates/templates/aspire-ts-cs-starter/frontend/package.json")]
+    [InlineData("src/Aspire.ProjectTemplates/templates/aspire-ts-cs-starter/frontend/package-lock.json")]
+    public void ProjectTemplateFrontendDependencyInputsRunCliSecurityGuards(string path)
+    {
+        var result = SelectWithRealMap(path);
+
+        Assert.False(result.SelectsAll);
+        Assert.Equal(
+            ["Aspire.Cli.EndToEnd.Tests", "Aspire.Cli.Tests", "Aspire.Templates.Tests"],
             result.TestProjects.Order(StringComparer.Ordinal));
         Assert.Equal(
             ["job:deployment-e2e", "job:homebrew-installer", "job:winget-installer"],
