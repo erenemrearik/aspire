@@ -2476,6 +2476,46 @@ function checkPublicNoopMessage(text) {
 // these types survive the scrub.
 const PUBLIC_OUTPUT_TYPES = new Set(['create_pull_request', 'push_to_pull_request_branch', 'approve_dependabot_pr', 'noop']);
 
+function isPublicPrNumber(value) {
+    return (typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 9999999999)
+        || (typeof value === 'string' && /^[1-9]\d{0,9}$/.test(value));
+}
+
+function projectPublicOutput(item) {
+    const output = { type: item.type };
+    const fields = item.type === 'create_pull_request' ? ['branch', 'title', 'body']
+        : item.type === 'push_to_pull_request_branch' ? ['pull_request_number', 'message']
+            : item.type === 'approve_dependabot_pr' ? ['pr_number', 'head_sha'] : ['message'];
+    for (const field of fields) {
+        output[field] = item[field];
+    }
+    let valid = fields.every(field => field === 'pull_request_number' || field === 'pr_number'
+        ? isPublicPrNumber(output[field]) : typeof output[field] === 'string');
+    if (item.type === 'approve_dependabot_pr') {
+        valid &&= /^[0-9a-f]{40}$/.test(output.head_sha);
+    } else if (item.type === 'create_pull_request' || item.type === 'push_to_pull_request_branch') {
+        // gh-aw v0.89.17 adds transport fields such as head_repo, base_branch, and
+        // base_commit. Keep the fields needed to apply the checked patch, but not
+        // unchecked tool arguments or local checkout paths such as repo_cwd.
+        const metadata = {
+            branch: value => value === AUTO_SEC_BRANCH,
+            repo: value => value === 'microsoft/aspire',
+            head_repo: value => value === 'microsoft/aspire',
+            base: value => value === 'main',
+            base_branch: value => value === 'main',
+            base_commit: value => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value),
+            diff_size: value => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
+        };
+        for (const [field, validate] of Object.entries(metadata)) {
+            if (Object.hasOwn(item, field)) {
+                valid &&= validate(item[field]);
+                output[field] = item[field];
+            }
+        }
+    }
+    return { output, valid };
+}
+
 // Files under /tmp/gh-aw that hold the agent transcript (prompt responses, tool calls, and
 // tool output such as the private alert inputs) or agent-written summaries. The agent job
 // uploads /tmp/gh-aw as the public `agent` artifact and renders these logs into the public
@@ -2493,8 +2533,9 @@ const AGENT_TRANSCRIPT_PATHS = [
 
 /**
  * Checks the raw safe-output items before they leave the agent job: every item must be a
- * template-checked type, a `noop` must be counts only, an approval request is reduced to
- * a valid PR number and head SHA, and PR text and patches must pass `checkPublicText`.
+ * template-checked type, retained fields must be validated primitives, a `noop` must be
+ * counts only, and PR text and patches must pass `checkPublicText`. Unknown properties
+ * are dropped from every retained type before publication.
  * Patch contents must also pass `checkPatchUploadSafety`, since the patches are uploaded
  * before the safe_outputs job's content gate runs. Returns the items to keep and
  * `{ source, reason }` violations.
@@ -2513,16 +2554,14 @@ function checkAgentOutputs(lines, patches) {
         if (!PUBLIC_OUTPUT_TYPES.has(item?.type)) {
             continue;
         }
+        const projected = projectPublicOutput(item);
+        if (!projected.valid) {
+            violations.push({ source: item.type, reason: 'invalid-inputs' });
+            continue;
+        }
+        item = projected.output;
         if (item.type === 'noop' && !checkPublicNoopMessage(item.message)) {
             violations.push({ source: 'noop.message', reason: 'non-template-text' });
-        } else if (item.type === 'approve_dependabot_pr') {
-            // The approval job reads only these two inputs, so anything else the item
-            // carries is dropped rather than uploaded.
-            if (!/^[1-9]\d{0,9}$/.test(String(item.pr_number ?? '')) || !/^[0-9a-f]{40}$/.test(String(item.head_sha ?? ''))) {
-                violations.push({ source: 'approve_dependabot_pr', reason: 'invalid-inputs' });
-            }
-            kept.push({ type: item.type, pr_number: item.pr_number, head_sha: item.head_sha });
-            continue;
         }
         kept.push(item);
     }

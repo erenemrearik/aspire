@@ -804,6 +804,117 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     [Theory]
     [RequiresTools(["node"])]
+    [InlineData("create_pull_request", false)]
+    [InlineData("create_pull_request", true)]
+    [InlineData("push_to_pull_request_branch", false)]
+    [InlineData("push_to_pull_request_branch", true)]
+    [InlineData("noop", false)]
+    [InlineData("noop", true)]
+    [InlineData("approve_dependabot_pr", false)]
+    [InlineData("approve_dependabot_pr", true)]
+    public async Task AgentOutputScrubProjectsEveryRetainedType(string type, bool nested)
+    {
+        var expected = PublicOutputFixture(type);
+        var input = expected.DeepClone().AsObject();
+        input["private advisory property GHSA-xxxx"] = nested
+            ? new JsonObject { ["private advisory"] = new JsonArray("alert 42") }
+            : JsonValue.Create("alert 42");
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(input.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+        });
+
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Empty(result["value"]!["violations"]!.AsArray());
+        var output = JsonNode.Parse(Assert.Single(result["outputs"]!.AsArray())!.GetValue<string>());
+        Assert.True(JsonNode.DeepEquals(expected, output));
+        Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("create_pull_request")]
+    [InlineData("push_to_pull_request_branch")]
+    public async Task AgentOutputScrubPreservesValidatedFrameworkTransportFields(string type)
+    {
+        var expected = PublicOutputFixture(type);
+        expected["branch"] = "auto-sec/security-updates";
+        expected["repo"] = "microsoft/aspire";
+        expected["head_repo"] = "microsoft/aspire";
+        expected["base"] = "main";
+        expected["base_branch"] = "main";
+        expected["base_commit"] = "0123456789abcdef0123456789abcdef01234567";
+        expected["diff_size"] = 123;
+        var input = expected.DeepClone().AsObject();
+        input["repo_cwd"] = "/private/alert-42";
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["outputLines"] = new JsonArray(input.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+        });
+
+        Assert.Empty(result["failures"]!.AsArray());
+        var output = JsonNode.Parse(Assert.Single(result["outputs"]!.AsArray())!.GetValue<string>());
+        Assert.True(JsonNode.DeepEquals(expected, output));
+        Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("create_pull_request", "branch", "\"alert 42\"")]
+    [InlineData("create_pull_request", "branch", "{\"advisory\":\"alert 42\"}")]
+    [InlineData("create_pull_request", "title", "[\"Automated dependency updates\"]")]
+    [InlineData("create_pull_request", "body", "null")]
+    [InlineData("push_to_pull_request_branch", "pull_request_number", "\"alert 42\"")]
+    [InlineData("push_to_pull_request_branch", "pull_request_number", "[202]")]
+    [InlineData("push_to_pull_request_branch", "pull_request_number", "0")]
+    [InlineData("push_to_pull_request_branch", "pull_request_number", "202.5")]
+    [InlineData("push_to_pull_request_branch", "message", "[\"Update dependencies\"]")]
+    [InlineData("noop", "message", "[\"alerts=1 dependabot-pr=0 auto-sec-pr=1 blocked=0 code-findings-out-of-scope=0\"]")]
+    [InlineData("approve_dependabot_pr", "pr_number", "[101]")]
+    [InlineData("approve_dependabot_pr", "head_sha", "[\"0123456789abcdef0123456789abcdef01234567\"]")]
+    [InlineData("create_pull_request", "repo", "\"private advisory\"")]
+    [InlineData("create_pull_request", "head_repo", "{\"advisory\":\"alert 42\"}")]
+    [InlineData("create_pull_request", "base", "\"alert-42\"")]
+    [InlineData("create_pull_request", "base_branch", "\"alert-42\"")]
+    [InlineData("push_to_pull_request_branch", "base_commit", "\"alert 42\"")]
+    [InlineData("push_to_pull_request_branch", "diff_size", "{\"advisory\":\"alert 42\"}")]
+    public async Task AgentOutputScrubRejectsNonPrimitiveOrInvalidRetainedFields(string type, string field, string value)
+    {
+        var input = PublicOutputFixture(type);
+        input[field] = JsonNode.Parse(value);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(input.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+        });
+
+        Assert.Equal([$"{type} invalid-inputs"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Equal([$"auto-sec agent output scrub failed: {type} invalid-inputs"], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    private static JsonObject PublicOutputFixture(string type) => type switch
+    {
+        "create_pull_request" => new JsonObject { ["type"] = type, ["branch"] = "auto-sec/security-updates", ["title"] = "Automated dependency updates", ["body"] = PublicTextBody.Replace("\r\n", "\n") },
+        "push_to_pull_request_branch" => new JsonObject { ["type"] = type, ["pull_request_number"] = 202, ["message"] = "Update dependencies" },
+        "approve_dependabot_pr" => new JsonObject { ["type"] = type, ["pr_number"] = 101, ["head_sha"] = "0123456789abcdef0123456789abcdef01234567" },
+        "noop" => new JsonObject { ["type"] = type, ["message"] = "alerts=1 dependabot-pr=0 auto-sec-pr=1 blocked=0 code-findings-out-of-scope=0" },
+        _ => throw new ArgumentOutOfRangeException(nameof(type)),
+    };
+
+    [Theory]
+    [RequiresTools(["node"])]
     [InlineData("noop-free-text", "noop.message non-template-text")]
     [InlineData("malformed-line", "line 2 malformed-output")]
     [InlineData("approval-invalid-sha", "approve_dependabot_pr invalid-inputs")]

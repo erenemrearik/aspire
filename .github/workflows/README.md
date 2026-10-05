@@ -104,7 +104,9 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   mapping assigns to the package. Otherwise the alert is reported as blocked on
   mirroring.
 - The PR body and run summaries intentionally contain only package and version
-  summaries, never advisory details.
+  summaries, never advisory details. Before publication, safe-output objects are
+  rebuilt from validated primitive fields; extra properties and unused transport
+  metadata are stripped rather than copied into public artifacts.
 
 Prerequisites:
 - The `auto-sec` label must exist.
