@@ -24,13 +24,13 @@
   </PropertyGroup>
   <PropertyGroup>
     <!-- DCP -->
-    <MicrosoftDeveloperControlPlanedarwinamd64Version>0.26.4</MicrosoftDeveloperControlPlanedarwinamd64Version>
-    <MicrosoftDeveloperControlPlanedarwinarm64Version>0.26.4</MicrosoftDeveloperControlPlanedarwinarm64Version>
-    <MicrosoftDeveloperControlPlanelinuxamd64Version>0.26.4</MicrosoftDeveloperControlPlanelinuxamd64Version>
-    <MicrosoftDeveloperControlPlanelinuxarm64Version>0.26.4</MicrosoftDeveloperControlPlanelinuxarm64Version>
-    <MicrosoftDeveloperControlPlanelinuxmuslamd64Version>0.26.4</MicrosoftDeveloperControlPlanelinuxmuslamd64Version>
-    <MicrosoftDeveloperControlPlanewindowsamd64Version>0.26.4</MicrosoftDeveloperControlPlanewindowsamd64Version>
-    <MicrosoftDeveloperControlPlanewindowsarm64Version>0.26.4</MicrosoftDeveloperControlPlanewindowsarm64Version>
+    <MicrosoftDeveloperControlPlanedarwinamd64Version>0.26.5</MicrosoftDeveloperControlPlanedarwinamd64Version>
+    <MicrosoftDeveloperControlPlanedarwinarm64Version>0.26.5</MicrosoftDeveloperControlPlanedarwinarm64Version>
+    <MicrosoftDeveloperControlPlanelinuxamd64Version>0.26.5</MicrosoftDeveloperControlPlanelinuxamd64Version>
+    <MicrosoftDeveloperControlPlanelinuxarm64Version>0.26.5</MicrosoftDeveloperControlPlanelinuxarm64Version>
+    <MicrosoftDeveloperControlPlanelinuxmuslamd64Version>0.26.5</MicrosoftDeveloperControlPlanelinuxmuslamd64Version>
+    <MicrosoftDeveloperControlPlanewindowsamd64Version>0.26.5</MicrosoftDeveloperControlPlanewindowsamd64Version>
+    <MicrosoftDeveloperControlPlanewindowsarm64Version>0.26.5</MicrosoftDeveloperControlPlanewindowsarm64Version>
     <!-- Other -->
     <MicrosoftDotNetRemoteExecutorVersion>10.0.0-beta.26472.2</MicrosoftDotNetRemoteExecutorVersion>
     <MicrosoftDotNetXUnitV3ExtensionsVersion>10.0.0-beta.26472.2</MicrosoftDotNetXUnitV3ExtensionsVersion>
@@ -52,8 +52,6 @@
     <OpenTelemetryInstrumentationRuntimeVersion>1.18.0</OpenTelemetryInstrumentationRuntimeVersion>
     <OpenTelemetryExporterOpenTelemetryProtocolVersion>1.18.0</OpenTelemetryExporterOpenTelemetryProtocolVersion>
     <AzureMonitorOpenTelemetryExporterVersion>1.9.0</AzureMonitorOpenTelemetryExporterVersion>
-    <!-- Aspire.Cli uses a preview version of StreamJsonRpc which is needed for native AOT support. -->
-    <StreamJsonRpcPackageVersionForCli>2.23.32-alpha</StreamJsonRpcPackageVersionForCli>
     <!-- Aspire.Cli runs NuGet restore in-process in a native AOT binary, which needs newer NuGet.*
          builds than the stable versions the rest of the repo uses (see Directory.Packages.props).
          These prereleases come from the dotnet11 feed, which does not carry the stable versions,
@@ -109,6 +107,8 @@
     <MicrosoftEntityFrameworkCoreSqlServerNet11Version>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreSqlServerNet11Version>
     <MicrosoftEntityFrameworkCoreToolsNet11Version>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreToolsNet11Version>
     <!-- ASP.NET Core -->
+    <MicrosoftAspNetCoreComponentsGatewayCliNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreComponentsGatewayCliNet11Version>
+    <MicrosoftAspNetCoreComponentsWebAssemblyNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreComponentsWebAssemblyNet11Version>
     <MicrosoftAspNetCoreAuthenticationCertificateNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationCertificateNet11Version>
     <MicrosoftAspNetCoreAuthenticationJwtBearerNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationJwtBearerNet11Version>
     <MicrosoftAspNetCoreAuthenticationOpenIdConnectNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationOpenIdConnectNet11Version>
