@@ -227,6 +227,11 @@
         <target state="translated">Tem filtros</target>
         <note />
       </trans-unit>
+      <trans-unit id="ResourcesGraphExportMermaidButton">
+        <source>Export as Mermaid</source>
+        <target state="new">Export as Mermaid</target>
+        <note>Downloads the currently visible resource graph as a Mermaid diagram.</note>
+      </trans-unit>
       <trans-unit id="ResourcesGraphResetButton">
         <source>Reset</source>
         <target state="translated">Redefinir</target>

@@ -19,6 +19,7 @@ using Aspire.Dashboard.Otlp.Storage;
 using Aspire.Dashboard.Serialization;
 using Aspire.Dashboard.Tests.Shared;
 using Aspire.Dashboard.Utils;
+using Aspire.Tests.Shared;
 using Aspire.Tests.Shared.DashboardModel;
 using Bunit;
 using ProtobufValue = Google.Protobuf.WellKnownTypes.Value;
@@ -399,6 +400,88 @@ public partial class ResourcesTests : DashboardTestContext
         var serializedResources = JsonSerializer.SerializeToElement(resources, DashboardJsonSerializerContext.Default.Options);
         Assert.Equal(resource.Name, serializedResources[0].GetProperty("name").GetString());
         Assert.Equivalent(resources, serializedResources.Deserialize(resources.GetType(), DashboardJsonSerializerContext.Default.Options), strict: true);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task ResourceGraph_ExportMermaid_UsesVisibleGraph(bool isDesktop, bool showHiddenResources)
+    {
+        var viewport = new ViewportInformation(IsDesktop: isDesktop, IsUltraLowHeight: false, IsUltraLowWidth: false);
+        var channel = Channel.CreateUnbounded<IReadOnlyList<ResourceViewModelChange>>();
+        var initialResources = new List<ResourceViewModel>
+        {
+            ModelTestHelpers.CreateResource("api", displayName: "api", relationships:
+            [
+                new RelationshipViewModel("cache", "Reference"),
+                new RelationshipViewModel("hidden", "Reference"),
+                new RelationshipViewModel("parameter", "Reference"),
+                new RelationshipViewModel("excluded", "Reference")
+            ]),
+            ModelTestHelpers.CreateResource("cache", displayName: "cache"),
+            ModelTestHelpers.CreateResource("hidden", displayName: "hidden", hidden: true),
+            ModelTestHelpers.CreateResource("parameter", resourceType: KnownResourceTypes.Parameter),
+            ModelTestHelpers.CreateResource("excluded", resourceType: "Excluded")
+        };
+        var dashboardClient = new TestDashboardClient(isEnabled: true, initialResources: initialResources, resourceChannelProvider: () => channel);
+        var sessionStorage = new TestSessionStorage
+        {
+            OnGetAsync = key => key == BrowserStorageKeys.ResourcesShowHiddenResources ? (true, showHiddenResources) : (false, null)
+        };
+        var dialogs = new List<TextVisualizerDialogViewModel>();
+        var dialogService = new TestDialogService((content, parameters) =>
+        {
+            dialogs.Add(Assert.IsType<TextVisualizerDialogViewModel>(content));
+            Assert.Equal("min(1000px, 75vw)", parameters.Width);
+            Assert.Equal(Aspire.Dashboard.Resources.Resources.ResourcesGraphExportMermaidButton, parameters.Title);
+            return Task.CompletedTask;
+        });
+        ResourceSetupHelpers.SetupResourcesPage(this, viewport, dashboardClient, sessionStorage: sessionStorage, dialogService: dialogService);
+        var module = JSInterop.SetupModule("/js/app-resourcegraph.js");
+        module.SetupVoid("initializeResourcesGraph", _ => true).SetVoidResult();
+        var updateGraph = module.SetupVoid("updateResourcesGraph", _ => true);
+        updateGraph.SetVoidResult();
+        module.SetupVoid("updateResourcesGraphSelected", _ => true).SetVoidResult();
+
+        Services.GetRequiredService<NavigationManager>().NavigateTo(
+            "/?view=Graph&HiddenTypes=Excluded");
+        var cut = Render<Components.Pages.Resources>(builder => builder.AddCascadingValue(viewport));
+        cut.WaitForAssertion(() => Assert.NotEmpty(module.Invocations["updateResourcesGraph"]));
+
+        await cut.Find(".graph-export").ClickAsync(new());
+
+        var dialog = Assert.Single(dialogs);
+        Assert.Equal("resources.mmd", dialog.DownloadFileName);
+        Assert.Equal(DashboardUIHelpers.PlaintextFormat, dialog.FixedFormat);
+        Assert.False(dialog.ContainsSecret);
+        Assert.Empty(JSInterop.Invocations["downloadStreamAsFile"]);
+        var expectedMermaid = showHiddenResources
+            ? "flowchart LR\n    resource0[\"api\"]\n    resource1[\"cache\"]\n    resource2[\"hidden\"]\n    resource0 --> resource1\n    resource0 --> resource2\n"
+            : "flowchart LR\n    resource0[\"api\"]\n    resource1[\"cache\"]\n    resource0 --> resource1\n";
+        Assert.Equal(expectedMermaid, dialog.Text);
+        await dialogService.LastInstance!.CloseAsync();
+
+        if (isDesktop)
+        {
+            var search = Assert.Single(cut.FindComponents<FluentTextInput>(), input => input.Instance.Name == "resources-search");
+            await cut.InvokeAsync(() => search.Instance.ValueChanged.InvokeAsync("api"));
+        }
+        else
+        {
+            await cut.InvokeAsync(() => cut.Instance.PageViewModel.TextFilter = "api");
+        }
+
+        await channel.Writer.WriteAsync([new ResourceViewModelChange(
+            ResourceViewModelChangeType.Upsert, ModelTestHelpers.CreateResource("api", displayName: "api"))]);
+        cut.WaitForAssertion(() => Assert.Single(Assert.IsType<List<ResourceDto>>(updateGraph.Invocations.Last().Arguments[0])));
+        await cut.Find(".graph-export").ClickAsync(new());
+
+        Assert.Equal(2, dialogs.Count);
+        Assert.Equal("flowchart LR\n    resource0[\"api\"]\n", dialogs[1].Text);
+        Assert.Equal(expectedMermaid, dialog.Text);
+        await dialogService.LastInstance!.CloseAsync();
     }
 
     [Fact]
