@@ -13,7 +13,6 @@ public class AgentProjectDiscoveryTests(ITestOutputHelper output) : IDisposable
     private static readonly (string Client, string Path)[] s_markers =
     [
         ("claude", ".claude"),
-        ("claude", ".mcp.json"),
         ("copilot", ".vscode"),
         ("opencode", "opencode.json"),
         ("opencode", "opencode.jsonc"),
@@ -51,6 +50,25 @@ public class AgentProjectDiscoveryTests(ITestOutputHelper output) : IDisposable
 
         Assert.Equal(ExpectedDetection(clientId), Assert.Single(scanContext.DetectedClients));
         Assert.Equal([clientId], _context.CliRunner.Commands);
+        Assert.Equal(entries, Directory.GetFileSystemEntries(_context.Workspace.Path, "*", SearchOption.AllDirectories).Order());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScanAsync_CopilotPortableMcpDoesNotIdentifyClaude(bool inParent)
+    {
+        var working = _context.Project.CreateSubdirectory("nested");
+        var results = await _context.ConfigureNativeAsync(_context.Request(AgentConfigurationScope.Project, [_context.Copilot], skills: false, mcp: true)
+            with { WorkspaceRoot = inParent ? _context.Project : working });
+        Assert.Equal(AgentConfigurationStatus.Configured, Assert.Single(results).Status);
+        Assert.True(File.Exists(Path.Combine(inParent ? _context.Project.FullName : working.FullName, ".mcp.json")));
+        var entries = Directory.GetFileSystemEntries(_context.Workspace.Path, "*", SearchOption.AllDirectories).Order().ToArray();
+
+        var scanContext = new AgentEnvironmentScanContext(working, _context.Project);
+        await _context.ClaudeCode.ScanAsync(scanContext, TestContext.Current.CancellationToken);
+
+        Assert.Empty(scanContext.DetectedClients);
         Assert.Equal(entries, Directory.GetFileSystemEntries(_context.Workspace.Path, "*", SearchOption.AllDirectories).Order());
     }
 

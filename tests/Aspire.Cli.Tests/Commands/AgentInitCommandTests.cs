@@ -141,6 +141,42 @@ public class AgentInitCommandTests(ITestOutputHelper outputHelper) : IDisposable
         Assert.Equal(AgentClientKind.VsCode, Assert.Single(request.Detections).Client);
     }
 
+    [Fact]
+    public async Task AgentInitCommand_CopilotPortableMcpDoesNotSelectOrInstrumentClaudeOnLaterSetup()
+    {
+        using var context = new AgentConfigurationTestContext(outputHelper);
+        context.SetVariable("TERM_PROGRAM", "vscode");
+        var results = await context.ConfigureNativeAsync(context.Request(AgentConfigurationScope.Project, [context.Copilot], skills: false, mcp: true));
+        Assert.Equal(AgentConfigurationStatus.Configured, Assert.Single(results).Status);
+        Assert.True(File.Exists(Path.Combine(context.Project.FullName, ".mcp.json")));
+        var services = CliTestHelper.CreateServiceCollection(context.Workspace, outputHelper, options =>
+        {
+            options.WorkingDirectory = context.Project;
+            options.TelemetryHookConfiguratorFactory = _ => context.Hooks;
+            options.GitRepositoryFactory = _ => new TestGitRepository
+            {
+                GetRootAsyncCallback = _ => Task.FromResult<DirectoryInfo?>(context.Project)
+            };
+        });
+        services.AddSingleton(context.ExecutionContext);
+        services.AddSingleton<IEnvironment>(context.Environment);
+        services.RemoveAll<IAgentEnvironmentScanner>();
+        foreach (var scanner in context.Environments)
+        {
+            services.AddSingleton(scanner);
+        }
+        using var provider = services.BuildServiceProvider();
+
+        var exitCode = await provider.GetRequiredService<RootCommand>()
+            .Parse("agent init --scope user --non-interactive").InvokeAsync().DefaultTimeout();
+
+        Assert.Equal(CliExitCodes.Success, exitCode);
+        Assert.True(File.Exists(Path.Combine(context.CopilotDirectory, "settings.json")));
+        Assert.Equal([".copilot"], context.Home.EnumerateDirectories().Select(directory => directory.Name));
+        Assert.Equal(0, context.HookInstaller.Calls);
+        Assert.False(File.Exists(context.ClaudeMcpFile));
+    }
+
     [Theory]
     [InlineData("", true)]
     [InlineData(" y", true)]

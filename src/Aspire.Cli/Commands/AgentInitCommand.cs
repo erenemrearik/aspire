@@ -98,10 +98,10 @@ internal sealed class AgentInitCommand : BaseCommand
     /// Offers native registration through the existing agent/scope flow without replacing local skills.
     /// </summary>
     internal Task<AgentInitExecutionResult> MigrateLocalSkillsAsync(
-        DirectoryInfo workspaceRoot, AgentConfigurationScope defaultScope, CancellationToken cancellationToken)
+        DirectoryInfo workspaceRoot, DirectoryInfo workingDirectory, AgentConfigurationScope defaultScope, CancellationToken cancellationToken)
     {
         var bindings = CreateBindings(this.Parse(["init", "--mcp", "n", "--playwright", "n", "--dotnet-inspect", "n", "--aspire-skills", "y"]), includeMcp: true);
-        return ExecuteAgentInitAsync(workspaceRoot, bindings with { Scope = bindings.Scope.WithDefault(defaultScope) }, cancellationToken);
+        return ExecuteAgentInitAsync(workspaceRoot, workingDirectory, bindings with { Scope = bindings.Scope.WithDefault(defaultScope) }, cancellationToken);
     }
 
     internal async Task<AgentInitExecutionResult> PromptAndChainAsync(
@@ -125,14 +125,14 @@ internal sealed class AgentInitCommand : BaseCommand
 
         // Chained new/init flows never offer MCP, even if called with a standalone binding.
         return runAgentInit
-            ? await ExecuteAgentInitAsync(workspaceRoot, bindings with { Mcp = null }, cancellationToken)
+            ? await ExecuteAgentInitAsync(workspaceRoot, ExecutionContext.WorkingDirectory, bindings with { Mcp = null }, cancellationToken)
             : new(CliExitCodes.Success, []);
     }
 
     protected override async Task<CommandResult> ExecuteAsync(ParseResult parseResult, CancellationToken cancellationToken)
     {
         var workspaceRoot = await PromptForWorkspaceRootAsync(parseResult, cancellationToken);
-        var result = await ExecuteAgentInitAsync(workspaceRoot, CreateBindings(parseResult, includeMcp: true), cancellationToken);
+        var result = await ExecuteAgentInitAsync(workspaceRoot, ExecutionContext.WorkingDirectory, CreateBindings(parseResult, includeMcp: true), cancellationToken);
         return CommandResult.FromExitCode(result.ExitCode);
     }
 
@@ -290,6 +290,7 @@ internal sealed class AgentInitCommand : BaseCommand
 
     private async Task<AgentInitExecutionResult> ExecuteAgentInitAsync(
         DirectoryInfo workspaceRoot,
+        DirectoryInfo workingDirectory,
         AgentInitPromptBindings bindings,
         CancellationToken cancellationToken)
     {
@@ -334,7 +335,7 @@ internal sealed class AgentInitCommand : BaseCommand
                 foreach (var scanner in _environmentScanners)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var context = new AgentEnvironmentScanContext(ExecutionContext.WorkingDirectory, workspaceRoot);
+                    var context = new AgentEnvironmentScanContext(workingDirectory, workspaceRoot);
                     await scanner.ScanAsync(context, cancellationToken);
                     if (context.DetectedClients.Count > 0)
                     {
@@ -405,7 +406,7 @@ internal sealed class AgentInitCommand : BaseCommand
 
         if (aspireSkills)
         {
-            var localSkills = await LocalAspireSkills.FindAsync(workspaceRoot, request.Environments, ExecutionContext, _environment, cancellationToken);
+            var localSkills = await LocalAspireSkills.FindAsync(workingDirectory, workspaceRoot, request.Environments, ExecutionContext, _environment, cancellationToken);
             foreach (var error in localSkills.Errors)
             {
                 InteractionService.DisplayMessage(KnownEmojis.Warning, error);

@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Text.Json.Nodes;
 using Aspire.Cli.Agents;
 using Aspire.Cli.Commands;
 using Aspire.Cli.Migrations;
@@ -122,22 +123,117 @@ public class LocalAspireSkillsMigrationTests(ITestOutputHelper output) : IDispos
     }
 
     [Fact]
-    public async Task DetectAsync_ResolvesTheSelectedAppHostRepositoryNotTheWorkingDirectory()
+    public async Task DetectAndApply_ResolveTheSelectedAppHostRepositoryNotTheWorkingDirectory()
     {
         var other = _context.Workspace.CreateDirectory("other-repository");
         Directory.CreateDirectory(Path.Combine(other.FullName, ".git"));
         var appHost = other.CreateSubdirectory("AppHost");
         var path = await CreateSkillAsync(other, ".github");
+        _context.SetVariable("TERM_PROGRAM", "vscode");
         var interaction = new TestInteractionService();
         using var provider = CreateProvider(interaction, interactive: false);
 
-        var descriptor = await CreateMigration(provider, interaction).DetectAsync(
-            new MigrationContext(new FileInfo(Path.Combine(appHost.FullName, "AppHost.csproj"))), TestContext.Current.CancellationToken);
+        var migration = CreateMigration(provider, interaction);
+        var context = new MigrationContext(new FileInfo(Path.Combine(appHost.FullName, "AppHost.csproj")));
+        var descriptor = await migration.DetectAsync(context, TestContext.Current.CancellationToken);
+        await migration.ApplyAsync(context, TestContext.Current.CancellationToken);
 
         Assert.NotNull(descriptor);
         Assert.Equal(other.FullName, descriptor.Metadata!["workspaceRoot"]!.GetValue<string>());
         Assert.Contains(path, descriptor.Detail);
+        Assert.True(File.Exists(Path.Combine(other.FullName, ".github", "copilot", "settings.json")));
+        Assert.Empty(_context.Project.EnumerateFileSystemInfos());
         Assert.Empty(_context.Home.EnumerateFileSystemInfos());
+    }
+
+    [Theory]
+    [InlineData("App.sln", "Microsoft Visual Studio Solution File, Format Version 12.00")]
+    [InlineData("App.slnx", "<Solution><Project Path=\"AppHost\\AppHost.csproj\" /></Solution>")]
+    public async Task DoctorAndUpdate_FindTheSameSkillsInANonGitSolution(string solutionName, string solution)
+    {
+        var appHost = _context.Project.CreateSubdirectory("AppHost");
+        var appHostFile = new FileInfo(Path.Combine(appHost.FullName, "AppHost.csproj"));
+        await AgentConfigurationTestContext.WriteAsync(appHostFile.FullName, "<Project />");
+        await AgentConfigurationTestContext.WriteAsync(Path.Combine(_context.Project.FullName, solutionName), solution);
+        var path = await CreateSkillAsync(_context.Project, ".github");
+        var timestamp = File.GetLastWriteTimeUtc(path);
+        _context.SetVariable("TERM_PROGRAM", "vscode");
+        var interaction = new TestInteractionService();
+        using var provider = CreateProvider(interaction, interactive: false);
+        var migration = CreateMigration(provider, interaction);
+        var check = new PendingMigrationsCheck([migration], NullLogger<PendingMigrationsCheck>.Instance);
+        var before = Directory.GetFileSystemEntries(_context.Workspace.Path, "*", SearchOption.AllDirectories).Order().ToArray();
+
+        var doctor = Assert.Single(await check.CheckAsync());
+        var context = new MigrationContext(appHostFile);
+        var update = await migration.DetectAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.Equal(EnvironmentCheckStatus.Warning, doctor.Status);
+        Assert.NotNull(update);
+        Assert.Equal(_context.Project.FullName, update.Metadata!["workspaceRoot"]!.GetValue<string>());
+        Assert.True(JsonNode.DeepEquals(doctor.Metadata!["files"], update.Metadata["files"]));
+        Assert.Equal(before, Directory.GetFileSystemEntries(_context.Workspace.Path, "*", SearchOption.AllDirectories).Order());
+
+        await migration.ApplyAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.True(File.Exists(Path.Combine(_context.Project.FullName, ".github", "copilot", "settings.json")));
+        Assert.False(Directory.Exists(Path.Combine(appHost.FullName, ".github")));
+        Assert.Equal("Customized local Aspire skill.", await File.ReadAllTextAsync(path));
+        Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
+        Assert.Contains(interaction.DisplayedMessages, message => message.Message == AgentCommandStrings.LocalSkills_MigrationReview);
+        Assert.Equal(0, _context.HookInstaller.Calls);
+    }
+
+    [Fact]
+    public async Task DetectAndApply_UseTheSelectedAppHostForActiveSkillAndAgentDiscovery()
+    {
+        Directory.CreateDirectory(Path.Combine(_context.Project.FullName, ".git"));
+        var appHost = _context.Project.CreateSubdirectory("active");
+        var sibling = _context.Project.CreateSubdirectory("sibling");
+        var selected = await CreateSkillAsync(appHost, ".claude");
+        var unrelated = await CreateSkillAsync(sibling, ".claude");
+        var interaction = new TestInteractionService();
+        using var provider = CreateProvider(interaction, interactive: false);
+        var migration = CreateMigration(provider, interaction);
+        var context = new MigrationContext(new FileInfo(Path.Combine(appHost.FullName, "AppHost.csproj")));
+
+        var descriptor = await migration.DetectAsync(context, TestContext.Current.CancellationToken);
+        await migration.ApplyAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(descriptor);
+        Assert.Equal(selected, Assert.Single(descriptor.Metadata!["files"]!.AsArray())!["path"]!.GetValue<string>());
+        Assert.True(File.Exists(Path.Combine(_context.Project.FullName, ".claude", "settings.json")));
+        Assert.False(File.Exists(Path.Combine(appHost.FullName, ".claude", "settings.json")));
+        Assert.False(File.Exists(Path.Combine(sibling.FullName, ".claude", "settings.json")));
+        Assert.Equal("Customized local Aspire skill.", await File.ReadAllTextAsync(selected));
+        Assert.Equal("Customized local Aspire skill.", await File.ReadAllTextAsync(unrelated));
+        Assert.Contains(interaction.DisplayedMessages, message => message.Message == AgentCommandStrings.LocalSkills_MigrationReview);
+    }
+
+    [Fact]
+    public async Task DetectAndApply_DoNotAdoptSolutionsInOrAboveHome()
+    {
+        await AgentConfigurationTestContext.WriteAsync(Path.Combine(_context.Workspace.Path, "Unrelated.slnx"), "<Solution />");
+        await AgentConfigurationTestContext.WriteAsync(Path.Combine(_context.Home.FullName, "Unrelated.slnx"), "<Solution />");
+        await CreateSkillAsync(_context.Workspace.WorkspaceRoot, ".github");
+        await CreateSkillAsync(_context.Home, ".github");
+        var appHost = _context.Home.CreateSubdirectory(Path.Combine("code", "AppHost"));
+        var selected = await CreateSkillAsync(appHost, ".claude");
+        var interaction = new TestInteractionService();
+        using var provider = CreateProvider(interaction, interactive: false);
+        var migration = CreateMigration(provider, interaction);
+        var context = new MigrationContext(new FileInfo(Path.Combine(appHost.FullName, "AppHost.csproj")));
+
+        var descriptor = await migration.DetectAsync(context, TestContext.Current.CancellationToken);
+        await migration.ApplyAsync(context, TestContext.Current.CancellationToken);
+
+        Assert.NotNull(descriptor);
+        Assert.Equal(appHost.FullName, descriptor.Metadata!["workspaceRoot"]!.GetValue<string>());
+        Assert.Equal(selected, Assert.Single(descriptor.Metadata["files"]!.AsArray())!["path"]!.GetValue<string>());
+        Assert.True(File.Exists(Path.Combine(appHost.FullName, ".claude", "settings.json")));
+        Assert.False(File.Exists(Path.Combine(_context.Home.FullName, ".github", "copilot", "settings.json")));
+        Assert.False(File.Exists(Path.Combine(_context.Workspace.Path, ".github", "copilot", "settings.json")));
+        Assert.Empty(_context.Project.EnumerateFileSystemInfos());
     }
 
     [Fact]

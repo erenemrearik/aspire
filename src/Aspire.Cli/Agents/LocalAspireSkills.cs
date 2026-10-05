@@ -21,12 +21,18 @@ internal static class LocalAspireSkills
     ];
 
     public static async Task<LocalAspireSkillScan> FindAsync(
+        DirectoryInfo workingDirectory,
         DirectoryInfo workspaceRoot,
         IEnumerable<IAgentEnvironmentScanner> agents,
         CliExecutionContext executionContext,
         IEnvironment environment,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Clients load project skills along the active ancestor chain, not just at its root.
+        // Clamping to the workspace excludes sibling projects and unrelated current directories.
+        var projectDirectories = AgentPath.ProjectDirectories(workingDirectory, workspaceRoot).ToArray();
         var files = new Dictionary<string, LocalAspireSkill>(AgentPath.Comparer);
         var errors = new HashSet<string>(StringComparer.Ordinal);
         var inspected = new HashSet<string>(AgentPath.Comparer);
@@ -38,7 +44,9 @@ internal static class LocalAspireSkills
                 string[] directories;
                 try
                 {
-                    directories = GetDirectories(agent.Id, scope, workspaceRoot, executionContext, environment).ToArray();
+                    directories = scope is AgentConfigurationScope.Project
+                        ? projectDirectories.SelectMany(directory => GetDirectories(agent.Id, scope, directory, executionContext, environment)).ToArray()
+                        : GetDirectories(agent.Id, scope, workspaceRoot, executionContext, environment).ToArray();
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
                 {

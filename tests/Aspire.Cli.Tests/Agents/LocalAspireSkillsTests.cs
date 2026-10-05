@@ -98,6 +98,54 @@ public class LocalAspireSkillsTests(ITestOutputHelper output) : IDisposable
         Assert.Empty(result.Errors);
     }
 
+    [Theory]
+    [InlineData("copilot", ".github")]
+    [InlineData("claude", ".claude")]
+    [InlineData("opencode", ".opencode")]
+    [InlineData("opencode", ".claude")]
+    [InlineData("opencode", ".agents")]
+    public async Task FindAsync_InspectsOnlyActiveAncestorsWithinTheWorkspace(string agent, string directory)
+    {
+        var parent = _context.Project.CreateSubdirectory("apps");
+        var working = parent.CreateSubdirectory("active");
+        var paths = new[] { _context.Project, parent, working }
+            .Select(root => Path.Combine(root.FullName, directory, "skills", "aspire", "SKILL.md")).ToArray();
+        foreach (var path in paths)
+        {
+            await AgentConfigurationTestContext.WriteAsync(path, "active local skill");
+        }
+        await AgentConfigurationTestContext.WriteAsync(
+            Path.Combine(parent.FullName, "sibling", directory, "skills", "aspire", "SKILL.md"), "unrelated");
+        await AgentConfigurationTestContext.WriteAsync(
+            Path.Combine(_context.Workspace.Path, directory, "skills", "aspire", "SKILL.md"), "outside the workspace");
+        var before = Directory.GetFileSystemEntries(_context.Workspace.Path, "*", SearchOption.AllDirectories).Order().ToArray();
+
+        var result = await LocalAspireSkills.FindAsync(working, _context.Project,
+            [_context.Environments.Single(scanner => scanner.Id == agent)], _context.ExecutionContext,
+            _context.Environment, TestContext.Current.CancellationToken);
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(paths.Order(AgentPath.Comparer), result.Files.Select(file => file.Path));
+        Assert.All(result.Files, file => Assert.Equal(AgentConfigurationScope.Project, file.Scope));
+        Assert.Equal(before, Directory.GetFileSystemEntries(_context.Workspace.Path, "*", SearchOption.AllDirectories).Order());
+    }
+
+    [Fact]
+    public async Task FindAsync_OutsideWorkingDirectoryUsesOnlyTheSelectedWorkspace()
+    {
+        var outside = _context.Workspace.CreateDirectory("outside");
+        var selected = Path.Combine(_context.Project.FullName, ".agents", "skills", "aspire", "SKILL.md");
+        await AgentConfigurationTestContext.WriteAsync(selected, "selected");
+        await AgentConfigurationTestContext.WriteAsync(Path.Combine(outside.FullName, ".agents", "skills", "aspire", "SKILL.md"), "outside");
+        await AgentConfigurationTestContext.WriteAsync(Path.Combine(_context.Workspace.Path, ".agents", "skills", "aspire", "SKILL.md"), "ancestor");
+
+        var result = await LocalAspireSkills.FindAsync(outside, _context.Project, [_context.OpenCode],
+            _context.ExecutionContext, _context.Environment, TestContext.Current.CancellationToken);
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(new LocalAspireSkill(selected, AgentConfigurationScope.Project), Assert.Single(result.Files));
+    }
+
     [Fact]
     public async Task FindAsync_ReportsInspectionErrorsRatherThanClaimingNoConflicts()
     {
@@ -132,14 +180,14 @@ public class LocalAspireSkillsTests(ITestOutputHelper output) : IDisposable
     public async Task FindAsync_CancellationPropagates()
     {
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            LocalAspireSkills.FindAsync(_context.Project, _context.Environments, _context.ExecutionContext,
+            LocalAspireSkills.FindAsync(_context.Project, _context.Project, _context.Environments, _context.ExecutionContext,
                 _context.Environment, new CancellationToken(canceled: true)));
         Assert.Empty(_context.Project.EnumerateFileSystemInfos());
         Assert.Empty(_context.Home.EnumerateFileSystemInfos());
     }
 
     private Task<LocalAspireSkillScan> ScanAsync(IEnumerable<IAgentEnvironmentScanner> agents)
-        => LocalAspireSkills.FindAsync(_context.Project, agents, _context.ExecutionContext, _context.Environment, TestContext.Current.CancellationToken);
+        => LocalAspireSkills.FindAsync(_context.Project, _context.Project, agents, _context.ExecutionContext, _context.Environment, TestContext.Current.CancellationToken);
 
     public void Dispose() => _context.Dispose();
 }

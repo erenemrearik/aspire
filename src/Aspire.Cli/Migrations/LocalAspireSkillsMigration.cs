@@ -25,8 +25,11 @@ internal sealed class LocalAspireSkillsMigration(
 
     public async Task<MigrationDescriptor?> DetectAsync(MigrationContext context, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var root = GetWorkspaceRoot(context);
-        var scan = await LocalAspireSkills.FindAsync(root, agents, executionContext, environment, cancellationToken);
+        var workingDirectory = context.AppHostFile?.Directory ?? executionContext.WorkingDirectory;
+
+        var scan = await LocalAspireSkills.FindAsync(workingDirectory, root, agents, executionContext, environment, cancellationToken);
         if (scan.Files.Count == 0 && scan.Errors.Count == 0)
         {
             return null;
@@ -53,11 +56,14 @@ internal sealed class LocalAspireSkillsMigration(
 
     public async Task ApplyAsync(MigrationContext context, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var root = GetWorkspaceRoot(context);
+        var workingDirectory = context.AppHostFile?.Directory ?? executionContext.WorkingDirectory;
+
         // Re-detect after the update confirmation; files can disappear or change meanwhile.
         // The old installer supplied no version/ownership marker. Neither a skill name nor
         // successful offline registration authorizes deleting a potentially customized file.
-        var scan = await LocalAspireSkills.FindAsync(root, agents, executionContext, environment, cancellationToken);
+        var scan = await LocalAspireSkills.FindAsync(workingDirectory, root, agents, executionContext, environment, cancellationToken);
         foreach (var error in scan.Errors)
         {
             interactionService.DisplayMessage(KnownEmojis.Warning, error);
@@ -69,7 +75,7 @@ internal sealed class LocalAspireSkillsMigration(
 
         var defaultScope = scan.Files.All(file => file.Scope is AgentConfigurationScope.User)
             ? AgentConfigurationScope.User : AgentConfigurationScope.Project;
-        var result = await agentInit.MigrateLocalSkillsAsync(root, defaultScope, cancellationToken);
+        var result = await agentInit.MigrateLocalSkillsAsync(root, workingDirectory, defaultScope, cancellationToken);
         if (result.ExitCode != CliExitCodes.Success || result.RegisteredEnvironments.Count == 0)
         {
             interactionService.DisplayMessage(KnownEmojis.Warning, AgentCommandStrings.LocalSkills_MigrationIncomplete);
@@ -83,6 +89,8 @@ internal sealed class LocalAspireSkillsMigration(
     private DirectoryInfo GetWorkspaceRoot(MigrationContext context)
     {
         var start = context.AppHostFile?.Directory ?? executionContext.WorkingDirectory;
+        DirectoryInfo? solutionRoot = null;
+
         // Resolve from the selected AppHost, not a different repository containing the CLI's
         // current directory. .git can be a directory or a worktree's gitdir pointer file.
         for (var directory = start; directory is not null; directory = directory.Parent)
@@ -91,10 +99,23 @@ internal sealed class LocalAspireSkillsMigration(
             {
                 return directory;
             }
+
+            // Personal configuration is not a project boundary. Do not adopt a solution
+            // in or above the user's home when resolving a project underneath it.
+            if (Path.GetRelativePath(executionContext.HomeDirectory.FullName, directory.FullName) == ".")
+            {
+                break;
+            }
+
+            if (solutionRoot is null &&
+                directory.EnumerateFiles("*.sln").Concat(directory.EnumerateFiles("*.slnx")).Any())
+            {
+                solutionRoot = directory;
+            }
         }
 
         // An ancestor's aspire.config.json can be unrelated (including a user-level file).
-        // Without a repository boundary, keep discovery and registration at the selected directory.
-        return start;
+        // A solution supplies the non-Git boundary; otherwise retain the selected directory.
+        return solutionRoot ?? start;
     }
 }

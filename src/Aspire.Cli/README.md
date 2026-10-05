@@ -71,6 +71,12 @@ aspire <command> [options]
 | `docs` | Browse and search Aspire documentation and API reference from aspire.dev. |
 | `agent` | Manage AI agent specific setup. |
 
+### Agent setup
+
+`aspire agent init` registers native Aspire plugin/catalog sources without downloading plugins. Marketplace policies are checked against the source actually registered, including its source type, pin, and path. The shared project `.mcp.json` is not evidence that Claude Code is installed.
+
+`aspire doctor` checks for local Aspire skill files along the active directory's ancestor chain within the workspace. `aspire update --migrate` uses the selected AppHost's Git root, or the nearest `.sln`/`.slnx` directory outside Git, falling back to the selected directory when neither exists. Sibling projects are not scanned, and migration preserves existing local skill files.
+
 ## Examples
 
 To initialize an empty C# AppHost without discovering incidental `.sln` or `.slnx` files, run this from the repository root:

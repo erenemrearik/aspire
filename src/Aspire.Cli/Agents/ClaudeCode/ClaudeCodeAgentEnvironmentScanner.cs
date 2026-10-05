@@ -71,15 +71,17 @@ internal sealed class ClaudeCodeAgentEnvironmentScanner : IAgentEnvironmentScann
     }
 
     /// <summary>
-    /// Checks for .claude or .mcp.json within the workspace boundary, excluding user-level home configuration.
+    /// Checks for .claude within the workspace boundary, excluding user-level home configuration.
     /// </summary>
     /// <param name="startDirectory">The directory to start searching from.</param>
     /// <param name="repositoryRoot">The workspace root to use as the boundary for searches.</param>
     private bool HasProjectConfiguration(DirectoryInfo startDirectory, DirectoryInfo repositoryRoot)
-        => AgentPath.ProjectDirectories(startDirectory, repositoryRoot).Any(directory =>
+    {
+        // Portable .mcp.json is shared with Copilot and cannot identify Claude.
+        return AgentPath.ProjectDirectories(startDirectory, repositoryRoot).Any(directory =>
             Path.GetRelativePath(_executionContext.HomeDirectory.FullName, directory.FullName) != "." &&
-            (Directory.Exists(Path.Combine(directory.FullName, ".claude")) ||
-             File.Exists(Path.Combine(directory.FullName, ".mcp.json"))));
+            Directory.Exists(Path.Combine(directory.FullName, ".claude")));
+    }
 
     /// <inheritdoc />
     public IEnumerable<AgentConfigurationTarget> GetTargets(AgentInitRequest request)

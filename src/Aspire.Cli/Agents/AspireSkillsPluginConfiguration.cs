@@ -48,23 +48,25 @@ internal static class AspireSkillsPluginConfiguration
                     pinnedSource = source;
                 }
             }
-
-            if (HasMarketplacePolicyConflict(config))
-            {
-                return AgentConfigurationEdit.Blocked(AgentCommandStrings.Configuration_PolicyBlocked);
-            }
         }
 
-        var targetMarketplaces = AgentConfigurationJson.Object(root, "extraKnownMarketplaces");
+        var targetMarketplaces = AgentConfigurationJson.OptionalObject(root, "extraKnownMarketplaces");
+        var desiredSource = targetMarketplaces?[MarketplaceName]?["source"]?.AsObject() ?? pinnedSource ?? new JsonObject
+        {
+            ["source"] = "github",
+            ["repo"] = Repository
+        };
+        if (settings.Append(root).Any(config => HasMarketplacePolicyConflict(config, desiredSource)))
+        {
+            return AgentConfigurationEdit.Blocked(AgentCommandStrings.Configuration_PolicyBlocked);
+        }
+
+        targetMarketplaces ??= AgentConfigurationJson.Object(root, "extraKnownMarketplaces");
         if (!targetMarketplaces.ContainsKey(MarketplaceName))
         {
             targetMarketplaces[MarketplaceName] = new JsonObject
             {
-                ["source"] = pinnedSource?.DeepClone() ?? new JsonObject
-                {
-                    ["source"] = "github",
-                    ["repo"] = Repository
-                }
+                ["source"] = desiredSource.DeepClone()
             };
         }
 
@@ -91,24 +93,34 @@ internal static class AspireSkillsPluginConfiguration
         };
     }
 
-    private static bool HasMarketplacePolicyConflict(JsonObject config)
+    private static bool HasMarketplacePolicyConflict(JsonObject config, JsonObject source)
     {
         // Claude's managed marketplace lists match source objects, not marketplace display
-        // names. Unknown matcher forms cannot be established offline and are left to the client.
-        // https://code.claude.com/docs/en/settings-reference#strictknownmarketplaces
+        // names. Strict matching includes the source form, ref and path: a policy permitting
+        // a pinned release does not permit our unpinned default. Unknown matchers remain blocked.
+        // https://code.claude.com/docs/en/settings-reference#exact-matching
         if (config.TryGetPropertyValue("strictKnownMarketplaces", out var allowedNode) &&
-            (allowedNode is not JsonArray allowed || !allowed.OfType<JsonObject>().Any(IsOfficialSource)))
+            (allowedNode is not JsonArray allowed || !allowed.Any(entry => JsonNode.DeepEquals(entry, source))))
         {
             return true;
         }
 
         if (config.TryGetPropertyValue("blockedMarketplaces", out var blockedNode) &&
-            (blockedNode is not JsonArray blocked || blocked.Any(entry => entry is not JsonObject source || IsOfficialSource(source) ||
-                AgentConfigurationJson.String(source["source"]) is not ("github" or "git"))))
+            (blockedNode is not JsonArray blocked || blocked.Any(entry => entry is not JsonObject blockedSource ||
+                AgentConfigurationJson.String(blockedSource["source"]) is not ("github" or "git") ||
+                MatchesBlockedSource(blockedSource, source))))
         {
             return true;
         }
 
         return false;
+    }
+
+    private static bool MatchesBlockedSource(JsonObject blocked, JsonObject source)
+    {
+        // An unpinned deny entry covers every ref; explicit refs and paths narrow that denial.
+        // https://code.claude.com/docs/en/settings-reference#blockedmarketplaces
+        return IsOfficialSource(blocked) && new[] { "ref", "path" }.All(key =>
+            !blocked.TryGetPropertyValue(key, out var value) || JsonNode.DeepEquals(value, source[key]));
     }
 }
