@@ -123,7 +123,6 @@ public partial class Resources : ComponentBase, IComponentWithTelemetry, IAsyncD
     private DotNetObjectReference<ResourcesInterop>? _resourcesInteropReference;
     private IJSObjectReference? _jsModule;
     private bool _graphInitialized;
-    private IReadOnlyList<ResourceDto> _graphResources = [];
     private AspirePageContentLayout? _contentLayout;
     private TotalItemsFooter _totalItemsFooter = default!;
     private int _totalItemsCount;
@@ -403,10 +402,13 @@ public partial class Resources : ComponentBase, IComponentWithTelemetry, IAsyncD
             return;
         }
 
+        await _jsModule.InvokeVoidAsync("updateResourcesGraph", GetResourceGraphResources());
+    }
+
+    private List<ResourceDto> GetResourceGraphResources()
+    {
         var activeResources = _resourceByName.Values.Where(Filter).OrderBy(e => e.ResourceType).ThenBy(e => e.Name).ToList();
-        var resources = activeResources.Select(r => ResourceGraphMapper.MapResource(r, activeResources, _resourceByName, ColumnsLoc, PageViewModel.ShowHiddenResources, IconResolver)).ToList();
-        _graphResources = resources;
-        await _jsModule.InvokeVoidAsync("updateResourcesGraph", resources);
+        return activeResources.Select(r => ResourceGraphMapper.MapResource(r, activeResources, _resourceByName, ColumnsLoc, PageViewModel.ShowHiddenResources, IconResolver)).ToList();
     }
 
     private Task ExportResourceGraphAsync()
@@ -415,7 +417,8 @@ public partial class Resources : ComponentBase, IComponentWithTelemetry, IAsyncD
         {
             DialogService = DialogService,
             ValueDescription = Loc[nameof(Dashboard.Resources.Resources.ResourcesGraphExportMermaidButton)],
-            Value = ResourceGraphMermaidExporter.Export(_graphResources),
+            // Map the current model even while the graph's asynchronous initialization is pending.
+            Value = ResourceGraphMermaidExporter.Export(GetResourceGraphResources()),
             DownloadFileName = "resources.mmd",
             FixedFormat = DashboardUIHelpers.PlaintextFormat
         });

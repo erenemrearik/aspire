@@ -403,11 +403,19 @@ public partial class ResourcesTests : DashboardTestContext
     }
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    public async Task ResourceGraph_ExportMermaid_UsesVisibleGraph(bool isDesktop, bool showHiddenResources)
+    [InlineData(true, false, 0)]
+    [InlineData(true, true, 0)]
+    [InlineData(false, false, 0)]
+    [InlineData(false, true, 0)]
+    [InlineData(true, false, 1)]
+    [InlineData(true, true, 1)]
+    [InlineData(false, false, 1)]
+    [InlineData(false, true, 1)]
+    [InlineData(true, false, 2)]
+    [InlineData(true, true, 2)]
+    [InlineData(false, false, 2)]
+    [InlineData(false, true, 2)]
+    public async Task ResourceGraph_ExportMermaid_UsesVisibleGraph(bool isDesktop, bool showHiddenResources, int initializationStage)
     {
         var viewport = new ViewportInformation(IsDesktop: isDesktop, IsUltraLowHeight: false, IsUltraLowWidth: false);
         var channel = Channel.CreateUnbounded<IReadOnlyList<ResourceViewModelChange>>();
@@ -439,16 +447,36 @@ public partial class ResourcesTests : DashboardTestContext
             return Task.CompletedTask;
         });
         ResourceSetupHelpers.SetupResourcesPage(this, viewport, dashboardClient, sessionStorage: sessionStorage, dialogService: dialogService);
-        var module = JSInterop.SetupModule("/js/app-resourcegraph.js");
-        module.SetupVoid("initializeResourcesGraph", _ => true).SetVoidResult();
-        var updateGraph = module.SetupVoid("updateResourcesGraph", _ => true);
-        updateGraph.SetVoidResult();
-        module.SetupVoid("updateResourcesGraphSelected", _ => true).SetVoidResult();
+        // Export while import (1) or graph initialization (2) is pending, as well as after both complete (0).
+        var initializeGraph = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var module = new TestJSObjectReference
+        {
+            BeforeInvokeAsync = identifier => identifier == "initializeResourcesGraph" ? initializeGraph.Task : Task.CompletedTask
+        };
+        var import = TestJSObjectReference.SetupImport(this, "/js/app-resourcegraph.js");
+        if (initializationStage != 1)
+        {
+            import.SetResult(module);
+        }
+        if (initializationStage != 2)
+        {
+            initializeGraph.SetResult();
+        }
 
         Services.GetRequiredService<NavigationManager>().NavigateTo(
             "/?view=Graph&HiddenTypes=Excluded");
         var cut = Render<Components.Pages.Resources>(builder => builder.AddCascadingValue(viewport));
-        cut.WaitForAssertion(() => Assert.NotEmpty(module.Invocations["updateResourcesGraph"]));
+        cut.WaitForAssertion(() =>
+        {
+            if (initializationStage == 1)
+            {
+                Assert.Single(import.Invocations);
+            }
+            else
+            {
+                Assert.Contains(module.Invocations, i => i.Identifier == (initializationStage == 2 ? "initializeResourcesGraph" : "updateResourcesGraph"));
+            }
+        });
 
         await cut.Find(".graph-export").ClickAsync(new());
 
@@ -463,6 +491,16 @@ public partial class ResourcesTests : DashboardTestContext
         Assert.Equal(expectedMermaid, dialog.Text);
         await dialogService.LastInstance!.CloseAsync();
 
+        if (initializationStage == 1)
+        {
+            import.SetResult(module);
+        }
+        if (initializationStage == 2)
+        {
+            initializeGraph.SetResult();
+        }
+        cut.WaitForAssertion(() => Assert.Contains(module.Invocations, i => i.Identifier == "updateResourcesGraph"));
+
         if (isDesktop)
         {
             var search = Assert.Single(cut.FindComponents<FluentTextInput>(), input => input.Instance.Name == "resources-search");
@@ -475,7 +513,7 @@ public partial class ResourcesTests : DashboardTestContext
 
         await channel.Writer.WriteAsync([new ResourceViewModelChange(
             ResourceViewModelChangeType.Upsert, ModelTestHelpers.CreateResource("api", displayName: "api"))]);
-        cut.WaitForAssertion(() => Assert.Single(Assert.IsType<List<ResourceDto>>(updateGraph.Invocations.Last().Arguments[0])));
+        cut.WaitForAssertion(() => Assert.Single(Assert.IsType<List<ResourceDto>>(module.Invocations.Last(i => i.Identifier == "updateResourcesGraph").Arguments[0])));
         await cut.Find(".graph-export").ClickAsync(new());
 
         Assert.Equal(2, dialogs.Count);
