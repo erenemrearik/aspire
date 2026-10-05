@@ -120,6 +120,15 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   properties are rejected because parsing would discard earlier values. Unchanged
   pre-existing metadata is preserved. New override/resolution entries and unsupported
   lockfile metadata require human intervention and are reported as `update-failed`.
+  Every patch artifact must contain a reconstructed dependency version change;
+  metadata-only patches are rejected. Regenerated package metadata must belong to
+  the specific installed entry whose version changes, not an unchanged copy of
+  that package or an unrelated upgrade. New or re-keyed entries at a version already
+  installed must preserve its existing metadata. npm project/package identities
+  remain unchanged. npm workspace-root selectors and pnpm importer/snapshot
+  references can regenerate only against installed targets with matching version
+  transitions; they cannot authorize changing the consumer's artifact metadata.
+  Other regeneration on unchanged owners requires human intervention.
   Compound npm selector edits also require human intervention: reducing `>=1 <2`
   to its first bound cannot prove changes to the other bounds non-breaking.
   Public summary rows are bound to reconstructed manifest/package/version changes,

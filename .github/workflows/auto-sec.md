@@ -468,6 +468,16 @@ Skip alerts the existing auto-sec PR already fixes.
 
 **Fix by ecosystem.** Change only the alert's own manifest directory.
 
+Each patch must contain a real reconstructed dependency version change; never
+submit a metadata-only patch. Regenerate integrity/checksum/hash and other package
+metadata only for the specific entry whose version changes. An unrelated upgrade
+or another copy of the same package does not authorize editing an unchanged entry.
+New or re-keyed entries at an already installed version must preserve its metadata.
+Preserve npm project/package identities. npm workspace-root selectors and pnpm
+importer/snapshot references must select installed targets with matching version
+changes, without changing the consumer's artifact metadata. If other metadata
+regeneration on an unchanged owner is required, report `blocked: update-failed`.
+
 - **npm** (`package-lock.json`): in the manifest directory run
   `npm install <name>@<version> --package-lock-only --ignore-scripts` for direct
   dependencies. For transitive dependencies, prefer

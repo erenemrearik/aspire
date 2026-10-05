@@ -1346,6 +1346,352 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     }
 
     [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData("package-lock.json", "none", false, 3)]
+    [InlineData("npm-shrinkwrap.json", "none", false, 3)]
+    [InlineData("package-lock.json", "other-package", false, 3)]
+    [InlineData("npm-shrinkwrap.json", "other-package", false, 3)]
+    [InlineData("package-lock.json", "other-occurrence", false, 3)]
+    [InlineData("package-lock.json", "same-entry", true, 3)]
+    [InlineData("npm-shrinkwrap.json", "same-entry", true, 3)]
+    [InlineData("package-lock.json", "none", false, 1)]
+    [InlineData("npm-shrinkwrap.json", "other-package", false, 1)]
+    [InlineData("package-lock.json", "other-occurrence", false, 1)]
+    [InlineData("npm-shrinkwrap.json", "same-entry", true, 1)]
+    public async Task AgentOutputScrubBindsIntegrityEditsToOwningVersionTransition(string basename, string transition, bool accepted, int format)
+    {
+        var path = $"extension/{basename}";
+        var baseline = JsonNode.Parse(PublicTextBase)!;
+        if (format == 1)
+        {
+            baseline["dependencies"] = new JsonObject
+            {
+                ["lodash"] = baseline["packages"]!["node_modules/lodash"]!.DeepClone(),
+                ["@types/node"] = baseline["packages"]!["node_modules/@types/node"]!.DeepClone(),
+            };
+            baseline.AsObject().Remove("packages");
+        }
+        var group = format == 1 ? "dependencies" : "packages";
+        var owner = format == 1 ? "lodash" : "node_modules/lodash";
+        var other = format == 1 ? "@types/node" : "node_modules/@types/node";
+        baseline[group]![owner]!["integrity"] = "sha512-YWJj";
+        if (transition == "other-occurrence")
+        {
+            if (format == 1)
+            {
+                baseline["dependencies"]!["parent"] = new JsonObject
+                {
+                    ["version"] = "1.0.0",
+                    ["dependencies"] = new JsonObject { ["lodash"] = new JsonObject { ["version"] = "4.17.20" } },
+                };
+            }
+            else
+            {
+                baseline["packages"]!["node_modules/parent/node_modules/lodash"] = new JsonObject { ["version"] = "4.17.20" };
+            }
+        }
+        var head = baseline.DeepClone();
+        head[group]![owner]!["integrity"] = "sha512-ZGVm";
+        var message = "Update dependencies";
+        switch (transition)
+        {
+            case "same-entry":
+                head[group]![owner]!["version"] = "4.17.21";
+                message += "\n\nlodash 4.17.20 -> 4.17.21\n";
+                break;
+            case "other-package":
+                head[group]![other]!["version"] = "22.1.0";
+                message += "\n\n@types/node 22.0.0 -> 22.1.0\n";
+                break;
+            case "other-occurrence":
+                if (format == 1)
+                {
+                    head["dependencies"]!["parent"]!["dependencies"]!["lodash"]!["version"] = "4.17.21";
+                }
+                else
+                {
+                    head["packages"]!["node_modules/parent/node_modules/lodash"]!["version"] = "4.17.21";
+                }
+                message += "\n\nlodash 4.17.20 -> 4.17.21\n";
+                break;
+        }
+        var output = PublicOutputFixture("push_to_pull_request_branch");
+        output["message"] = message;
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["baseFiles"] = new JsonObject { [path] = baseline.ToJsonString(options) },
+            ["generatedPatch"] = new JsonObject
+            {
+                ["headFiles"] = new JsonObject { [path] = head.ToJsonString(options) },
+                ["message"] = message,
+            },
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        if (accepted)
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Empty(result["failures"]!.AsArray());
+            Assert.Single(result["outputs"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+            Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
+        }
+        else
+        {
+            var reason = transition == "none" ? "no-version-transitions" : "unbound-lockfile-metadata";
+            Assert.Equal([$"aw-auto-sec-security-updates.patch {reason}"],
+                result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Empty(result["remaining"]!.AsArray());
+            Assert.Null(result["stepOutputs"]!["publication_ready"]);
+            Assert.Empty(result["publications"]!.AsArray());
+        }
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData("yarn.lock", "none", false)]
+    [InlineData("yarn.lock", "other-package", false)]
+    [InlineData("yarn.lock", "other-occurrence", false)]
+    [InlineData("yarn.lock", "ambiguous-owner", false)]
+    [InlineData("yarn.lock", "same-entry", true)]
+    [InlineData("pnpm-lock.yaml", "none", false)]
+    [InlineData("pnpm-lock.yaml", "other-package", false)]
+    [InlineData("pnpm-lock.yaml", "other-occurrence", false)]
+    [InlineData("pnpm-lock.yaml", "same-entry", true)]
+    [InlineData("uv.lock", "none", false)]
+    [InlineData("uv.lock", "other-package", false)]
+    [InlineData("uv.lock", "other-occurrence", false)]
+    [InlineData("uv.lock", "existing-target", false)]
+    [InlineData("uv.lock", "same-entry", true)]
+    public async Task AgentOutputScrubBindsTextLockfileMetadataToOwningTransition(string basename, string transition, bool accepted)
+    {
+        var path = basename == "uv.lock" ? basename : $"extension/{basename}";
+        var name = basename == "uv.lock" ? "jinja2" : "lodash";
+        var from = basename == "uv.lock" ? "3.1.5" : "4.17.20";
+        var to = basename == "uv.lock" ? "3.1.6" : "4.17.21";
+        var previous = basename == "uv.lock" ? "3.1.4" : "4.17.19";
+        var other = basename == "uv.lock" ? "markupsafe" : "react";
+        string Entry(string package, string version, string hash, bool copy) => basename switch
+        {
+            "yarn.lock" => $"\"{package}@{(copy ? "~" : "^")}{from}\":\n  version \"{version}\"\n  integrity sha512-{hash}\n",
+            "pnpm-lock.yaml" => $"  {package}@{version}:\n    resolution: {{integrity: sha512-{hash}}}\n",
+            _ => $"[[package]]\nname = \"{package}\"\nversion = \"{version}\"\nsource = {{ registry = \"https://pypi.org/simple\" }}\nsdist = {{ url = \"https://files.pythonhosted.org/packages/{package}-{version}.tar.gz\", hash = \"sha256:{hash}\" }}\n",
+        };
+        var prefix = basename == "pnpm-lock.yaml" ? "packages:\n" : "";
+        var baseText = prefix;
+        var headText = prefix;
+        if (transition is "other-occurrence" or "existing-target" or "ambiguous-owner")
+        {
+            baseText += Entry(name, previous, "abcd", transition != "ambiguous-owner");
+            headText += Entry(name, transition is "existing-target" or "ambiguous-owner" ? from : to, "abcd", transition != "ambiguous-owner");
+        }
+        baseText += Entry(name, from, "abcd", false);
+        headText += Entry(name, transition == "same-entry" ? to : from, "cdef", false);
+        if (transition == "other-package")
+        {
+            baseText += Entry(other, "2.1.3", "abcd", false);
+            headText += Entry(other, "2.1.4", "abcd", false);
+        }
+        var message = transition switch
+        {
+            "none" => "Update dependencies",
+            "other-package" => $"Update dependencies\n\n{other} 2.1.3 -> 2.1.4\n",
+            "other-occurrence" => $"Update dependencies\n\n{name} {previous} -> {to}\n",
+            "existing-target" or "ambiguous-owner" => $"Update dependencies\n\n{name} {previous} -> {from}\n",
+            _ => $"Update dependencies\n\n{name} {from} -> {to}\n",
+        };
+        var output = PublicOutputFixture("push_to_pull_request_branch");
+        output["message"] = message;
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["baseFiles"] = new JsonObject { [path] = baseText },
+            ["generatedPatch"] = new JsonObject { ["headFiles"] = new JsonObject { [path] = headText }, ["message"] = message },
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        if (accepted)
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Empty(result["failures"]!.AsArray());
+            Assert.Single(result["outputs"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+            Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
+        }
+        else
+        {
+            var reason = transition == "none" ? "no-version-transitions" : "unbound-lockfile-metadata";
+            Assert.Equal([$"aw-auto-sec-security-updates.patch {reason}"],
+                result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Empty(result["remaining"]!.AsArray());
+            Assert.Null(result["stepOutputs"]!["publication_ready"]);
+            Assert.Empty(result["publications"]!.AsArray());
+        }
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task PatchGateDoesNotBorrowTransitionFromAnotherArtifact()
+    {
+        var baseline = JsonNode.Parse(PublicTextBase)!;
+        baseline["packages"]!["node_modules/lodash"]!["integrity"] = "sha512-YWJj";
+        var baseText = baseline.ToJsonString(new JsonSerializerOptions { WriteIndented = true }).Replace("\r\n", "\n", StringComparison.Ordinal);
+        var integrityLine = baseText.Split('\n')
+            .Single(line => line.Contains("sha512-YWJj", StringComparison.Ordinal));
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "patch-gate",
+            ["workspaceFiles"] = new JsonObject { ["extension/package.json"] = PackageJsonBase, ["extension/package-lock.json"] = baseText },
+            ["patchFiles"] = new JsonObject
+            {
+                ["aw-upgrade.patch"] = ReplacementPatch("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\""),
+                ["aw-metadata.patch"] = ReplacementPatch("extension/package-lock.json", baseText, integrityLine, integrityLine.Replace("sha512-YWJj", "sha512-ZGVm", StringComparison.Ordinal)),
+            },
+        });
+
+        Assert.Equal(["(patch) no-version-transitions"],
+            result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}"));
+        Assert.Single(result["failures"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData("consumer", true)]
+    [InlineData("unbound-consumer", false)]
+    [InlineData("consumer-hash", false)]
+    [InlineData("package-identity", false)]
+    [InlineData("root-identity", false)]
+    [InlineData("new-existing-target", false)]
+    public async Task AgentOutputScrubBindsNpmConsumersAndPreservesPackageIdentity(string scenario, bool accepted)
+    {
+        const string path = "extension/package-lock.json";
+        var baseline = JsonNode.Parse(PublicTextBase)!;
+        baseline["name"] = "public-app";
+        baseline["packages"]![""] = new JsonObject { ["dependencies"] = new JsonObject { ["lodash"] = "^4.17.20" } };
+        baseline["packages"]!["node_modules/lodash"]!["name"] = "lodash";
+        baseline["packages"]!["node_modules/lodash"]!["integrity"] = "sha512-YWJj";
+        if (scenario == "new-existing-target")
+        {
+            baseline["packages"]!["node_modules/existing/node_modules/lodash"] = new JsonObject
+            {
+                ["name"] = "lodash", ["version"] = "4.17.21", ["integrity"] = "sha512-YWJj",
+            };
+        }
+        var head = baseline.DeepClone();
+        head["packages"]!["node_modules/lodash"]!["version"] = "4.17.21";
+        head["packages"]![""]!["dependencies"]!["lodash"] = scenario == "unbound-consumer" ? "^4.17.22" : "^4.17.21";
+        switch (scenario)
+        {
+            case "consumer-hash":
+                head["packages"]![""]!["integrity"] = "sha512-ZGVm";
+                break;
+            case "package-identity":
+                head["packages"]!["node_modules/lodash"]!["name"] = "other";
+                break;
+            case "root-identity":
+                head["name"] = "other";
+                break;
+            case "new-existing-target":
+                head["packages"]!["node_modules/new/node_modules/lodash"] = new JsonObject
+                {
+                    ["name"] = "lodash", ["version"] = "4.17.21", ["integrity"] = "sha512-ZGVm",
+                };
+                break;
+        }
+        const string message = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21\n";
+        var output = PublicOutputFixture("push_to_pull_request_branch");
+        output["message"] = message;
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["baseFiles"] = new JsonObject { [path] = baseline.ToJsonString(options) },
+            ["generatedPatch"] = new JsonObject { ["headFiles"] = new JsonObject { [path] = head.ToJsonString(options) }, ["message"] = message },
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        if (accepted)
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Empty(result["failures"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        }
+        else
+        {
+            Assert.Equal(["aw-auto-sec-security-updates.patch unbound-lockfile-metadata"],
+                result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Empty(result["remaining"]!.AsArray());
+            Assert.Null(result["stepOutputs"]!["publication_ready"]);
+            Assert.Empty(result["publications"]!.AsArray());
+        }
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData("importer", true)]
+    [InlineData("snapshot", true)]
+    [InlineData("snapshot-hash", false)]
+    [InlineData("misplaced-hash", false)]
+    public async Task AgentOutputScrubSeparatesPnpmConsumerReferencesFromArtifactMetadata(string scenario, bool accepted)
+    {
+        const string path = "extension/pnpm-lock.yaml";
+        const string packages = "packages:\n  lodash@4.17.20:\n    resolution: {integrity: sha512-YWJj}\n";
+        var consumer = scenario == "importer"
+            ? "importers:\n  .:\n    dependencies:\n      lodash:\n        specifier: ^4.17.20\n        version: 4.17.20\n"
+            : "snapshots:\n  parent@1.0.0:\n    resolution: {integrity: sha512-YWJj}\n    dependencies:\n      lodash: 4.17.20\n";
+        var baseText = packages + consumer;
+        var headText = baseText.Replace("4.17.20", "4.17.21", StringComparison.Ordinal);
+        if (scenario == "snapshot-hash")
+        {
+            headText = packages.Replace("4.17.20", "4.17.21", StringComparison.Ordinal)
+                + consumer.Replace("4.17.20", "4.17.21", StringComparison.Ordinal).Replace("sha512-YWJj", "sha512-ZGVm", StringComparison.Ordinal);
+        }
+        else if (scenario == "misplaced-hash")
+        {
+            headText += "      integrity: sha512-ZGVm\n";
+        }
+        const string message = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21\n";
+        var output = PublicOutputFixture("push_to_pull_request_branch");
+        output["message"] = message;
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["baseFiles"] = new JsonObject { [path] = baseText },
+            ["generatedPatch"] = new JsonObject { ["headFiles"] = new JsonObject { [path] = headText }, ["message"] = message },
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        if (accepted)
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Empty(result["failures"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        }
+        else
+        {
+            Assert.Equal(["aw-auto-sec-security-updates.patch unbound-lockfile-metadata"],
+                result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Empty(result["remaining"]!.AsArray());
+            Assert.Null(result["stepOutputs"]!["publication_ready"]);
+            Assert.Empty(result["publications"]!.AsArray());
+        }
+    }
+
+    [Theory]
     [RequiresTools(["node"])]
     [InlineData("https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/other/-/other-4.17.21.tgz", "unbound-lockfile-artifact")]
     [InlineData("https://new.example/lodash/-/lodash-4.17.21.tgz", "new-package-source")]

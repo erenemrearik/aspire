@@ -2184,7 +2184,232 @@ function checkPatchContents(patchText, readBaseTexts = () => [], rebuiltFiles = 
             violations.push({ path, reason: 'unsupported-lockfile-text' });
         }
     }
+    if (violations.length === 0) {
+        violations.push(...checkLockfileMetadataTransitions(rebuiltFiles));
+    }
     return violations;
+}
+
+// Compare final reconstructed files, not intermediate commits in a patch series.
+// A package-wide transition cannot authorize rewriting an unchanged installed copy's
+// checksum. New/re-keyed entries at an already installed version must preserve metadata.
+function checkLockfileMetadataTransitions(rebuiltFiles) {
+    const directory = require('node:path').posix.dirname;
+    const transitions = [...rebuiltFiles].flatMap(([path, { base, head }]) => {
+        const ecosystem = PATH_ECOSYSTEMS.get(basenameOf(path).toLowerCase());
+        return ecosystem ? manifestVersionChanges(path, base, head, ecosystem)
+            .filter(change => !change.from.length || change.from.some(version => !sameVersion(version, change.to)))
+            .map(change => ({ ...change, path, ecosystem })) : [];
+    });
+    if (!transitions.length) {
+        return [{ path: '(patch)', reason: 'no-version-transitions' }];
+    }
+    const violations = [];
+    for (const [path, { base, head }] of rebuiltFiles) {
+        if (!isLockfile(path)) {
+            continue;
+        }
+        const ecosystem = PATH_ECOSYSTEMS.get(basenameOf(path).toLowerCase());
+        const before = lockfileMetadataRecords(path, base);
+        const after = lockfileMetadataRecords(path, head);
+        const sameIdentity = (a, b) => normalizePackageName(ecosystem, a.name) === normalizePackageName(ecosystem, b.name);
+        const targetTransition = entry => transitions.some(change => change.path === path
+            && sameIdentity(change, entry) && sameVersion(change.to, entry.version));
+        const sameMetadata = (a, b) => jsonDifferencePaths(a, b).length === 0;
+        for (const record of after) {
+            const oldOccurrences = before.filter(entry => entry.key === record.key);
+            const newOccurrences = after.filter(entry => entry.key === record.key);
+            const previous = oldOccurrences[0];
+            const ambiguous = oldOccurrences.length > 1 || newOccurrences.length > 1;
+            let bound = previous && sameMetadata(previous.metadata, record.metadata);
+            if (ambiguous) {
+                // Duplicate selectors/tables have no unique owning transition. Preserve
+                // their complete multiset rather than borrowing another copy's metadata.
+                const sameRecord = candidate => sameMetadata(candidate.metadata, record.metadata)
+                    && candidate.entries.length === record.entries.length
+                    && candidate.entries.every(entry => record.entries.some(other =>
+                        sameIdentity(entry, other) && sameVersion(entry.version, other.version)));
+                bound = oldOccurrences.filter(sameRecord).length === newOccurrences.filter(sameRecord).length;
+            }
+            if (!bound && !ambiguous && record.entries.length) {
+                bound = record.entries.every(entry => {
+                    const old = previous?.entries.find(candidate => sameIdentity(candidate, entry));
+                    if (old) {
+                        return !sameVersion(old.version, entry.version) && targetTransition(entry);
+                    }
+                    const existing = before.filter(candidate => candidate.entries.some(oldEntry =>
+                        sameIdentity(oldEntry, entry) && sameVersion(oldEntry.version, entry.version)));
+                    return existing.length
+                        ? existing.some(candidate => sameMetadata(candidate.metadata, record.metadata))
+                        : targetTransition(entry);
+                });
+            }
+            if (record.json && record.entries.length && record.metadata.name !== previous?.metadata.name
+                && (previous?.metadata.name !== undefined || record.metadata.name !== record.entries[0].name)) {
+                bound = false;
+            }
+            if (jsonDifferencePaths(previous?.references ?? {}, record.references ?? {}).length > 0) {
+                bound &&= Object.entries(record.references).every(([key, ref]) => {
+                    if (sameMetadata(previous?.references?.[key], ref)) {
+                        return true;
+                    }
+                    return typeof ref.selector === 'string' && !/\s|\|\|/.test(ref.selector)
+                        && isPublicLockfileVersion(ref.selector)
+                        && after.some(candidate => candidate.entries.some(entry => sameIdentity(entry, ref)
+                            && sameVersion(entry.version, stripRangeOperators(ref.selector))
+                            && transitions.some(change => sameIdentity(change, entry) && sameVersion(change.to, entry.version)
+                                && directory(change.path) === directory(path))));
+                });
+            }
+            if (!bound || (record.referenceText !== previous?.referenceText
+                && !pnpmReferencesBound(record.referenceText, previous?.referenceText ?? '', after, targetTransition))) {
+                violations.push({ path, reason: 'unbound-lockfile-metadata' });
+                break;
+            }
+        }
+    }
+    return violations;
+}
+
+function lockfileMetadataRecords(path, text) {
+    const name = basenameOf(path).toLowerCase();
+    const records = [];
+    if (METADATA_LOCKFILE_BASENAMES.has(name)) {
+        const json = readJson(text) ?? {};
+        const { packages, dependencies, requires, lockfileVersion, ...rootMetadata } = json;
+        if (lockfileVersion !== undefined && ![1, 2, 3].includes(lockfileVersion)) {
+            rootMetadata.lockfileVersion = lockfileVersion;
+        }
+        records.push({ key: '(root)', metadata: rootMetadata, entries: [] });
+        const versions = new Map(packageLockEntries(text).map(entry => [entry.key, entry]));
+        for (const [key, value] of Object.entries(json.packages ?? {})) {
+            const metadata = { ...value };
+            const references = {};
+            if (key === '') {
+                // The workspace root is a consumer, not a downloaded package. Its
+                // dependency selectors can regenerate without changing project identity.
+                for (const group of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+                    for (const [name, selector] of Object.entries(metadata[group] ?? {})) {
+                        references[`${group}/${name}`] = { name, selector };
+                    }
+                    delete metadata[group];
+                }
+            } else {
+                delete metadata.version;
+            }
+            records.push({ key, metadata, references, json: true, entries: versions.has(key) ? [versions.get(key)] : [] });
+        }
+        const visit = (dependencies, parent) => {
+            for (const [key, value] of Object.entries(dependencies ?? {})) {
+                const id = `${parent}/${key}`;
+                const { version, dependencies: children, ...metadata } = value;
+                records.push({ key: `v1${id}`, metadata, json: true, entries: versions.has(`v1${id}`) ? [versions.get(`v1${id}`)] : [] });
+                visit(children, id);
+            }
+        };
+        visit(json.dependencies, '');
+        return records;
+    }
+    // Yarn selectors, pnpm installation/peer keys, and uv package tables own their
+    // complete metadata block. Unsupported regeneration on an unchanged owner fails
+    // closed; an unrelated manifest bump cannot authorize it.
+    const lines = String(text ?? '').split(/\r?\n/);
+    let section = '';
+    let block = [];
+    let key = '(root)';
+    const flush = () => {
+        if (!block.length) {
+            return;
+        }
+        const content = block.join('\n');
+        const entries = manifestReader(path)(name === 'pnpm-lock.yaml' ? `${section}:\n${content}` : content)
+            .filter(entry => name !== 'pnpm-lock.yaml' || entry.key === undefined);
+        let inReferences = false;
+        const references = [];
+        const metadata = block.filter((line, index) => {
+            if (name === 'pnpm-lock.yaml') {
+                if (/^ {4}(?:dependencies|devDependencies|optionalDependencies):\s*$/.test(line)) {
+                    inReferences = true;
+                } else if (line.trim() && !/^ {6}/.test(line)) {
+                    inReferences = false;
+                }
+                if (inReferences) {
+                    references.push(line);
+                    return false;
+                }
+            }
+            return !(entries.length && (index === 0 || (name === 'yarn.lock'
+                ? /^ {2}version:?\s/.test(line) : name === 'uv.lock' && /^version\s*=/.test(line))));
+        }).filter(line => line.trim()).join('\n');
+        const identity = name === 'uv.lock' && entries.length ? `${entries[0].name}/${entries[0].version}` : key;
+        records.push({ key: `${section}/${identity}`, entries, metadata, referenceText: references.join('\n') });
+    };
+    for (const line of lines) {
+        const root = name === 'pnpm-lock.yaml' && /^(\S.*?):\s*$/.exec(line);
+        const start = name === 'uv.lock' ? /^\[\[package\]\]\s*$/.test(line)
+            : name === 'pnpm-lock.yaml' ? /^ {2}\S.*?:\s*$/.test(line) : /^\S.*:\s*$/.test(line);
+        if (root || start) {
+            flush();
+            block = [];
+            if (root) {
+                section = root[1];
+                key = '(root)';
+            } else {
+                key = line;
+            }
+        }
+        block.push(line);
+    }
+    flush();
+    return records;
+}
+
+// pnpm consumer data has either scalar references or an importer selector/version pair:
+//   dependencies:\n      lodash: 4.17.21
+//   dependencies:\n      lodash:\n        specifier: ^4.17.21\n        version: 4.17.21
+// Do not let a dependency-group wrapper hide arbitrary artifact fields.
+function pnpmReferencesBound(head, base, records, targetTransition) {
+    const parse = text => {
+        const refs = new Map();
+        let group = '';
+        let pending = '';
+        const unquote = value => value.trim().replace(/^['"]|['"]$/g, '');
+        for (const line of text.split('\n').filter(line => line.trim())) {
+            let match;
+            if ((match = /^ {4}(dependencies|devDependencies|optionalDependencies):\s*$/.exec(line))) {
+                group = match[1];
+            } else if (group && (match = /^ {6}(\S.*?):\s*(\S.*)?$/.exec(line))) {
+                const name = unquote(match[1]);
+                if (!PUBLIC_PACKAGE_NAME.test(name)) {
+                    return null;
+                }
+                pending = `${group}/${name}`;
+                if (refs.has(pending)) {
+                    return null;
+                }
+                refs.set(pending, { name, ...(match[2] ? { version: unquote(match[2]) } : {}) });
+            } else if (pending && (match = /^ {8}(specifier|version):\s*(\S.*)$/.exec(line))) {
+                if (refs.get(pending)[match[1]] !== undefined) {
+                    return null;
+                }
+                refs.get(pending)[match[1]] = unquote(match[2]);
+            } else {
+                return null;
+            }
+        }
+        return refs;
+    };
+    const before = parse(base);
+    const after = parse(head);
+    return before !== null && after !== null && [...after].every(([key, ref]) => {
+        if (jsonDifferencePaths(before.get(key), ref).length === 0) {
+            return true;
+        }
+        const version = ref.version?.replace(/\(.*$/, '');
+        return version && records.some(record => record.entries.some(entry => entry.name === ref.name
+            && sameVersion(entry.version, version) && targetTransition(entry)))
+            && (ref.specifier === undefined || isPublicLockfileVersion(ref.specifier));
+    });
 }
 
 // Lockfiles whose formats allow `#` comments: yarn.lock (https://classic.yarnpkg.com/lang/en/docs/yarn-lock/),
