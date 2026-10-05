@@ -40,7 +40,7 @@ internal static class ProcessStartInfoHelper
                 else
                 {
                     var variable = ArgumentEnvironmentVariablePrefix + index.ToString(CultureInfo.InvariantCulture);
-                    SetEnvironmentVariable(startInfo, variable, arg);
+                    SetEnvironmentVariable(startInfo, variable, EncodeQuotedWindowsArgument(arg, forBatchShim: true));
                     commandLine.Append(" \"%").Append(variable).Append("%\"");
                 }
                 index++;
@@ -83,8 +83,13 @@ internal static class ProcessStartInfoHelper
             return argument;
         }
 
-        var result = new StringBuilder(argument.Length + 2);
-        result.Append('"');
+        return $"\"{EncodeQuotedWindowsArgument(argument, forBatchShim: false)}\"";
+    }
+#endif
+
+    private static string EncodeQuotedWindowsArgument(string argument, bool forBatchShim)
+    {
+        var result = new StringBuilder(argument.Length);
         var backslashCount = 0;
         foreach (var character in argument)
         {
@@ -95,7 +100,17 @@ internal static class ProcessStartInfoHelper
             }
             if (character == '"')
             {
-                result.Append('\\', (backslashCount * 2) + 1);
+                // cmd does not recognize backslash-escaped quotes. For batch shims,
+                // a "quoted" & value becomes "a ""quoted"" & value", keeping shell
+                // metacharacters quoted while the native child restores the literal quotes.
+                // CRT parsing also requires doubled backslashes before quotes and the
+                // closing delimiter; native executables use the usual backslash escape.
+                // https://learn.microsoft.com/cpp/c-language/parsing-c-command-line-arguments
+                result.Append('\\', (backslashCount * 2) + (forBatchShim ? 0 : 1));
+                if (forBatchShim)
+                {
+                    result.Append('"');
+                }
                 result.Append('"');
                 backslashCount = 0;
                 continue;
@@ -106,9 +121,7 @@ internal static class ProcessStartInfoHelper
             result.Append(character);
         }
         result.Append('\\', backslashCount * 2);
-        result.Append('"');
 
         return result.ToString();
     }
-#endif
 }

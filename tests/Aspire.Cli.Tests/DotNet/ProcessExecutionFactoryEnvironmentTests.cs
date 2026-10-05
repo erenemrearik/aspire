@@ -51,6 +51,19 @@ public sealed class ProcessExecutionFactoryEnvironmentTests(ITestOutputHelper ou
     }
 
     [Fact]
+    public void SetCommand_WindowsBatchShim_EncodesQuotesAndTrailingBackslashes()
+    {
+        var startInfo = new ProcessStartInfo();
+        string[] arguments = ["a \"quoted\" value", "backslash\\\"quote", @"C:\tools\trailing\"];
+
+        ProcessStartInfoHelper.SetCommand(startInfo, @"C:\tools\npm.cmd", arguments, isWindows: true);
+
+        Assert.Equal(
+            ["a \"\"quoted\"\" value", "backslash\\\\\"\"quote", @"C:\tools\trailing\\"],
+            Enumerable.Range(0, arguments.Length).Select(index => startInfo.Environment[$"ASPIRE_COMMAND_SHIM_ARGUMENT_{index}"]));
+    }
+
+    [Fact]
     [RequiresTools(["node"])]
     public async Task CreateExecution_WindowsBatchShim_PreservesLiteralArgumentText()
     {
@@ -75,7 +88,12 @@ public sealed class ProcessExecutionFactoryEnvironmentTests(ITestOutputHelper ou
         var output = new List<string>();
         await using var execution = CreateFactory().CreateExecution(startInfo, new ProcessInvocationOptions
         {
-            StandardOutputCallback = output.Add
+            StandardOutputCallback = line =>
+            {
+                output.Add(line);
+                outputHelper.WriteLine(line);
+            },
+            StandardErrorCallback = outputHelper.WriteLine
         });
         Assert.True(await execution.StartAsync(TestContext.Current.CancellationToken));
         Assert.Equal(0, await execution.WaitForExitAsync(TestContext.Current.CancellationToken));
