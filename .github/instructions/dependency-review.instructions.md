@@ -20,5 +20,7 @@ For extension updates, check the declared minimum VS Code host as well as the
 latest host; newer type declarations alone do not prove a runtime regression.
 For image majors, review migration/data-format and supported platform effects.
 Report definite defects separately from unknowns and follow-up scenarios.
+Keep uncertainty in the evidence/gap assessment rather than speculative defect
+comments. For mixed diffs, continue the normal correctness review of other code.
 Existing approved-feed, action allow-list, generated-API, and test-selection
 rules still apply; do not duplicate or weaken them here.

@@ -161,6 +161,16 @@ def score(corpus, expected, output, adjudication, expected_case_ids):
     return {"totals": totals, "cases": details, "schema_alias_used": "rows" not in output}
 
 
+def finding_adjudication(decision):
+    notes = [{"targets": targets} for targets in decision["matches"]]
+    for metric in ("fp", "unsupported", "duplicate"):
+        for index in decision.get(metric, []):
+            if not isinstance(index, int) or not 0 <= index < len(notes):
+                raise ValueError(f"Invalid {metric} finding index: {index}")
+            notes[index][metric] = True
+    return notes
+
+
 def adjudicate(directory):
     """Expand explicit human decisions, never infer truth from claim keywords."""
     directory = Path(directory)
@@ -175,9 +185,7 @@ def adjudicate(directory):
             decision = decisions[row["id"]]
             citations = row["evidence"] + [e for f in row["findings"] for e in f["evidence"]]
             citations += [e for x in row["execution"] for e in x["evidence"]]
-            finding_notes = [{"targets": targets} for targets in decision["matches"]]
-            for index in decision.get("duplicate", []):
-                finding_notes[index]["duplicate"] = True
+            finding_notes = finding_adjudication(decision)
             notes[row["id"]] = {
                 "findings": finding_notes,
                 "row_targets": decision.get("row_targets", []),

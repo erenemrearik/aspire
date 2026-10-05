@@ -19,6 +19,9 @@ and its CI-infrastructure reference; it is not a separate testing framework.
    **blocked** (with failing prerequisite and log), or **unexercised** (not selected,
    skipped, pending, cancelled, or no relevant scenario). A successful wrapper
    with skipped test steps does not count as successful scenario execution.
+   Classify each consumer separately: a queued/pending/skipped job is
+   **unexercised**, not **blocked**, unless evidence identifies its failed or
+   denied prerequisite. Do not copy an aggregate row's state to every consumer.
 4. For generated workflows, use the installed gh-aw CLI and compilation command
    in `validate-agentic-workflows.yml`; compare committed outputs after compiling
    in an isolated workspace. Wrapper SHA and explicit CLI version need not match;
@@ -39,6 +42,9 @@ and its CI-infrastructure reference; it is not a separate testing framework.
    State precisely which behavior was exercised and what remains unknown.
    For dependency reports, replace the generic `PR VERIFIED` verdict with
    objective findings and the consumer execution/gap table, even when CI is green.
+   Record a prerequisite gap once in that table; do not duplicate it as several
+   review defects. A bounded advisory caveat does not erase a successful tested
+   scenario or establish an advisory finding.
 
 For experimental copies, preserve source PR/head provenance, mark every draft
 `IGNORE — DO NOT MERGE`, and label reduced reproductions versus full diff copies.

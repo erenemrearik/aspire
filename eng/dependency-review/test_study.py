@@ -4,7 +4,7 @@
 import copy
 import unittest
 
-from study import ROOT, deterministic, load, score
+from study import ROOT, deterministic, finding_adjudication, load, score
 
 
 class StudyTests(unittest.TestCase):
@@ -76,6 +76,22 @@ class StudyTests(unittest.TestCase):
         note["unsupported"] = True
         result = self.assess()["totals"]
         self.assertEqual((1, 1, 2), (result["fp"], result["unsupported"], result["miss"]))
+
+    def test_plan_preserves_false_positive_unsupported_and_duplicate_annotations(self):
+        result = finding_adjudication({
+            "matches": [[], ["null-invariant"]],
+            "fp": [0], "unsupported": [0], "duplicate": [1],
+        })
+        self.assertEqual([
+            {"targets": [], "fp": True, "unsupported": True},
+            {"targets": ["null-invariant"], "duplicate": True},
+        ], result)
+
+    def test_plan_rejects_invalid_annotation_indices(self):
+        for index in (-1, 1, "0"):
+            with self.subTest(index=index):
+                with self.assertRaisesRegex(ValueError, "Invalid fp finding index"):
+                    finding_adjudication({"matches": [[]], "fp": [index]})
 
     def test_schema_alias_not_false_positive(self):
         self.output["results"] = self.output.pop("rows")
