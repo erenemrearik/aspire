@@ -48,6 +48,7 @@ jobs:
         run: |
           python3 -m unittest discover -s eng/dependency-review -p 'test_*.py'
           python3 eng/dependency-review/check.py
+          (cd extension && node scripts/validate-lockfile-registry.cjs)
 
       - id: compute_version_suffix
         name: Compute version suffix for PRs

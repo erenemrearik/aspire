@@ -79,6 +79,7 @@ public sealed class TestTriggerMapTests
                 run.ToString().Contains("eng/dependency-review/check.py", StringComparison.Ordinal));
         Assert.Equal("${{ github.event_name == 'pull_request' }}", constraintStep.Children[new YamlScalarNode("if")].ToString());
         Assert.Contains("unittest discover -s eng/dependency-review", constraintStep.Children[new YamlScalarNode("run")].ToString());
+        Assert.Contains("node scripts/validate-lockfile-registry.cjs", constraintStep.Children[new YamlScalarNode("run")].ToString());
     }
 
     [Theory]

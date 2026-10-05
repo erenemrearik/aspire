@@ -9,7 +9,14 @@ Audit sources are not download sources. Missing/malformed inputs fail explicitly
 ```bash
 python3 eng/dependency-review/check.py
 python3 -m unittest discover -s eng/dependency-review -p 'test_*.py'
+(cd extension && node scripts/validate-lockfile-registry.cjs)
 ```
+
+The extension's existing Node validator remains the exact-feed authority.
+The pilot's Yarn URL checks complement its substring match with parsed HTTPS,
+host, organization-path and credential boundaries; they do not replace it.
+The PR preparation step runs both, so an otherwise approved Azure feed is not
+mistaken for the extension's specific `dotnet-public-npm` feed.
 
 Exit codes: `0` means these constraints passed, `1` means a constraint failed,
 and `2` means inspection could not complete. `--root <checkout>` inspects another

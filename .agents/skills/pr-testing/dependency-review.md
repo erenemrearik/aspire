@@ -7,6 +7,8 @@ and its CI-infrastructure reference; it is not a separate testing framework.
    documented constraints. Check the head again before presenting results.
    Run `python3 eng/dependency-review/check.py` and its focused tests
    (`python3 -m unittest discover -s eng/dependency-review -p 'test_*.py'`).
+   Reuse the extension's exact-feed check:
+   `(cd extension && node scripts/validate-lockfile-registry.cjs)`.
    Preserve nonzero results; do not remove holds or switch feeds to make CI green.
 2. Identify **required consumers** from project references, runtime-only package
    loading, templates, generators, deployment outputs, host versions, and supported
