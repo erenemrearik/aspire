@@ -2,9 +2,9 @@
   "type": "containerimage.v0",
   "source": "docker.io/library/busybox:v1",
   "publications": {
-    "registry": {
+    "tools-registry": {
       "registry": "registry",
-      "image": "{endpoint.value}/tools:v1"
+      "image": "{tools-registry.image}"
     }
   }
 }

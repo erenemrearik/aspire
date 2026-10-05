@@ -6,6 +6,7 @@
 #pragma warning disable ASPIRECOMPUTE002
 
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Aspire.Hosting.Azure;
@@ -14,6 +15,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.RemoteHost;
 using Aspire.TypeSystem;
 using Aspire.Hosting.CodeGeneration.TypeScript.Tests.TestTypes;
+using Aspire.TestUtilities;
 using Azure.Provisioning.AppContainers;
 using Azure.Provisioning.AppService;
 
@@ -22,6 +24,121 @@ namespace Aspire.Hosting.CodeGeneration.TypeScript.Tests;
 public class AtsTypeScriptCodeGeneratorTests
 {
     private readonly AtsTypeScriptCodeGenerator _generator = new();
+
+    [Fact]
+    [RequiresTools(["node", "npm"])]
+    [SkipOnPlatform(TestPlatforms.Windows, "Invokes the Unix npm executable.")]
+    public async Task GeneratedDestinationImage_CanBePassedToEnvironmentAndReference()
+    {
+        var scanned = AtsCapabilityScanner.ScanAssembly(typeof(DistributedApplication).Assembly).ToAtsContext();
+        var context = new AtsContext
+        {
+            Capabilities = scanned.Capabilities.Where(capability => capability.CapabilityId is
+                "Aspire.Hosting/addContainerImage" or "Aspire.Hosting/withContainerImageSource" or
+                "Aspire.Hosting/addContainerRegistry" or "Aspire.Hosting/addRegistryImage" or
+                "Aspire.Hosting/addContainer" or "Aspire.Hosting/withEnvironment" or
+                "Aspire.Hosting/withReference").ToList(),
+            HandleTypes = scanned.HandleTypes,
+            DtoTypes = scanned.DtoTypes.Where(dto => dto.Name is "AddContainerOptions" or "CreateBuilderOptions").ToList(),
+            EnumTypes = scanned.EnumTypes,
+            ExportedValues = scanned.ExportedValues,
+            Diagnostics = scanned.Diagnostics
+        };
+        var files = _generator.GenerateDistributedApplication(context);
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            foreach (var (name, content) in files)
+            {
+                await File.WriteAllTextAsync(Path.Combine(directory.FullName, name), content);
+            }
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "package.json"), EmbeddedResources.Read("package.json"));
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "consumer.mts"),
+                """
+                import assert from 'node:assert/strict';
+                import type { DistributedApplicationBuilder } from './aspire.mjs';
+                import { Handle, AspireClient, wrapIfHandle } from './transport.mjs';
+                import './aspire.mjs';
+
+                const client = new AspireClient('unused');
+                const calls: Array<{ id: string, args: Record<string, unknown> }> = [];
+                const types: Record<string, string> = {
+                    addContainerImage: 'ContainerImageResource',
+                    addContainerRegistry: 'ContainerRegistryResource',
+                    addRegistryImage: 'DestinationImageResource',
+                    addContainer: 'ContainerResource'
+                };
+                client.invokeCapability = async <TResult,>(id: string, args: Record<string, unknown> = {}): Promise<TResult> => {
+                    calls.push({ id, args });
+                    const method = id.split('/').at(-1)!;
+                    const type = types[method];
+                    return (type
+                        ? new Handle({ $handle: String(args.name), $type: `Aspire.Hosting/Aspire.Hosting.ApplicationModel.${type}` })
+                        : args.builder) as TResult;
+                };
+                const builder = wrapIfHandle({
+                    $handle: 'builder',
+                    $type: 'Aspire.Hosting/Aspire.Hosting.IDistributedApplicationBuilder'
+                }, client) as DistributedApplicationBuilder;
+                const source = builder.addContainerImage('tools').withImageSource('busybox:v1');
+                const registry = builder.addContainerRegistry('registry', 'registry.example.com');
+                const destination = registry.addImage('published', source);
+                await builder.addContainer('consumer', 'busybox')
+                    .withEnvironment('IMAGE_NAME', destination)
+                    .withReference(destination);
+                const serialized = JSON.parse(JSON.stringify(calls));
+                assert.deepEqual(serialized.map((call: { id: string }) => call.id).sort(), [
+                    'Aspire.Hosting/addContainer',
+                    'Aspire.Hosting/addContainerImage',
+                    'Aspire.Hosting/withContainerImageSource',
+                    'Aspire.Hosting/addContainerRegistry',
+                    'Aspire.Hosting/addRegistryImage',
+                    'Aspire.Hosting/withEnvironment',
+                    'Aspire.Hosting/withReference'
+                ].sort());
+                const expectedImage = {
+                    $handle: 'published',
+                    $type: 'Aspire.Hosting/Aspire.Hosting.ApplicationModel.DestinationImageResource'
+                };
+                assert.deepEqual(serialized.at(-2).args.value, expectedImage);
+                assert.deepEqual(serialized.at(-1).args.source, expectedImage);
+                """);
+
+            // Restore the generated SDK's own dependency manifest, then compile a real consumer:
+            // accepting a snapshot alone does not prove fluent destination builders are assignable.
+            await RunGeneratedConsumerToolAsync("npm", directory.FullName, "install", "--include=dev", "--ignore-scripts", "--no-audit", "--no-fund");
+            await RunGeneratedConsumerToolAsync("npm", directory.FullName, "exec", "--", "tsc",
+                "--module", "nodenext", "--target", "ES2022", "--types", "node", "--strict", "--skipLibCheck", "consumer.mts");
+            await RunGeneratedConsumerToolAsync("node", directory.FullName, "consumer.mjs");
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    private static async Task RunGeneratedConsumerToolAsync(string executable, string directory, params string[] arguments)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo(executable)
+            {
+                WorkingDirectory = directory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            }
+        };
+        foreach (var argument in arguments)
+        {
+            process.StartInfo.ArgumentList.Add(argument);
+        }
+        process.Start();
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, $"{executable} failed.{Environment.NewLine}{await output}{await error}");
+    }
 
     [Fact]
     public void Language_ReturnsTypeScript()

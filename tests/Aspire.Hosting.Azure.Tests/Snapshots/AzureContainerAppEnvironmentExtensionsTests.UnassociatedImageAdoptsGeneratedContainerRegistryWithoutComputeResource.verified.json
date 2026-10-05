@@ -2,9 +2,9 @@
   "type": "containerimage.v0",
   "source": "docker.io/library/busybox:v1",
   "publications": {
-    "env-acr": {
+    "tools-env-acr": {
       "registry": "env-acr",
-      "image": "{env-acr.outputs.loginServer}/tools:v1"
+      "image": "{tools-env-acr.image}"
     }
   }
 }

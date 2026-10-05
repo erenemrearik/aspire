@@ -22,6 +22,10 @@ internal static class ContainerImageRegistryResolver
             foreach (var association in image.Annotations.OfType<ContainerImageRegistryAssociationAnnotation>()
                 .Where(a => a.DefaultEnvironment is not null).ToArray())
             {
+                if (association is ContainerImagePublicationAnnotation publication)
+                {
+                    model.Resources.Remove(publication.Destination);
+                }
                 image.Annotations.Remove(association);
             }
         }
@@ -29,6 +33,10 @@ internal static class ContainerImageRegistryResolver
         var unassociatedImages = images
             .Where(image => !image.IsExcludedFromPublish() && !image.HasExplicitRegistryAssociation)
             .ToArray();
+        foreach (var image in images.Where(image => !image.IsExcludedFromPublish()))
+        {
+            _ = image.GetSource();
+        }
         if (unassociatedImages.Length == 0)
         {
             return;
@@ -74,7 +82,7 @@ internal static class ContainerImageRegistryResolver
             var registryNames = string.Join("', '", candidates.Keys.Order(StringComparers.ResourceName));
             throw new DistributedApplicationException(
                 $"Image artifact(s) '{imageNames}' have multiple default container registries available ('{registryNames}'). " +
-                "Associate each image explicitly using 'registry.WithPushedImage(image)' or 'image.WithContainerRegistry(registry)'.");
+                "Create each destination explicitly using 'registry.AddImage(name, image)'.");
         }
 
         if (candidates.Count == 1)
@@ -82,7 +90,15 @@ internal static class ContainerImageRegistryResolver
             var (registry, environment) = candidates.Values.Single();
             foreach (var image in unassociatedImages)
             {
-                image.Annotations.Add(new ContainerImagePublicationAnnotation(registry, null, image.DefaultTag, environment));
+                var destination = new DestinationImageResource($"{image.Name}-{registry.Name}", image, registry);
+                if (model.Resources.Any(resource => StringComparers.ResourceName.Equals(resource.Name, destination.Name)))
+                {
+                    throw new DistributedApplicationException(
+                        $"Default destination image name '{destination.Name}' conflicts with another resource. Create an explicitly named destination with registry.AddImage(name, image).");
+                }
+                ContainerImageResourceBuilderExtensions.ConfigureDestination(destination);
+                model.Resources.Add(destination);
+                image.Annotations.Add(new ContainerImagePublicationAnnotation(destination, environment));
             }
         }
     }

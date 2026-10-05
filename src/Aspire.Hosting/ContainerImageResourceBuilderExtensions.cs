@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics.CodeAnalysis;
+using Aspire.Dashboard.Model;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Publishing;
 using Aspire.Hosting.Utils;
@@ -11,172 +12,208 @@ using Aspire.Hosting.Utils;
 namespace Aspire.Hosting;
 
 /// <summary>
-/// Provides methods for modeling container image artifacts and their registry destinations.
+/// Provides methods for modeling source image artifacts and registry-scoped image destinations.
 /// </summary>
 public static class ContainerImageResourceBuilderExtensions
 {
     /// <summary>
-    /// Adds an existing container image as a standalone artifact.
+    /// Adds a standalone image artifact whose source is configured separately.
     /// </summary>
     /// <param name="builder">The distributed application builder.</param>
-    /// <param name="name">The artifact resource name.</param>
-    /// <param name="image">The source image, with an optional tag, digest, or both.</param>
-    /// <returns>A builder for the image artifact.</returns>
+    /// <param name="name">The source artifact resource name.</param>
+    /// <returns>The image artifact builder.</returns>
     /// <remarks>
-    /// The artifact is added to the application model only in publish mode. Registration does not
-    /// pull, build, push, or run the image. Without explicit associations, the artifact adopts a single
-    /// effective registry advertised by a compute environment after environment preparation.
-    /// Multiple distinct environment defaults require an explicit association. Merely adding a
-    /// generic registry does not opt the artifact into publication.
+    /// Configure an existing registry image with <c>WithImageSource</c>. Sources are independent
+    /// of destinations and can be shared across registries. This experimental API registers
+    /// artifacts in publish mode only; local image preparation and registry emulation are not implemented.
     /// </remarks>
-    /// <exception cref="ArgumentNullException">A required argument is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">The name or source image is invalid.</exception>
     /// <example>
     /// <code>
-    /// var image = builder.AddContainerImage("tools", "ghcr.io/example/tools:v1");
-    /// var registry = builder.AddContainerRegistry("registry", "registry.example.com");
-    /// registry.WithPushedImage(image);
-    /// var destination = image.GetImageReference(registry);
+    /// var source = builder.AddContainerImage("tools").WithImageSource("ghcr.io/example/tools:v1");
+    /// var destination = registry.AddImage("published-tools", source);
+    /// app.WithEnvironment("IMAGE_NAME", destination);
     /// </code>
     /// </example>
+    /// <exception cref="ArgumentNullException">The builder or name is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The name is empty or invalid.</exception>
     [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
     [AspireExport]
     public static IResourceBuilder<ContainerImageResource> AddContainerImage(
-        this IDistributedApplicationBuilder builder, [ResourceName] string name, string image)
+        this IDistributedApplicationBuilder builder, [ResourceName] string name)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrEmpty(name);
-        ArgumentException.ThrowIfNullOrEmpty(image);
-
-        var resource = new ContainerImageResource(name, image);
+        var resource = new ContainerImageResource(name);
         var resourceBuilder = builder.ExecutionContext.IsRunMode
             ? builder.CreateResourceBuilder(resource)
             : builder.AddResource(resource);
 
-        return resourceBuilder.WithManifestPublishingCallback(context => WriteManifestAsync(context, resource));
+        return resourceBuilder.WithManifestPublishingCallback(context => WriteSourceManifestAsync(context, resource));
     }
 
     /// <summary>
-    /// Configures an image artifact to be pushed to a registry.
+    /// Configures an existing registry image as the source of an image artifact.
+    /// </summary>
+    /// <param name="builder">The source artifact builder.</param>
+    /// <param name="image">The image reference, including an optional tag, digest, or both.</param>
+    /// <returns>The original source artifact builder.</returns>
+    /// <remarks>
+    /// Source configuration is last-wins. This method records deferred preparation intent;
+    /// it does not pull or push an image. A source tag must be pinned to content during preparation,
+    /// before publication to any destinations. Reconfiguration invalidates previously recorded publication digests.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The builder or image is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The source image reference is invalid.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExport("withContainerImageSource", MethodName = "withImageSource")]
+    public static IResourceBuilder<ContainerImageResource> WithImageSource(
+        this IResourceBuilder<ContainerImageResource> builder, string image)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        var source = ContainerImageName.ParseSource(image);
+
+        return builder.WithAnnotation(new ContainerImageSourceAnnotation(source), ResourceAnnotationMutationBehavior.Replace);
+    }
+
+    /// <summary>
+    /// Adds a named publication destination for an image artifact in a container registry.
     /// </summary>
     /// <typeparam name="TRegistry">The registry resource type.</typeparam>
     /// <param name="builder">The registry builder.</param>
-    /// <param name="image">The image artifact builder.</param>
-    /// <param name="repository">The destination repository relative to the registry. Defaults to the registry namespace and lowercase artifact name.</param>
-    /// <param name="tag">The destination tag. Defaults to the source tag or a digest-derived tag for a digest-only source.</param>
-    /// <returns>The original registry builder.</returns>
+    /// <param name="name">The destination resource name, also used as the repository name within the registry namespace.</param>
+    /// <param name="image">The source image artifact builder.</param>
+    /// <returns>A builder for the registry-scoped destination image.</returns>
     /// <remarks>
-    /// Associations with different registries are additive. Identical repeated associations are
-    /// idempotent; conflicting configuration for the same artifact and registry is rejected.
-    /// An explicit repository replaces the registry namespace, never its endpoint.
-    /// The registry endpoint must resolve to a hostname with an optional port, not a URL
-    /// or an empty local-only endpoint. Explicit associations suppress automatic default-registry adoption.
+    /// Each call creates a distinct resource. Destinations are additive and can share a source,
+    /// including multiple repositories within one registry. References use the published content digest,
+    /// never a mutable tag. No publication or permission grant is performed during model construction.
     /// </remarks>
-    /// <exception cref="ArgumentNullException">A required builder is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">The repository or tag is invalid, or the builders belong to different applications.</exception>
-    /// <exception cref="InvalidOperationException">An association with different configuration already exists.</exception>
-    /// <example>
-    /// <code>
-    /// firstRegistry.WithPushedImage(image);
-    /// secondRegistry.WithPushedImage(image, repository: "tools/helper", tag: "release");
-    /// </code>
-    /// </example>
+    /// <exception cref="ArgumentNullException">A required argument is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The name is invalid or the builders belong to different applications.</exception>
     [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
-    [AspireExport("withRegistryPushedImage", MethodName = "withPushedImage")]
-    public static IResourceBuilder<TRegistry> WithPushedImage<TRegistry>(
-        this IResourceBuilder<TRegistry> builder,
-        IResourceBuilder<ContainerImageResource> image,
-        string? repository = null,
-        string? tag = null)
+    [AspireExport("addRegistryImage", MethodName = "addImage")]
+    public static IResourceBuilder<DestinationImageResource> AddImage<TRegistry>(
+        this IResourceBuilder<TRegistry> builder, [ResourceName] string name, IResourceBuilder<ContainerImageResource> image)
         where TRegistry : IResource, IContainerRegistry
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(image);
+        ArgumentException.ThrowIfNullOrEmpty(name);
         ValidateApplication(builder.ApplicationBuilder, image.ApplicationBuilder);
-        if (repository is not null)
+        var resource = new DestinationImageResource(name, image.Resource, builder.Resource);
+        var destination = builder.ApplicationBuilder.ExecutionContext.IsRunMode
+            ? builder.ApplicationBuilder.CreateResourceBuilder(resource)
+            : builder.ApplicationBuilder.AddResource(resource);
+        foreach (var inferred in image.Resource.Annotations.OfType<ContainerImagePublicationAnnotation>()
+            .Where(publication => publication.DefaultEnvironment is not null).ToArray())
         {
-            ContainerImageName.ValidateRepository(repository, nameof(repository));
+            image.Resource.Annotations.Remove(inferred);
+            builder.ApplicationBuilder.Resources.Remove(inferred.Destination);
         }
-        if (tag is not null)
+        ConfigureDestination(resource);
+        image.WithAnnotation(new ContainerImagePublicationAnnotation(resource, defaultEnvironment: null));
+
+        return destination;
+    }
+
+    /// <summary>
+    /// Injects a digest-qualified destination image reference into an environment variable.
+    /// </summary>
+    /// <typeparam name="T">The consuming resource type.</typeparam>
+    /// <param name="builder">The consumer builder.</param>
+    /// <param name="name">The environment variable name.</param>
+    /// <param name="image">The registry-scoped destination image.</param>
+    /// <returns>The original consumer builder.</returns>
+    /// <remarks>
+    /// Preserves destination, source, and registry provenance without resolving values during construction.
+    /// This does not grant registry pull permissions or start a container.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A required argument is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The builders belong to different applications.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExportIgnore(Reason = "Polyglot AppHosts use the canonical withEnvironment dispatcher.")]
+    public static IResourceBuilder<T> WithEnvironment<T>(
+        this IResourceBuilder<T> builder, string name, IResourceBuilder<DestinationImageResource> image)
+        where T : IResourceWithEnvironment
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(image);
+        ValidateApplication(builder.ApplicationBuilder, image.ApplicationBuilder);
+
+        return builder.WithEnvironment(name, (IExpressionValue)image.Resource);
+    }
+
+    /// <summary>
+    /// Declares that a resource consumes a registry-scoped destination image.
+    /// </summary>
+    /// <typeparam name="T">The consuming resource type.</typeparam>
+    /// <param name="builder">The consumer builder.</param>
+    /// <param name="image">The destination image builder.</param>
+    /// <returns>The original consumer builder.</returns>
+    /// <remarks>
+    /// Records image consumption for publication ordering and provider-specific pull access.
+    /// This method records the relationship only: permission provisioning and local dispatch
+    /// are not implemented. Use <c>WithEnvironment</c> separately to choose an environment variable name.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A required builder is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The builders belong to different applications.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExportIgnore(Reason = "Polyglot AppHosts use custom resource dispatch through the canonical withReference export.")]
+    public static IResourceBuilder<T> WithReference<T>(
+        this IResourceBuilder<T> builder, IResourceBuilder<DestinationImageResource> image)
+        where T : IResourceWithEnvironment
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(image);
+        ValidateApplication(builder.ApplicationBuilder, image.ApplicationBuilder);
+        if (!builder.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>()
+            .Any(reference => ReferenceEquals(reference.Image, image.Resource)))
         {
-            ContainerImageName.ValidateTag(tag, nameof(tag));
+            builder.WithAnnotation(new DestinationImageReferenceAnnotation(image.Resource));
+            builder.WithRelationship(image.Resource, KnownRelationshipTypes.Reference);
         }
-
-        tag ??= image.Resource.DefaultTag;
-        IResource registryResource = builder.Resource;
-        var existing = image.Resource.Annotations.OfType<ContainerImagePublicationAnnotation>()
-            .FirstOrDefault(p => p.DefaultEnvironment is null &&
-                StringComparers.ResourceName.Equals(p.Registry.Name, registryResource.Name));
-        if (existing is not null)
-        {
-            if (!string.Equals(existing.Repository, repository, StringComparison.Ordinal) ||
-                !string.Equals(existing.Tag, tag, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"Image artifact '{image.Resource.Name}' already has different publication settings for registry '{registryResource.Name}'.");
-            }
-
-            return builder;
-        }
-
-        image.WithAnnotation(new ContainerImagePublicationAnnotation(builder.Resource, repository, tag, defaultEnvironment: null));
 
         return builder;
     }
 
-    /// <summary>
-    /// Gets a structured image reference for an associated registry.
-    /// </summary>
-    /// <typeparam name="TRegistry">The registry resource type.</typeparam>
-    /// <param name="builder">The image artifact builder.</param>
-    /// <param name="registry">The selected registry builder.</param>
-    /// <returns>A destination reference retaining the image and registry.</returns>
-    /// <exception cref="ArgumentNullException">A required builder is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">The builders belong to different applications.</exception>
-    /// <exception cref="InvalidOperationException">The image has no association with the registry.</exception>
-    /// <remarks>
-    /// A registry must be selected even when the artifact currently has only one destination.
-    /// The reference can be composed with other structured values without resolving registry parameters.
-    /// Automatically adopted associations are available after environment preparation.
-    /// </remarks>
-    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
-    [AspireExport]
-    public static ContainerImageDestinationReference GetImageReference<TRegistry>(
-        this IResourceBuilder<ContainerImageResource> builder, IResourceBuilder<TRegistry> registry)
-        where TRegistry : IResource, IContainerRegistry
+    private static void ValidateApplication(IDistributedApplicationBuilder first, IDistributedApplicationBuilder second)
     {
-        ArgumentNullException.ThrowIfNull(builder);
-        ArgumentNullException.ThrowIfNull(registry);
-        ValidateApplication(builder.ApplicationBuilder, registry.ApplicationBuilder);
-        builder.Resource.GetPublication(registry.Resource);
-
-        return new(builder.Resource, registry.Resource);
-    }
-
-    private static void ValidateApplication(IDistributedApplicationBuilder imageBuilder, IDistributedApplicationBuilder registryBuilder)
-    {
-        if (!ReferenceEquals(imageBuilder, registryBuilder))
+        if (!ReferenceEquals(first, second))
         {
-            throw new ArgumentException("The image and registry must belong to the same distributed application.");
+            throw new ArgumentException("The image, registry, and consumer must belong to the same distributed application.");
         }
     }
 
-    private static Task WriteManifestAsync(ManifestPublishingContext context, ContainerImageResource resource)
+    internal static void ConfigureDestination(DestinationImageResource resource) =>
+        resource.Annotations.Add(new ManifestPublishingCallbackAnnotation(context => WriteDestinationManifestAsync(context, resource)));
+
+    private static Task WriteSourceManifestAsync(ManifestPublishingContext context, ContainerImageResource resource)
     {
         context.Writer.WriteString("type", "containerimage.v0");
-        context.Writer.WriteString("source", resource.SourceImage);
+        context.Writer.WriteString("source", resource.GetSource().Image);
         context.Writer.WriteStartObject("publications");
-        foreach (var publication in resource.GetPublications().OrderBy(p => p.Registry.Name, StringComparers.ResourceName))
+        foreach (var publication in resource.GetPublications().OrderBy(publication => publication.Destination.Name, StringComparers.ResourceName))
         {
-            var reference = new ContainerImageDestinationReference(resource, publication.Registry);
-            var expression = reference.GetImageExpression();
-            context.Writer.WriteStartObject(publication.Registry.Name);
+            context.Writer.WriteStartObject(publication.Destination.Name);
             context.Writer.WriteString("registry", publication.Registry.Name);
-            context.Writer.WriteString("image", expression.ValueExpression);
-            context.TryAddDependentResources(expression);
+            context.Writer.WriteString("image", publication.Destination.ValueExpression);
+            context.TryAddDependentResources(publication.Destination);
             context.Writer.WriteEndObject();
         }
         context.Writer.WriteEndObject();
+
+        return Task.CompletedTask;
+    }
+
+    private static Task WriteDestinationManifestAsync(ManifestPublishingContext context, DestinationImageResource resource)
+    {
+        context.Writer.WriteString("type", "containerimagepublication.v0");
+        context.Writer.WriteString("source", resource.Source.Name);
+        context.Writer.WriteString("registry", resource.Parent.Name);
+        context.Writer.WriteString("image", resource.GetImageExpression().ValueExpression);
+        // The digest is a publication output, not a value inferred from a mutable source tag.
+        context.TryAddDependentResources(resource.Source);
+        context.TryAddDependentResources(resource.Parent);
 
         return Task.CompletedTask;
     }

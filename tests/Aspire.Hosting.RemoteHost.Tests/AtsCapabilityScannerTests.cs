@@ -35,7 +35,7 @@ public class AtsCapabilityScannerTests
     {
         var result = AtsCapabilityScanner.ScanAssembly(typeof(DistributedApplication).Assembly);
         var publication = Assert.Single(result.Capabilities,
-            capability => capability.CapabilityId == "Aspire.Hosting/withRegistryPushedImage");
+            capability => capability.CapabilityId == "Aspire.Hosting/addRegistryImage");
 
         Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(IContainerRegistry)), publication.TargetTypeId);
 #pragma warning disable ASPIRECOMPUTE003
@@ -43,13 +43,10 @@ public class AtsCapabilityScannerTests
             target => Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(ContainerRegistryResource)), target.TypeId));
 #pragma warning restore ASPIRECOMPUTE003
 
-        foreach (var capabilityId in new[] { "Aspire.Hosting/getImageReference", "Aspire.Hosting/withContainerRegistry" })
-        {
-            var capability = Assert.Single(result.Capabilities, capability => capability.CapabilityId == capabilityId);
-            var registry = Assert.Single(capability.Parameters, parameter => parameter.Name == "registry");
-            Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(IContainerRegistry)), registry.Type?.TypeId);
-            Assert.True(registry.Type?.IsInterface);
-        }
+        var capability = Assert.Single(result.Capabilities, capability => capability.CapabilityId == "Aspire.Hosting/withContainerRegistry");
+        var registry = Assert.Single(capability.Parameters, parameter => parameter.Name == "registry");
+        Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(IContainerRegistry)), registry.Type?.TypeId);
+        Assert.True(registry.Type?.IsInterface);
     }
 
     private static IResourceBuilder<T> ResourceFirstRegistryConstraint<T>(IResourceBuilder<T> builder)

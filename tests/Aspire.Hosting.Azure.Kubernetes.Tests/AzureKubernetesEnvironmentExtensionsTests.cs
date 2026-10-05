@@ -25,7 +25,7 @@ public class AzureKubernetesEnvironmentExtensionsTests(ITestOutputHelper outputH
     {
         using var workspace = TemporaryWorkspace.Create(outputHelper);
         using var builder = AzureKubernetesTestBuilder.Create(outputHelper, workspace);
-        var image = builder.AddContainerImage("tools", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
         var registry = builder.AddAzureContainerRegistry("selected");
         var environment = builder.AddAzureKubernetesEnvironment("aks");
         var generated = Assert.IsType<AzureContainerRegistryResource>(
@@ -40,8 +40,8 @@ public class AzureKubernetesEnvironmentExtensionsTests(ITestOutputHelper outputH
 
         var selected = overrideRegistry ? registry.Resource : generated;
         var manifest = await ManifestUtils.GetManifest(image.Resource);
-        Assert.Equal([selected.Name], manifest["publications"]!.AsObject().Select(entry => entry.Key).ToArray());
-        Assert.Same(selected, image.GetImageReference(builder.CreateResourceBuilder(selected)).Registry);
+        Assert.Equal([$"tools-{selected.Name}"], manifest["publications"]!.AsObject().Select(entry => entry.Key).ToArray());
+        Assert.Same(selected, Assert.Single(app.Services.GetRequiredService<DistributedApplicationModel>().Resources.OfType<DestinationImageResource>()).Parent);
         Assert.Same(selected, Assert.Single(environment.Resource.Annotations.OfType<ContainerImageRegistryTargetAnnotation>()).Registry);
         Assert.Equal(!overrideRegistry, app.Services.GetRequiredService<DistributedApplicationModel>().Resources.Contains(generated));
     }

@@ -66,6 +66,15 @@ internal static partial class ContainerImageName
         }
     }
 
+    internal static void ValidateDigest(string digest, string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(digest, parameterName);
+        if (!DigestRegex().IsMatch(digest))
+        {
+            throw new ArgumentException("The digest must contain a SHA-256, SHA-384, or SHA-512 algorithm and its full hexadecimal digest.", parameterName);
+        }
+    }
+
     internal static void ValidateRegistry(string registry, string parameterName)
     {
         if (string.IsNullOrEmpty(registry) || registry.IndexOfAny(['/', '\\', '?', '#', '@']) >= 0 ||

@@ -35,7 +35,7 @@ public class AzureSandboxesTests(ITestOutputHelper output)
     public async Task UnassociatedImageAdoptsEffectiveSandboxRegistry(bool overrideRegistry)
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, output);
-        var image = builder.AddContainerImage("tools", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
         var registry = builder.AddAzureContainerRegistry("selected");
         var environment = builder.AddAzureSandboxGroup("env");
         var generated = Assert.IsType<AzureContainerRegistryResource>(environment.Resource.ContainerRegistry);
@@ -49,8 +49,8 @@ public class AzureSandboxesTests(ITestOutputHelper output)
 
         var selected = overrideRegistry ? registry.Resource : generated;
         var manifest = await ManifestUtils.GetManifest(image.Resource);
-        Assert.Equal([selected.Name], manifest["publications"]!.AsObject().Select(entry => entry.Key).ToArray());
-        Assert.Same(selected, image.GetImageReference(builder.CreateResourceBuilder(selected)).Registry);
+        Assert.Equal([$"tools-{selected.Name}"], manifest["publications"]!.AsObject().Select(entry => entry.Key).ToArray());
+        Assert.Same(selected, Assert.Single(app.Services.GetRequiredService<DistributedApplicationModel>().Resources.OfType<DestinationImageResource>()).Parent);
         Assert.Same(selected, Assert.Single(environment.Resource.Annotations.OfType<ContainerImageRegistryTargetAnnotation>()).Registry);
         Assert.Equal(!overrideRegistry, app.Services.GetRequiredService<DistributedApplicationModel>().Resources.Contains(generated));
     }

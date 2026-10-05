@@ -187,9 +187,6 @@ public static class ContainerRegistryResourceBuilderExtensions
     /// <remarks>
     /// This method adds a <see cref="ContainerRegistryReferenceAnnotation"/> to the resource,
     /// indicating that the resource should use the specified container registry for container image operations.
-    /// For an image artifact, the last explicit selection contributes one publication destination
-    /// in addition to associations configured with <c>registry.WithPushedImage(image)</c>.
-    /// Explicit image associations suppress automatic adoption of compute-environment registry defaults.
     /// </remarks>
     /// <example>
     /// Configure a project to use a container registry:
@@ -209,10 +206,9 @@ public static class ContainerRegistryResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(registry);
-        if (builder.Resource is ContainerImageResource &&
-            !ReferenceEquals(builder.ApplicationBuilder, registry.ApplicationBuilder))
+        if (builder.Resource is ContainerImageResource or DestinationImageResource)
         {
-            throw new ArgumentException("The image and registry must belong to the same distributed application.", nameof(registry));
+            throw new InvalidOperationException("Create an image publication destination with registry.AddImage(name, image).");
         }
 
         return builder.WithAnnotation(new ContainerRegistryReferenceAnnotation(registry.Resource));

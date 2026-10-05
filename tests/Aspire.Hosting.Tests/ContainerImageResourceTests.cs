@@ -6,6 +6,7 @@
 
 using Aspire.Hosting.Utils;
 using Aspire.Hosting.Tests.TestServices;
+using Aspire.Hosting.Tests.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.Tests;
@@ -19,22 +20,29 @@ public class ContainerImageResourceTests
     public void RequiredArgumentsAreValidated()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
         var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var destination = registry.AddImage("published", image);
+        var consumer = builder.AddContainer("consumer", "busybox");
         IDistributedApplicationBuilder nullBuilder = null!;
         IResourceBuilder<ContainerImageResource> nullImage = null!;
         IResourceBuilder<ContainerRegistryResource> nullRegistry = null!;
+        IResourceBuilder<DestinationImageResource> nullDestination = null!;
 
-        Assert.Throws<ArgumentNullException>(() => nullBuilder.AddContainerImage("tools", "busybox"));
-        Assert.Throws<ArgumentNullException>(() => builder.AddContainerImage(null!, "busybox"));
-        Assert.Throws<ArgumentException>(() => builder.AddContainerImage("", "busybox"));
-        Assert.Throws<ArgumentNullException>(() => builder.AddContainerImage("null-image", null!));
-        Assert.Throws<ArgumentNullException>(() => nullRegistry.WithPushedImage(image));
-        Assert.Throws<ArgumentNullException>(() => registry.WithPushedImage(nullImage));
-        Assert.Throws<ArgumentNullException>(() => nullImage.GetImageReference(registry));
-        Assert.Throws<ArgumentNullException>(() => image.GetImageReference(nullRegistry));
+        Assert.Throws<ArgumentNullException>(() => nullBuilder.AddContainerImage("tools"));
+        Assert.Throws<ArgumentNullException>(() => builder.AddContainerImage(null!));
+        Assert.Throws<ArgumentException>(() => builder.AddContainerImage(""));
+        Assert.Throws<ArgumentNullException>(() => nullImage.WithImageSource("busybox"));
+        Assert.Throws<ArgumentNullException>(() => image.WithImageSource(null!));
+        Assert.Throws<ArgumentNullException>(() => nullRegistry.AddImage("destination", image));
+        Assert.Throws<ArgumentNullException>(() => registry.AddImage("destination", nullImage));
+        Assert.Throws<ArgumentNullException>(() => registry.AddImage(null!, image));
+        Assert.Throws<ArgumentException>(() => registry.AddImage("", image));
+        Assert.Throws<ArgumentNullException>(() => consumer.WithEnvironment("IMAGE", nullDestination));
+        Assert.Throws<ArgumentNullException>(() => consumer.WithReference(nullDestination));
         Assert.Throws<ArgumentNullException>(() => new ContainerImageRegistryTargetAnnotation((IContainerRegistry)null!));
         Assert.Throws<ArgumentNullException>(() => new ContainerImageRegistryTargetAnnotation((Func<IContainerRegistry?>)null!));
+        Assert.Same(registry.Resource, destination.Resource.Parent);
     }
 
     [Theory]
@@ -48,12 +56,12 @@ public class ContainerImageResourceTests
     [InlineData("ghcr.io/tools:v1@" + Digest, "ghcr.io/tools:v1@" + Digest, "ghcr.io", "tools", "v1", Digest)]
     public void SourceReferenceIsNormalized(string image, string normalized, string registry, string repository, string? tag, string? digest)
     {
-        var resource = new ContainerImageResource("tools", image);
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var resource = builder.AddContainerImage("tools").WithImageSource(image).Resource;
 
-        Assert.Equal(normalized, resource.SourceImage);
-        Assert.Equal(new ContainerReference(registry, repository, tag, digest), resource.Source);
+        Assert.Equal(normalized, resource.GetSource().Image);
+        Assert.Equal(new ContainerReference(registry, repository, tag, digest), resource.GetSource().Source);
         Assert.IsAssignableFrom<IResourceWithoutLifetime>(resource);
-        Assert.Empty(resource.Annotations);
         Assert.False(resource.IsContainer());
         Assert.False(resource.RequiresImageBuild());
         Assert.False(resource.RequiresImageBuildAndPush());
@@ -68,19 +76,33 @@ public class ContainerImageResourceTests
     [InlineData("repo/../image")]
     [InlineData("repo/<image>")]
     [InlineData("https://registry.example.com/tools:v1")]
-    [InlineData("https://user:password@registry.example.com/tools:v1")]
     [InlineData("user:password@registry.example.com/tools")]
     [InlineData("image@sha256:1234")]
     [InlineData("image@digest")]
     [InlineData("image:")]
     [InlineData("image:-invalid")]
     [InlineData("registry.example.com:70000/tools")]
-    public void InvalidSourcesAreRejectedWithoutEchoingTheirValues(string image)
+    public void InvalidSourcesAreRejected(string image)
     {
-        var exception = Assert.ThrowsAny<ArgumentException>(() => new ContainerImageResource("tools", image));
+        using var builder = TestDistributedApplicationBuilder.Create();
+        var resource = builder.AddContainerImage("tools");
+        var exception = Assert.ThrowsAny<ArgumentException>(() => resource.WithImageSource(image));
 
         Assert.Equal("image", exception.ParamName);
         Assert.IsNotType<ArgumentOutOfRangeException>(exception);
+        Assert.Empty(resource.Resource.Annotations.OfType<ContainerImageSourceAnnotation>());
+    }
+
+    [Theory]
+    [InlineData("https://user:password@registry.example.com/tools:v1", "The source must be a container image reference without a URL scheme or credentials.")]
+    [InlineData("user:password@registry.example.com/tools", "The source digest must contain a SHA-256, SHA-384, or SHA-512 algorithm and its full hexadecimal digest.")]
+    public void CredentialBearingSourcesAreRejectedWithSafeMessages(string image, string message)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create();
+        var source = builder.AddContainerImage("tools");
+        var exception = Assert.Throws<ArgumentException>(() => source.WithImageSource(image));
+
+        Assert.Equal($"{message} (Parameter 'image')", exception.Message);
     }
 
     [Theory]
@@ -89,186 +111,198 @@ public class ContainerImageResourceTests
     public void ArtifactRegistrationIsPublishOnly(DistributedApplicationOperation operation, bool inModel)
     {
         using var builder = TestDistributedApplicationBuilder.Create(operation);
-        var artifact = builder.AddContainerImage("tools", "busybox");
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var destination = registry.AddImage("published", source);
         var container = builder.AddContainer("consumer", "busybox");
         using var app = builder.Build();
         var model = app.Services.GetRequiredService<DistributedApplicationModel>();
 
-        Assert.Equal(inModel, model.Resources.Contains(artifact.Resource));
+        Assert.Equal(inModel, model.Resources.Contains(source.Resource));
+        Assert.Equal(inModel, model.Resources.Contains(destination.Resource));
         Assert.Equal([container.Resource], model.GetComputeResources().ToArray());
         Assert.Empty(model.GetBuildResources());
         Assert.Empty(model.GetBuildAndPushResources());
-        Assert.Collection(artifact.Resource.Annotations, annotation => Assert.IsType<ManifestPublishingCallbackAnnotation>(annotation));
     }
 
     [Fact]
-    public void AssociationsAreAdditiveAndIdenticalCallsAreIdempotent()
+    public void DestinationsAreNamedResourcesAndCanShareASourceAndRegistry()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox:v1");
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox:v1");
         var first = builder.AddContainerRegistry("first", "first.example.com");
         var second = builder.AddContainerRegistry("second", "second.example.com");
+        var one = first.AddImage("one", source);
+        var two = first.AddImage("two", source);
+        var three = second.AddImage("three", source);
 
-        Assert.Same(first, first.WithPushedImage(image));
-        first.WithPushedImage(image, tag: "v1");
-        second.WithPushedImage(image, repository: "team/tools", tag: "release");
-
-        Assert.Collection(image.Resource.GetPublications(),
-            publication =>
-            {
-                Assert.Same(first.Resource, publication.Registry);
-                Assert.Null(publication.Repository);
-                Assert.Equal("v1", publication.Tag);
-            },
-            publication =>
-            {
-                Assert.Same(second.Resource, publication.Registry);
-                Assert.Equal("team/tools", publication.Repository);
-                Assert.Equal("release", publication.Tag);
-            });
+        Assert.Collection(source.Resource.GetPublications(),
+            publication => Assert.Same(one.Resource, publication.Destination),
+            publication => Assert.Same(two.Resource, publication.Destination),
+            publication => Assert.Same(three.Resource, publication.Destination));
+        Assert.Same(source.Resource, one.Resource.Source);
+        Assert.Same(first.Resource, one.Resource.Parent);
+        Assert.IsAssignableFrom<IResourceWithoutLifetime>(one.Resource);
+        Assert.IsAssignableFrom<IResourceWithParent<IResource>>(one.Resource);
+        Assert.Throws<DistributedApplicationException>(() => second.AddImage("one", source));
+        Assert.Equal(3, source.Resource.GetPublications().Count);
+        Assert.Throws<InvalidOperationException>(() => source.WithContainerRegistry(first));
+        Assert.Throws<InvalidOperationException>(() => one.WithContainerRegistry(second));
     }
 
     [Fact]
-    public void ConflictingAssociationIsRejectedWithoutChangingTheModel()
+    public async Task MissingSourceFailsAtPublishPreparationNotArtifactConstruction()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox:v1");
-        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
-        registry.WithPushedImage(image, repository: "team/tools", tag: "v2");
-
-        Assert.Throws<InvalidOperationException>(() => registry.WithPushedImage(image, repository: "other/tools", tag: "v2"));
-        Assert.Throws<InvalidOperationException>(() => registry.WithPushedImage(image, repository: "team/tools", tag: "v3"));
-
-        var publication = Assert.Single(image.Resource.GetPublications());
-        Assert.Equal("team/tools", publication.Repository);
-        Assert.Equal("v2", publication.Tag);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("/absolute")]
-    [InlineData("team//tools")]
-    [InlineData("TEAM/tools")]
-    [InlineData("registry.example.com:5000/tools")]
-    [InlineData("team/tools:v1")]
-    [InlineData("team/tools@" + Digest)]
-    public void InvalidDestinationRepositoriesAreRejected(string repository)
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
-
-        Assert.Throws<ArgumentException>(() => registry.WithPushedImage(image, repository: repository));
-        Assert.Empty(image.Resource.GetPublications());
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData(".invalid")]
-    [InlineData("-invalid")]
-    [InlineData("not a tag")]
-    [InlineData("image:v1")]
-    public void InvalidDestinationTagsAreRejected(string tag)
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
-
-        Assert.Throws<ArgumentException>(() => registry.WithPushedImage(image, tag: tag));
-        Assert.Throws<ArgumentException>(() => registry.WithPushedImage(image, tag: new string('a', 129)));
-        Assert.Empty(image.Resource.GetPublications());
-    }
-
-    [Fact]
-    public void ExplicitRegistrySelectionRemainsLastWinsAndMergesWithAdditiveAssociations()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox:v1");
-        var first = builder.AddContainerRegistry("first", "first.example.com");
-        var second = builder.AddContainerRegistry("second", "second.example.com");
-        var third = builder.AddContainerRegistry("third", "third.example.com");
-        first.WithPushedImage(image);
-        image.WithContainerRegistry(second).WithContainerRegistry(third);
-
-        Assert.Collection(image.Resource.GetPublications(),
-            publication => Assert.Same(first.Resource, publication.Registry),
-            publication => Assert.Same(third.Resource, publication.Registry));
-        Assert.Throws<InvalidOperationException>(() => image.GetImageReference(second));
-
-        first.WithPushedImage(image);
-        image.WithContainerRegistry(first);
-        Assert.Same(first.Resource, Assert.Single(image.Resource.GetPublications()).Registry);
-    }
-
-    [Fact]
-    public async Task DefaultRegistryAnnotationsDoNotCreatePublicationAssociations()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var first = builder.AddContainerRegistry("first", "first.example.com");
-        var second = builder.AddContainerRegistry("second", "second.example.com");
-        image.WithAnnotation(new RegistryTargetAnnotation(first.Resource));
-        image.WithAnnotation(new RegistryTargetAnnotation(second.Resource));
-
+        builder.AddContainerImage("tools");
         using var app = builder.Build();
-        await app.ExecuteBeforeStartHooksAsync(default);
 
-        Assert.Empty(image.Resource.GetPublications());
-        Assert.Throws<InvalidOperationException>(() => image.GetImageReference(first));
-        Assert.Throws<InvalidOperationException>(() => image.GetImageReference(second));
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => app.ExecuteBeforeStartHooksAsync(default));
+        Assert.Equal("Image artifact 'tools' has no source. Configure it with WithImageSource.", exception.Message);
+    }
+
+    [Fact]
+    public async Task SourceChangesInvalidatePublishedDigestsAndInvalidChangesPreserveState()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox:v1");
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var destination = registry.AddImage("published", source);
+        destination.Resource.RecordPublishedDigest(Digest);
+        Assert.Throws<ArgumentException>(() => source.WithImageSource("https://invalid/image"));
+        Assert.Equal("registry.example.com/published@" + Digest, await ((IValueProvider)destination.Resource).GetValueAsync(default));
+
+        source.WithImageSource("busybox:v2");
+        Assert.Equal("docker.io/library/busybox:v2", source.Resource.GetSource().Image);
+        Assert.Single(source.Resource.Annotations.OfType<ContainerImageSourceAnnotation>());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ((IValueProvider)destination.Resource).GetValueAsync(default).AsTask());
+    }
+
+    [Theory]
+    [InlineData("busybox:latest")]
+    [InlineData("busybox@" + Digest)]
+    public async Task DestinationDoesNotInventAPublishedDigest(string image)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("tools").WithImageSource(image);
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var destination = registry.AddImage("published", source);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => ((IValueProvider)destination.Resource).GetValueAsync(default).AsTask());
+        Assert.Equal("Destination image 'published' has no published digest for its current source. Publish the image before resolving its value.", exception.Message);
+        Assert.Throws<ArgumentException>(() => destination.Resource.RecordPublishedDigest("sha256:1234"));
+    }
+
+    [Fact]
+    public async Task DestinationReferencesAreDigestQualifiedAndRetainProvenance()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox:v1");
+        var registry = builder.AddContainerRegistry("registry", "localhost:5000", "team");
+        var destination = registry.AddImage("Published", source);
+        destination.Resource.RecordPublishedDigest(Digest);
+
+        Assert.Equal("{Published.image}", destination.Resource.ValueExpression);
+        Assert.Equal("localhost:5000/team/published@" + Digest, await ((IValueProvider)destination.Resource).GetValueAsync(default));
+        Assert.Collection(destination.Resource.References,
+            resource => Assert.Same(destination.Resource, resource),
+            resource => Assert.Same(source.Resource, resource),
+            resource => Assert.Same(registry.Resource, resource));
+        var expression = ReferenceExpression.Create($"image={destination.Resource}");
+        Assert.Equal("image={Published.image}", expression.ValueExpression);
+        Assert.Equal("image=localhost:5000/team/published@" + Digest, await expression.GetValueAsync(default));
+    }
+
+    [Fact]
+    public async Task EnvironmentValuesAndConsumptionIntentRemainSeparate()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var destination = registry.AddImage("published", source);
+        var consumer = builder.AddContainer("consumer", "busybox");
+
+        Assert.Same(consumer, consumer.WithEnvironment("IMAGE_NAME", destination));
+        Assert.Empty(consumer.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>());
+        Assert.Same(consumer, consumer.WithReference(destination));
+        consumer.WithReference(destination);
+        Assert.Same(destination.Resource, Assert.Single(consumer.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>()).Image);
+        var environment = await EnvironmentVariableEvaluator.GetEnvironmentVariablesAsync(consumer.Resource, DistributedApplicationOperation.Publish);
+        Assert.Equal("{published.image}", environment["IMAGE_NAME"]);
+    }
+
+    [Theory]
+    [InlineData("", "registry.example.com:5000/published@")]
+    [InlineData("team", "registry.example.com:5000/team/published@")]
+    public async Task EmptyAndParameterBackedRegistryNamespacesResolveConsistentlyInProcess(string namespaceValue, string qualifiedRepository)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var endpoint = builder.AddParameter("endpoint");
+        var repository = builder.AddParameter("repository");
+        var registry = builder.AddContainerRegistry("registry", endpoint, repository);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox:v1");
+        var destination = registry.AddImage("published", source);
+        destination.Resource.RecordPublishedDigest(Digest);
+        Assert.Equal("{endpoint.value}/{repository.value}/published@{published.digest}", destination.Resource.GetImageExpression().ValueExpression);
+        builder.Configuration["Parameters:endpoint"] = "registry.example.com:5000";
+        builder.Configuration["Parameters:repository"] = namespaceValue;
+        Assert.Equal(qualifiedRepository + Digest, await ((IValueProvider)destination.Resource).GetValueAsync(default));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("https://registry.example.com")]
+    [InlineData("user:password@registry.example.com")]
+    [InlineData("registry.example.com/path")]
+    public async Task InvalidResolvedRegistryEndpointFailsExplicitly(string endpointValue)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var endpoint = builder.AddParameter("endpoint");
+        var registry = builder.AddContainerRegistry("registry", endpoint);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var destination = registry.AddImage("published", source);
+        destination.Resource.RecordPublishedDigest(Digest);
+        builder.Configuration["Parameters:endpoint"] = endpointValue;
+
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => ((IValueProvider)destination.Resource).GetValueAsync(default).AsTask());
     }
 
     [Fact]
     public async Task UnassociatedImageAdoptsRegistryAfterEnvironmentPreparation()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox:v1");
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox:v1");
         var endpoint = builder.AddParameter("endpoint");
         var registry = builder.AddContainerRegistry("registry", endpoint);
         var environment = builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = registry.Resource });
         using var app = builder.Build();
-
-        Assert.Empty(image.Resource.GetPublications());
         await app.ExecuteBeforeStartHooksAsync(default);
 
-        var publication = Assert.Single(image.Resource.GetPublications());
+        var publication = Assert.Single(source.Resource.GetPublications());
         Assert.Same(registry.Resource, publication.Registry);
         Assert.Same(environment.Resource, publication.DefaultEnvironment);
-        Assert.Equal("v1", publication.Tag);
-        Assert.Null(publication.Repository);
-        Assert.Equal("{tools.publications.registry.image}", image.GetImageReference(registry).ValueExpression);
-        Assert.Empty(image.Resource.Annotations.OfType<DeploymentTargetAnnotation>());
+        Assert.Equal("{tools-registry.image}", publication.Destination.ValueExpression);
+        Assert.Empty(source.Resource.Annotations.OfType<DeploymentTargetAnnotation>());
         Assert.Empty(app.Services.GetRequiredService<DistributedApplicationModel>().GetComputeResources());
-
-        var manifest = await ManifestUtils.GetManifest(image.Resource);
+        var manifest = await ManifestUtils.GetManifest(source.Resource);
         await Verify(manifest.ToJsonString(new() { WriteIndented = true }), "json");
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExplicitAssociationSuppressesAllEnvironmentDefaults(bool useWithPushedImage)
+    [Fact]
+    public async Task ExplicitAssociationSuppressesAllEnvironmentDefaults()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
         var first = builder.AddContainerRegistry("first", "first.example.com");
         var second = builder.AddContainerRegistry("second", "second.example.com");
         builder.AddResource(new TestImageComputeEnvironmentResource("first-env") { ImageRegistry = first.Resource });
         builder.AddResource(new TestImageComputeEnvironmentResource("second-env") { ImageRegistry = second.Resource });
-        if (useWithPushedImage)
-        {
-            first.WithPushedImage(image);
-        }
-        else
-        {
-            image.WithContainerRegistry(first);
-        }
-
+        var destination = first.AddImage("published", image);
         using var app = builder.Build();
         await app.ExecuteBeforeStartHooksAsync(default);
 
         var publication = Assert.Single(image.Resource.GetPublications());
-        Assert.Same(first.Resource, publication.Registry);
+        Assert.Same(destination.Resource, publication.Destination);
         Assert.Null(publication.DefaultEnvironment);
     }
 
@@ -276,11 +310,10 @@ public class ContainerImageResourceTests
     public async Task NonPublicationAssociationSuppressesAutomaticPublication()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
         var registry = builder.AddContainerRegistry("registry", "registry.example.com");
         builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = registry.Resource });
         image.WithAnnotation(new TestContainerImageRegistryAssociationAnnotation(registry.Resource));
-
         using var app = builder.Build();
         await app.ExecuteBeforeStartHooksAsync(default);
 
@@ -292,11 +325,10 @@ public class ContainerImageResourceTests
     public async Task EnvironmentsSharingOneRegistryDoNotCreateAmbiguousDefaults()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
         var registry = builder.AddContainerRegistry("registry", "registry.example.com");
         builder.AddResource(new TestImageComputeEnvironmentResource("second-env") { ImageRegistry = registry.Resource });
         var first = builder.AddResource(new TestImageComputeEnvironmentResource("first-env") { ImageRegistry = registry.Resource });
-
         using var app = builder.Build();
         await app.ExecuteBeforeStartHooksAsync(default);
 
@@ -311,8 +343,8 @@ public class ContainerImageResourceTests
     public async Task DistinctDefaultRegistriesAreRejectedRegardlessOfRegistrationOrder(bool reverseOrder)
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var other = builder.AddContainerImage("other", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var other = builder.AddContainerImage("other").WithImageSource("busybox");
         var first = builder.AddContainerRegistry("first", "first.example.com");
         var second = builder.AddContainerRegistry("second", "second.example.com");
         var environments = new[]
@@ -324,110 +356,57 @@ public class ContainerImageResourceTests
         {
             builder.AddResource(environment);
         }
-
         using var app = builder.Build();
         var exception = await Assert.ThrowsAsync<DistributedApplicationException>(() => app.ExecuteBeforeStartHooksAsync(default));
-
         Assert.Equal(
             "Image artifact(s) 'other', 'tools' have multiple default container registries available ('first', 'second'). " +
-            "Associate each image explicitly using 'registry.WithPushedImage(image)' or 'image.WithContainerRegistry(registry)'.",
-            exception.Message);
+            "Create each destination explicitly using 'registry.AddImage(name, image)'.", exception.Message);
         Assert.Empty(image.Resource.GetPublications());
         Assert.Empty(other.Resource.GetPublications());
     }
 
     [Fact]
-    public async Task InferredAssociationIsRecomputedAndRemovedWhenDefaultDisappears()
+    public async Task InferredDestinationIsRecomputedAndRemovedWhenDefaultDisappears()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
         var first = builder.AddContainerRegistry("first", "first.example.com");
         var second = builder.AddContainerRegistry("second", "second.example.com");
         var environment = builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = first.Resource });
         using var app = builder.Build();
         await app.ExecuteBeforeStartHooksAsync(default);
-        var reference = image.GetImageReference(first);
-        await app.ExecuteBeforeStartHooksAsync(default);
-        Assert.Same(first.Resource, Assert.Single(image.Resource.GetPublications()).Registry);
-
+        var original = Assert.Single(image.Resource.GetPublications()).Destination;
         environment.Resource.ImageRegistry = second.Resource;
         await app.ExecuteBeforeStartHooksAsync(default);
 
         Assert.Same(second.Resource, Assert.Single(image.Resource.GetPublications()).Registry);
-        Assert.Throws<InvalidOperationException>(() => reference.ValueExpression);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => ((IValueProvider)reference).GetValueAsync(default).AsTask());
-
+        Assert.Throws<InvalidOperationException>(() => original.ValueExpression);
+        Assert.False(app.Services.GetRequiredService<DistributedApplicationModel>().Resources.Contains(original));
         environment.Resource.ImageRegistry = null;
         await app.ExecuteBeforeStartHooksAsync(default);
         Assert.Empty(image.Resource.GetPublications());
+        Assert.Empty(app.Services.GetRequiredService<DistributedApplicationModel>().Resources.OfType<DestinationImageResource>());
     }
 
     [Theory]
-    [InlineData(false)]
     [InlineData(true)]
-    public async Task LateExplicitAssociationImmediatelySuppressesInferredDestination(bool sameRegistry)
+    [InlineData(false)]
+    public async Task ExcludedImagesAndEnvironmentsDoNotParticipateInDefaultAdoption(bool excludeImage)
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var first = builder.AddContainerRegistry("first", "first.example.com");
-        var second = builder.AddContainerRegistry("second", "second.example.com");
-        builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = first.Resource });
-        using var app = builder.Build();
-        await app.ExecuteBeforeStartHooksAsync(default);
-        var selected = sameRegistry ? first : second;
-        selected.WithPushedImage(image, repository: "custom/tools", tag: "release");
-
-        var publication = Assert.Single(image.Resource.GetPublications());
-        Assert.Same(selected.Resource, publication.Registry);
-        Assert.Null(publication.DefaultEnvironment);
-        Assert.Equal("custom/tools", publication.Repository);
-        Assert.Equal("release", publication.Tag);
-
-        await app.ExecuteBeforeStartHooksAsync(default);
-        Assert.Same(publication, Assert.Single(image.Resource.GetPublications()));
-        Assert.Null(Assert.Single(image.Resource.Annotations.OfType<ContainerImagePublicationAnnotation>()).DefaultEnvironment);
-    }
-
-    [Fact]
-    public async Task LateWithContainerRegistryImmediatelySuppressesInferredDestination()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var first = builder.AddContainerRegistry("first", "first.example.com");
-        var second = builder.AddContainerRegistry("second", "second.example.com");
-        builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = first.Resource });
-        using var app = builder.Build();
-        await app.ExecuteBeforeStartHooksAsync(default);
-
-        image.WithContainerRegistry(second);
-        Assert.Same(second.Resource, Assert.Single(image.Resource.GetPublications()).Registry);
-
-        await app.ExecuteBeforeStartHooksAsync(default);
-        Assert.Same(second.Resource, Assert.Single(image.Resource.GetPublications()).Registry);
-        Assert.Empty(image.Resource.Annotations.OfType<ContainerImagePublicationAnnotation>());
-    }
-
-    [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task ExcludedImagesAndEnvironmentsDoNotParticipateInDefaultAdoption(bool excludeImage, bool excludeEnvironment)
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
         var registry = builder.AddContainerRegistry("registry", "registry.example.com");
         var environment = builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = registry.Resource });
         if (excludeImage)
         {
             image.ExcludeFromManifest();
         }
-        if (excludeEnvironment)
+        else
         {
             environment.ExcludeFromManifest();
         }
-
         using var app = builder.Build();
         await app.ExecuteBeforeStartHooksAsync(default);
-
         Assert.Empty(image.Resource.GetPublications());
     }
 
@@ -435,180 +414,15 @@ public class ContainerImageResourceTests
     public async Task DefaultRegistryMustBePublishableAndPresentInModel()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
         var registry = builder.AddContainerRegistry("registry", "registry.example.com").ExcludeFromManifest();
         builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = registry.Resource });
         using var app = builder.Build();
-
         var exception = await Assert.ThrowsAsync<DistributedApplicationException>(() => app.ExecuteBeforeStartHooksAsync(default));
-        Assert.Equal(
-            "Compute environment 'env' advertises image registry 'registry', which is not a publishable container registry resource in the application model.",
-            exception.Message);
+        Assert.Equal("Compute environment 'env' advertises image registry 'registry', which is not a publishable container registry resource in the application model.", exception.Message);
         Assert.Empty(image.Resource.GetPublications());
-
         app.Services.GetRequiredService<DistributedApplicationModel>().Resources.Remove(registry.Resource);
-        exception = await Assert.ThrowsAsync<DistributedApplicationException>(() => app.ExecuteBeforeStartHooksAsync(default));
-        Assert.Equal(
-            "Compute environment 'env' advertises image registry 'registry', which is not a publishable container registry resource in the application model.",
-            exception.Message);
-    }
-
-    [Fact]
-    public async Task RunModeNeverAdoptsRegistriesEvenForManuallyAddedImageResource()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create();
-        var image = builder.AddResource(new ContainerImageResource("tools", "busybox"));
-        var registry = new ContainerRegistryResource("registry", ReferenceExpression.Create($"registry.example.com"));
-        builder.AddResource(registry);
-        builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = registry })
-            .WithAnnotation(new ContainerImageRegistryTargetAnnotation(registry));
-        using var app = builder.Build();
-
-        await app.ExecuteBeforeStartHooksAsync(default);
-
-        Assert.Empty(image.Resource.GetPublications());
-    }
-
-    [Fact]
-    public async Task DestinationRetainsArtifactAndRegistryProvenance()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("Tools", "busybox:v1");
-        var registry = builder.AddContainerRegistry("registry", "localhost:5000", "namespace");
-        registry.WithPushedImage(image);
-        var reference = image.GetImageReference(registry);
-
-        Assert.Same(image.Resource, reference.Resource);
-        Assert.Same(registry.Resource, reference.Registry);
-        Assert.Equal("{Tools.publications.registry.image}", reference.ValueExpression);
-        Assert.Equal("localhost:5000/namespace/tools:v1", await ((IValueProvider)reference).GetValueAsync(default));
-        Assert.Collection(reference.References,
-            resource => Assert.Same(image.Resource, resource),
-            resource => Assert.Same(registry.Resource, resource));
-        var expression = ReferenceExpression.Create($"image={reference}");
-        Assert.Equal("image={Tools.publications.registry.image}", expression.ValueExpression);
-        Assert.Equal("image=localhost:5000/namespace/tools:v1", await expression.GetValueAsync(default));
-    }
-
-    [Fact]
-    public async Task ExplicitRepositoryNeverOverridesTheRegistryEndpoint()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var registry = builder.AddContainerRegistry("registry", "registry.example.com", "namespace");
-        registry.WithPushedImage(image, repository: "other.example.com/team/tools", tag: "release");
-
-        Assert.Equal("registry.example.com/other.example.com/team/tools:release",
-            await ((IValueProvider)image.GetImageReference(registry)).GetValueAsync(default));
-    }
-
-    [Fact]
-    public async Task EmptyRegistryNamespaceDoesNotAddAnEmptyPathSegment()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var registry = builder.AddContainerRegistry("registry", "registry.example.com", "");
-        registry.WithPushedImage(image);
-        var reference = image.GetImageReference(registry);
-
-        Assert.Equal("registry.example.com/tools:latest", reference.GetImageExpression().ValueExpression);
-        Assert.Equal("registry.example.com/tools:latest", await ((IValueProvider)reference).GetValueAsync(default));
-    }
-
-    [Fact]
-    public async Task DestinationRegistryParametersRemainDeferred()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var endpoint = builder.AddParameter("endpoint");
-        var repository = builder.AddParameter("repository");
-        var registry = builder.AddContainerRegistry("registry", endpoint, repository);
-        var image = builder.AddContainerImage("tools", "busybox:v1");
-        registry.WithPushedImage(image);
-        var reference = image.GetImageReference(registry);
-
-        Assert.Equal("{endpoint.value}/{repository.value}/tools:v1", reference.GetImageExpression().ValueExpression);
-        builder.Configuration["Parameters:endpoint"] = "registry.example.com:5000";
-        builder.Configuration["Parameters:repository"] = "team";
-        Assert.Equal("registry.example.com:5000/team/tools:v1", await ((IValueProvider)reference).GetValueAsync(default));
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("https://registry.example.com")]
-    [InlineData("user:password@registry.example.com")]
-    [InlineData("registry.example.com/path")]
-    public async Task InvalidResolvedRegistryEndpointFailsExplicitly(string endpointValue)
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var endpoint = builder.AddParameter("endpoint");
-        var registry = builder.AddContainerRegistry("registry", endpoint);
-        var image = builder.AddContainerImage("tools", "busybox");
-        registry.WithPushedImage(image);
-        builder.Configuration["Parameters:endpoint"] = endpointValue;
-
-        await Assert.ThrowsAnyAsync<ArgumentException>(() => ((IValueProvider)image.GetImageReference(registry)).GetValueAsync(default).AsTask());
-    }
-
-    [Fact]
-    public async Task DigestOnlySourcesUseDeterministicDestinationTags()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox@" + Digest);
-        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
-        registry.WithPushedImage(image);
-
-        Assert.Equal("registry.example.com/tools:" + Digest.Replace(':', '-'),
-            await ((IValueProvider)image.GetImageReference(registry)).GetValueAsync(default));
-    }
-
-    [Fact]
-    public void SourceAndDestinationLengthLimitsAreEnforced()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var digest = "sha512:" + new string('a', 128);
-        var image = builder.AddContainerImage("tools", "busybox@" + digest);
-        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
-        registry.WithPushedImage(image);
-
-        Assert.Equal(128, Assert.Single(image.Resource.GetPublications()).Tag.Length);
-        Assert.Equal(digest.Replace(':', '-')[..128], image.Resource.DefaultTag);
-        Assert.Throws<ArgumentException>(() => builder.AddContainerImage("long-source", new string('a', 256)));
-        Assert.Throws<ArgumentException>(() => registry.WithPushedImage(image, repository: new string('a', 256)));
-        Assert.Throws<ArgumentException>(() => registry.WithPushedImage(image, tag: new string('a', 129)));
-    }
-
-    [Fact]
-    public async Task ResolvedDestinationLengthLimitIncludesTheRegistryEndpoint()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
-        var validRepository = new string('a', 255 - "registry.example.com/".Length);
-        registry.WithPushedImage(image, repository: validRepository);
-
-        var reference = image.GetImageReference(registry);
-        Assert.Equal("registry.example.com/" + validRepository + ":latest",
-            await ((IValueProvider)reference).GetValueAsync(default));
-
-        var tooLong = builder.AddContainerImage("long-tools", "busybox");
-        registry.WithPushedImage(tooLong, repository: validRepository + "a");
-        await Assert.ThrowsAsync<InvalidOperationException>(() => ((IValueProvider)tooLong.GetImageReference(registry)).GetValueAsync(default).AsTask());
-    }
-
-    [Fact]
-    public async Task DestinationReferenceCannotRetainAnAssociationRemovedByLastWinsSelection()
-    {
-        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var first = builder.AddContainerRegistry("first", "first.example.com");
-        var second = builder.AddContainerRegistry("second", "second.example.com");
-        image.WithContainerRegistry(first);
-        var reference = image.GetImageReference(first);
-        image.WithContainerRegistry(second);
-
-        Assert.Throws<InvalidOperationException>(() => reference.ValueExpression);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => ((IValueProvider)reference).GetValueAsync(default).AsTask());
-        Assert.Same(second.Resource, Assert.Single(image.Resource.GetPublications()).Registry);
+        await Assert.ThrowsAsync<DistributedApplicationException>(() => app.ExecuteBeforeStartHooksAsync(default));
     }
 
     [Fact]
@@ -616,31 +430,31 @@ public class ContainerImageResourceTests
     {
         using var first = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
         using var second = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = first.AddContainerImage("tools", "busybox");
+        var image = first.AddContainerImage("tools").WithImageSource("busybox");
         var registry = second.AddContainerRegistry("registry", "registry.example.com");
-
-        Assert.Throws<ArgumentException>(() => registry.WithPushedImage(image));
-        Assert.Throws<ArgumentException>(() => image.GetImageReference(registry));
-        Assert.Throws<ArgumentException>(() => image.WithContainerRegistry(registry));
-        Assert.Empty(image.Resource.GetPublications());
+        Assert.Throws<ArgumentException>(() => registry.AddImage("published", image));
+        var localRegistry = first.AddContainerRegistry("local-registry", "registry.example.com");
+        var destination = localRegistry.AddImage("published", image);
+        var consumer = second.AddContainer("consumer", "busybox");
+        Assert.Throws<ArgumentException>(() => consumer.WithEnvironment("IMAGE", destination));
+        Assert.Throws<ArgumentException>(() => consumer.WithReference(destination));
     }
 
     [Fact]
     public async Task ManifestCapturesSourceAndAllExplicitDestinationsWithoutResolvingParameters()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox:v1@" + Digest);
+        var source = builder.AddContainerImage("tools").WithImageSource("ghcr.io/example/tools:v1");
         var endpoint = builder.AddParameter("endpoint");
         var repository = builder.AddParameter("repository");
         var first = builder.AddContainerRegistry("first", endpoint, repository);
-        var second = builder.AddContainerRegistry("second", "second.example.com", "ignored-namespace");
-        second.WithPushedImage(image, repository: "team/tools", tag: "release");
-        first.WithPushedImage(image);
+        var second = builder.AddContainerRegistry("second", "second.example.com");
+        var firstImage = first.AddImage("first-tools", source);
+        second.AddImage("second-tools", source);
         builder.AddContainer("consumer", "busybox")
-            .WithEnvironment("TOOLS_IMAGE", image.GetImageReference(first));
-
-        var manifest = await ManifestUtils.GetManifestForModel(new DistributedApplicationModel(builder.Resources));
-
+            .WithEnvironment("TOOLS_IMAGE", firstImage);
+        using var app = builder.Build();
+        var manifest = await ManifestUtils.GetManifestForModel(app.Services.GetRequiredService<DistributedApplicationModel>());
         await Verify(manifest.ToJsonString(new() { WriteIndented = true }), "json");
     }
 
@@ -648,12 +462,98 @@ public class ContainerImageResourceTests
     public async Task ManifestWithoutAssociationsDoesNotSelectADefaultRegistry()
     {
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
-        var image = builder.AddContainerImage("tools", "busybox");
-        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
-        image.WithAnnotation(new RegistryTargetAnnotation(registry.Resource));
-
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
+        builder.AddContainerRegistry("registry", "registry.example.com");
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        Assert.Empty(image.Resource.GetPublications());
         var manifest = await ManifestUtils.GetManifest(image.Resource);
-
         await Verify(manifest.ToJsonString(new() { WriteIndented = true }), "json");
+    }
+
+    [Fact]
+    public async Task LateExplicitDestinationImmediatelyRemovesOnlyInferredResources()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = registry.Resource });
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        var inferred = Assert.Single(source.Resource.GetPublications()).Destination;
+        var destination = registry.AddImage("explicit-tools", source);
+        var another = registry.AddImage("another", source);
+
+        Assert.Throws<InvalidOperationException>(() => inferred.ValueExpression);
+        Assert.Equal([destination.Resource, another.Resource],
+            app.Services.GetRequiredService<DistributedApplicationModel>().Resources.OfType<DestinationImageResource>().ToArray());
+        await app.ExecuteBeforeStartHooksAsync(default);
+        Assert.Equal([destination.Resource, another.Resource], source.Resource.GetPublications().Select(publication => publication.Destination).ToArray());
+    }
+
+    [Fact]
+    public async Task DestinationDispatchersAcceptResourceBuildersWithoutConnectionStringSemantics()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var destination = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        var consumer = builder.AddContainer("consumer", "busybox");
+
+        Assert.Same(consumer, ResourceBuilderExtensions.WithEnvironment(consumer, "IMAGE_NAME", (object)destination));
+        Assert.Same(consumer, ResourceBuilderExtensions.WithReference(consumer, (object)destination));
+        Assert.Same(destination.Resource, Assert.Single(consumer.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>()).Image);
+        var exception = Assert.Throws<System.Reflection.TargetInvocationException>(() =>
+            ResourceBuilderExtensions.WithReference(consumer, (object)destination, optional: true));
+        Assert.IsType<InvalidOperationException>(exception.InnerException);
+        var environment = await EnvironmentVariableEvaluator.GetEnvironmentVariablesAsync(consumer.Resource, DistributedApplicationOperation.Publish);
+        Assert.Equal("{published.image}", environment["IMAGE_NAME"]);
+    }
+
+    [Fact]
+    public async Task RunModeNeverAdoptsDefaultsEvenForManuallyRegisteredArtifacts()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create();
+        var image = builder.AddContainerImage("tools").WithImageSource("busybox");
+        builder.AddResource(image.Resource);
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = registry.Resource });
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+
+        Assert.Empty(image.Resource.GetPublications());
+        Assert.Empty(app.Services.GetRequiredService<DistributedApplicationModel>().Resources.OfType<DestinationImageResource>());
+    }
+
+    [Fact]
+    public async Task ResolvedDestinationLengthLimitIncludesTheRegistryEndpoint()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var repository = builder.AddParameter("repository");
+        var endpoint = builder.AddParameter("endpoint");
+        builder.Configuration["Parameters:endpoint"] = "registry.example.com";
+        var registry = builder.AddContainerRegistry("registry", endpoint, repository);
+        var destination = registry.AddImage("published", source);
+        destination.Resource.RecordPublishedDigest(Digest);
+        builder.Configuration["Parameters:repository"] = new string('a', 240);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ((IValueProvider)destination.Resource).GetValueAsync(default).AsTask());
+        Assert.Throws<ArgumentException>(() => source.WithImageSource(new string('a', 250)));
+    }
+
+    [Fact]
+    public async Task InferredNamesNeverOverwriteUserResources()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        builder.AddResource(new TestImageComputeEnvironmentResource("env") { ImageRegistry = registry.Resource });
+        var existing = builder.AddParameter("tools-registry");
+        using var app = builder.Build();
+
+        var exception = await Assert.ThrowsAsync<DistributedApplicationException>(() => app.ExecuteBeforeStartHooksAsync(default));
+        Assert.Equal("Default destination image name 'tools-registry' conflicts with another resource. Create an explicitly named destination with registry.AddImage(name, image).", exception.Message);
+        Assert.Empty(source.Resource.GetPublications());
+        Assert.True(app.Services.GetRequiredService<DistributedApplicationModel>().Resources.Contains(existing.Resource));
     }
 }
