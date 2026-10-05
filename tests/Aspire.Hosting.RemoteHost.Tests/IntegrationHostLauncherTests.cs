@@ -227,12 +227,15 @@ public class IntegrationHostLauncherTests
         Assert.Equal(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", startInfo.FileName);
         Assert.Empty(startInfo.ArgumentList);
         Assert.Equal(
-            "/D /V:OFF /S /C \"\"%ASPIRE_COMMAND_SHIM_PATH%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_0%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_1%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_2%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_3%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_4%\"\"",
+            "/D /V:OFF /S /C \"\"%ASPIRE_COMMAND_SHIM_PATH%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_0%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_1%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_2%\" \"\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_4%\"\"",
             startInfo.Arguments);
         Assert.Equal(command, startInfo.Environment["ASPIRE_COMMAND_SHIM_PATH"]);
         Assert.Equal(
-            ["--no-install", "tsx", entryPoint, "", "literal %PATH%! & value"],
-            Enumerable.Range(0, 5).Select(index => startInfo.Environment[$"ASPIRE_COMMAND_SHIM_ARGUMENT_{index}"]));
+            ["--no-install", "tsx", entryPoint, "literal %PATH%! & value"],
+            startInfo.Environment
+                .Where(variable => variable.Key.StartsWith("ASPIRE_COMMAND_SHIM_ARGUMENT_", StringComparison.Ordinal))
+                .OrderBy(variable => variable.Key, StringComparer.Ordinal)
+                .Select(variable => variable.Value));
         Assert.False(startInfo.UseShellExecute);
         Assert.True(startInfo.RedirectStandardOutput);
         Assert.True(startInfo.RedirectStandardError);
