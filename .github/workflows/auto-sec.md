@@ -472,7 +472,11 @@ Skip alerts the existing auto-sec PR already fixes.
   `npm install <name>@<version> --package-lock-only --ignore-scripts` for direct
   dependencies. For transitive dependencies, prefer
   `npm update <name> --package-lock-only --ignore-scripts`; if the parent pins an
-  old range, update an existing `overrides` version in `package.json`. Do not add
+  old range, update an existing `overrides` version in `package.json`. Edit only
+  single-bound selectors (such as exact, caret, or tilde versions); leave compound
+  selectors such as `>=1 <2` unchanged, or report `blocked: update-failed` when the
+  fix requires changing one. The policy cannot verify every bound of a compound
+  selector. Do not add
   new entries: the manifest gate permits only version-token replacements. If a
   fix requires a new override, mark the alert `blocked: update-failed`.
   Keep the registry the lockfile already uses.

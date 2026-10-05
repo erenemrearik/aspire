@@ -46,6 +46,11 @@ function createFetch(responses, urls) {
 
 function createGitHub(request, created) {
     const notFound = () => Object.assign(new Error('Not Found'), { status: 404 });
+    const fail = phase => {
+        if (request.approvalFailure === phase) {
+            throw new Error('synthetic private advisory in API failure');
+        }
+    };
     const getCalls = new Map();
     let checkCalls = 0;
     let statusCalls = 0;
@@ -54,7 +59,13 @@ function createGitHub(request, created) {
         commits: () => (request.commits ?? [{ author_login: 'dependabot[bot]', verified: true }])
             .map(commit => ({ author: { login: commit.author_login }, commit: { verification: { verified: commit.verified } } })),
         // `liveCheckRuns` / `liveStatuses` simulate CI changing after the gates read it.
-        checks: () => (++checkCalls > 1 && request.liveCheckRuns) ? request.liveCheckRuns : (request.checkRuns ?? []),
+        checks: () => {
+            checkCalls++;
+            if (checkCalls > 1) {
+                fail('live-checks');
+            }
+            return checkCalls > 1 && request.liveCheckRuns ? request.liveCheckRuns : (request.checkRuns ?? []);
+        },
         reviews: () => (request.reviews ?? []).map(review => ({ user: { login: review.user_login }, state: review.state, commit_id: review.commit_id })),
     };
     const rest = {
@@ -64,6 +75,7 @@ function createGitHub(request, created) {
                 // `liveHeadSha` / `liveBaseRef` / `liveDraft` simulate a push, retarget, or draft
                 // conversion that lands after the gates were evaluated.
                 getCalls.set(pullNumber, (getCalls.get(pullNumber) ?? 0) + 1);
+                fail(getCalls.get(pullNumber) > 1 ? 'live-pr' : 'evaluation');
                 if (request.liveHeadSha && getCalls.get(pullNumber) > 1) {
                     pr.head_sha = request.liveHeadSha;
                 }
@@ -90,7 +102,9 @@ function createGitHub(request, created) {
             listCommits: pages.commits,
             listReviews: pages.reviews,
             createReview: async args => {
+                fail('submission');
                 created.push(args);
+                fail('submission-after-accept');
                 return { data: { id: 1 } };
             },
         },
@@ -107,6 +121,9 @@ function createGitHub(request, created) {
                 // Page 1 starts a new CI read; the second read is the live re-check.
                 if (page === 1) {
                     statusCalls++;
+                }
+                if (statusCalls > 1) {
+                    fail('live-statuses');
                 }
                 const all = (statusCalls > 1 && request.liveStatuses) ? request.liveStatuses : (request.statuses ?? []);
                 const states = all.map(status => status.state);
@@ -176,17 +193,23 @@ async function main() {
             const reviews = [];
             const info = [];
             const warnings = [];
+            const failures = [];
             let summary = '';
             const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-'));
             const outputPath = path.join(outputDir, 'agent_output.json');
-            fs.writeFileSync(outputPath, JSON.stringify({ items: request.agentItems ?? [] }));
+            fs.writeFileSync(outputPath, request.approvalFailure === 'parse-output' ? 'synthetic private advisory invalid JSON' : JSON.stringify({ items: request.agentItems ?? [] }));
             const core = {
                 info: message => info.push(message),
                 warning: message => warnings.push(message),
+                setFailed: message => failures.push(message),
                 summary: {
                     addHeading: text => { summary += `${text}\n`; return core.summary; },
                     addRaw: text => { summary += text; return core.summary; },
-                    write: async () => {},
+                    write: async () => {
+                        if (request.approvalFailure === 'summary') {
+                            throw new Error('synthetic private advisory in summary failure');
+                        }
+                    },
                 },
             };
             try {
@@ -195,11 +218,16 @@ async function main() {
                     approver: createGitHub(request, reviews),
                     context: { repo: { owner: 'microsoft', repo: 'aspire' } },
                     core,
+                    fs: new Proxy(fs, {
+                        get: (target, property) => property === 'readFileSync' && request.approvalFailure === 'read-output'
+                            ? () => { throw new Error('synthetic private advisory in file failure'); }
+                            : target[property],
+                    }),
                     env: { GH_AW_AGENT_OUTPUT: outputPath, GH_AW_SAFE_OUTPUTS_STAGED: request.staged ? 'true' : 'false' },
                     fetchImpl: createFetch(request.responses, []),
                     now: new Date(request.now),
                 });
-                result = { value, reviews, summary, info, warnings };
+                result = { value, reviews, summary, info, warnings, failures };
             } finally {
                 fs.rmSync(outputDir, { recursive: true, force: true });
             }

@@ -499,7 +499,8 @@ function splitNpmSpec(spec) {
 }
 
 // Reduce a range to its version: `^4.17.21`, `~4.17.21`, `>=4.17.21`, `=4.17.21` and
-// `v4.17.21` all become `4.17.21`. Compound ranges (`>=1 <2`) keep only the first bound.
+// `v4.17.21` all become `4.17.21`. Compound ranges (`>=1 <2`) keep only the first bound
+// when reading existing entries; isVersionOnlyEdit rejects changes to those selectors.
 function stripRangeOperators(range) {
     return String(range ?? '').trim().replace(/^npm:/, '').replace(/^[\^~=<>v\s]+/, '').split(/[\s,|]/)[0];
 }
@@ -1146,7 +1147,8 @@ const DEPENDENCY_VERSION_LINE_RULES = {
     'package.json': line => {
         const match = PACKAGE_JSON_VERSION_LINE.exec(line);
         const parts = match ? match[1].trim().split(/\s+/) : [];
-        return parts.length > 0 && parts.every(part => NPM_RANGE_PART.test(part)) ? groupRange(match, 1) : null;
+        // A single target version cannot authorize edits to a later bound in `>=1 <2`.
+        return parts.length === 1 && NPM_RANGE_PART.test(parts[0]) ? groupRange(match, 1) : null;
     },
     'pyproject.toml': line => groupRange(PYPROJECT_VERSION_LINE.exec(line), 2),
     'directory.packages.props': line => groupRange(PACKAGES_PROPS_VERSION_LINE.exec(line), 1),
@@ -1820,7 +1822,17 @@ async function collectGateInput(github, owner, repo, request, { fetchImpl, now, 
  * `security-events: read` for Dependabot alerts); `approver` is an Octokit client for
  * the Aspire bot App and is used only to submit the APPROVE review.
  */
-async function runApprovalJob({ github, approver = github, context, core, fs = require('node:fs'), env = process.env, fetchImpl = fetch, now = new Date() }) {
+async function runApprovalJob(options) {
+    try {
+        return await executeApprovalJob(options);
+    } catch {
+        // Input parsing, file I/O, and summary transport can echo private text too.
+        options.core.setFailed('Auto-sec approval failed: gate-evaluation-failed.');
+        return [];
+    }
+}
+
+async function executeApprovalJob({ github, approver = github, context, core, fs = require('node:fs'), env = process.env, fetchImpl = fetch, now = new Date() }) {
     const outputPath = env.GH_AW_AGENT_OUTPUT;
     if (!outputPath || !fs.existsSync(outputPath)) {
         core.info('No agent output found; nothing to approve.');
@@ -1833,59 +1845,62 @@ async function runApprovalJob({ github, approver = github, context, core, fs = r
     const { owner, repo } = context.repo;
     const results = [];
     const lookupCache = new Map();
-    let approvals = 0;
+    let approvalAttempts = 0;
 
     for (const request of requests) {
         let result;
-        if (approvals >= MAX_APPROVALS) {
+        if (approvalAttempts >= MAX_APPROVALS) {
             results.push({ pr: request.prNumber, decision: 'skip', reasons: ['approval-limit-reached'], fixedAlerts: [] });
             core.info(`#${request.prNumber}: skip approval-limit-reached`);
             continue;
         }
+        let failureReason = 'gate-evaluation-failed';
         try {
             const input = await collectGateInput(github, owner, repo, request, { fetchImpl, now, botLogin, lookupCache });
             result = { pr: request.prNumber, ...evaluateApprovalGates(input) };
-        } catch (error) {
-            result = { pr: request.prNumber, decision: 'skip', reasons: ['gate-evaluation-failed'], fixedAlerts: [] };
-            core.warning(`Gate evaluation failed for #${request.prNumber}: ${error.message}`);
-        }
-
-        if (result.decision === 'approve' && !staged) {
-            // The gates take many requests; Dependabot can rebase meanwhile, and an
-            // approval on the older commit could still count for the new head, or the PR can
-            // be retargeted away from the branch its alerts describe.
-            const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: request.prNumber });
-            // It can also be closed or converted to draft; an approval submitted then would
-            // still count once the PR is reopened or marked ready.
-            if (live.head?.sha !== request.headSha) {
-                result = { ...result, decision: 'skip', reasons: ['head-sha-mismatch'] };
-            } else if (live.state !== 'open' || live.draft) {
-                result = { ...result, decision: 'skip', reasons: ['not-open'] };
-            } else if (live.base?.ref !== BASE_BRANCH) {
-                result = { ...result, decision: 'skip', reasons: ['wrong-base-branch'] };
-            } else {
-                // CI was read before the registry lookups; a re-run or late status can turn
-                // the same SHA pending or red in the meantime, so read it again right before
-                // the review is submitted.
-                const liveCi = await fetchCiState(github, owner, repo, request.headSha);
-                const ci = ciReasons(liveCi.checkRuns, liveCi.statuses);
-                if (ci.length > 0) {
-                    result = { ...result, decision: 'skip', reasons: ci };
+            if (result.decision === 'approve' && !staged) {
+                // The gates take many requests; Dependabot can rebase meanwhile, and an
+                // approval on the older commit could still count for the new head, or the PR can
+                // be retargeted away from the branch its alerts describe.
+                const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: request.prNumber });
+                // It can also be closed or converted to draft; an approval submitted then would
+                // still count once the PR is reopened or marked ready.
+                if (live.head?.sha !== request.headSha) {
+                    result = { ...result, decision: 'skip', reasons: ['head-sha-mismatch'] };
+                } else if (live.state !== 'open' || live.draft) {
+                    result = { ...result, decision: 'skip', reasons: ['not-open'] };
+                } else if (live.base?.ref !== BASE_BRANCH) {
+                    result = { ...result, decision: 'skip', reasons: ['wrong-base-branch'] };
+                } else {
+                    // CI was read before the registry lookups; a re-run or late status can turn
+                    // the same SHA pending or red in the meantime, so read it again right before
+                    // the review is submitted.
+                    const liveCi = await fetchCiState(github, owner, repo, request.headSha);
+                    const ci = ciReasons(liveCi.checkRuns, liveCi.statuses);
+                    if (ci.length > 0) {
+                        result = { ...result, decision: 'skip', reasons: ci };
+                    }
                 }
             }
-        }
-        if (result.decision === 'approve') {
-            approvals++;
-        }
-        if (result.decision === 'approve' && !staged) {
-            await approver.rest.pulls.createReview({
-                owner,
-                repo,
-                pull_number: request.prNumber,
-                commit_id: request.headSha,
-                event: 'APPROVE',
-                body: 'Automated dependency review: this update passed the auto-sec checks (package sources unchanged, checks green, non-breaking, and past the 7-day cooldown).',
-            });
+            if (result.decision === 'approve') {
+                // Reserve the attempt before submission: a transport failure can follow a
+                // successful remote review, so it must still consume the submission quota.
+                approvalAttempts++;
+            }
+            if (result.decision === 'approve' && !staged) {
+                failureReason = 'approval-submission-failed';
+                await approver.rest.pulls.createReview({
+                    owner,
+                    repo,
+                    pull_number: request.prNumber,
+                    commit_id: request.headSha,
+                    event: 'APPROVE',
+                    body: 'Automated dependency review: this update passed the auto-sec checks (package sources unchanged, checks green, non-breaking, and past the 7-day cooldown).',
+                });
+            }
+        } catch {
+            result = { pr: request.prNumber, decision: 'skip', reasons: [failureReason], fixedAlerts: [] };
+            core.setFailed(`Auto-sec approval failed: ${failureReason}.`);
         }
 
         results.push(result);

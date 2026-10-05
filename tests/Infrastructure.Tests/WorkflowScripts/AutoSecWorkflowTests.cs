@@ -48,6 +48,72 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     [Theory]
     [RequiresTools(["node"])]
+    [InlineData("evaluation")]
+    [InlineData("live-pr")]
+    [InlineData("live-checks")]
+    [InlineData("live-statuses")]
+    [InlineData("submission")]
+    [InlineData("submission-after-accept")]
+    [InlineData("parse-output")]
+    [InlineData("read-output")]
+    [InlineData("summary")]
+    public async Task ApprovalFailuresPublishOnlyFixedReasonCodes(string phase)
+    {
+        var scenario = CreateApprovalScenario();
+        scenario["approvalFailure"] = phase;
+
+        var result = await RunHarnessAsync(scenario);
+
+        var reason = phase is "submission" or "submission-after-accept" ? "approval-submission-failed" : "gate-evaluation-failed";
+        Assert.Equal([$"Auto-sec approval failed: {reason}."], result["failures"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Empty(result["warnings"]!.AsArray());
+        if (phase is "parse-output" or "read-output" or "summary")
+        {
+            Assert.Empty(result["value"]!.AsArray());
+            Assert.Equal(phase == "summary" ? "auto-sec Dependabot approvals\nRequests: 1. Approved: 1. Skipped: 0.\n\n- #101: approve" : "", result["summary"]!.GetValue<string>());
+        }
+        else
+        {
+            var decision = Assert.Single(result["value"]!.AsArray());
+            Assert.Equal("skip", decision!["decision"]!.GetValue<string>());
+            Assert.Equal([reason], decision["reasons"]!.AsArray().Select(n => n!.GetValue<string>()));
+            Assert.Empty(decision["fixedAlerts"]!.AsArray());
+            Assert.Equal($"auto-sec Dependabot approvals\nRequests: 1. Approved: 0. Skipped: 1.\n\n- #101: skip ({reason})", result["summary"]!.GetValue<string>());
+        }
+        Assert.Equal(phase is "summary" or "submission-after-accept" ? 1 : 0, result["reviews"]!.AsArray().Count);
+        Assert.Equal(phase is "parse-output" or "read-output" ? [] : [$"#101: {(phase == "summary" ? "approve " : $"skip {reason}")}"],
+            result["info"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("dependencies")]
+    [InlineData("devDependencies")]
+    [InlineData("optionalDependencies")]
+    [InlineData("peerDependencies")]
+    [InlineData("overrides")]
+    [InlineData("resolutions")]
+    public async Task ApprovalRejectsUncheckedCompoundNpmSelectorAlongsideValidFix(string section)
+    {
+        var scenario = CreateApprovalScenario();
+        var baseText = $"{{\n  \"{section}\": {{\n    \"foo\": \">=1 <2\"\n  }}\n}}\n";
+        scenario["contents"]!["extension/package.json@base"] = baseText;
+        scenario["contents"]!["extension/package.json@head"] = baseText;
+        var unchanged = await RunHarnessAsync(scenario);
+        Assert.Equal("approve", Assert.Single(unchanged["value"]!.AsArray())!["decision"]!.GetValue<string>());
+
+        scenario["contents"]!["extension/package.json@head"] = baseText.Replace(">=1 <2", ">=1 <3", StringComparison.Ordinal);
+
+        var result = await RunHarnessAsync(scenario);
+
+        var decision = Assert.Single(result["value"]!.AsArray());
+        Assert.Equal("skip", decision!["decision"]!.GetValue<string>());
+        Assert.Contains("non-version-manifest-edit", decision["reasons"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Empty(result["reviews"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
     [InlineData("not-dependabot")]
     [InlineData("head-sha-mismatch")]
     [InlineData("wrong-base-branch")]
@@ -400,6 +466,13 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("package.json", "scripts", "\"build\": \"1.0.0\"", "\"build\": \"1.0.1\"", false)]
     [InlineData("package.json", "dependencies", "\"lodash\": \"^4.17.20\"", "\"lodash\": \"^4.17.20\",\n    \"postinstall\": \"node x.js\"", false)]
     [InlineData("package.json", "dependencies", "\"foo\": \">=1.0 <2.0\"", "\"foo\": \">=1.1 <3.0\"", false)]
+    [InlineData("package.json", "dependencies", "\"foo\": \">=1 <2\"", "\"foo\": \">=1 <3\"", false)]
+    [InlineData("package.json", "dependencies", "\"foo\": \">=1 <2\"", "\"foo\": \">=1.1 <2\"", false)]
+    [InlineData("package.json", "overrides", "\"parent\": {\n      \".\": \">=1 <2\"\n    }", "\"parent\": {\n      \".\": \">=1 <3\"\n    }", false)]
+    [InlineData("package.json", "overrides", "\"parent\": {\n      \".\": \"^1.0.0\"\n    }", "\"parent\": {\n      \".\": \"^1.0.1\"\n    }", true)]
+    [InlineData("package.json", "resolutions", "\"**/foo\": \">=1 <2\"", "\"**/foo\": \">=1 <3\"", false)]
+    [InlineData("package.json", "dependencies", "\"foo\": \">=1 <2\",\n    \"lodash\": \"^4.17.20\"", "\"foo\": \">=1 <2\",\n    \"lodash\": \"^4.17.21\"", true)]
+    [InlineData("package.json", "dependencies", "\"lodash\": \"~4.17.20\"", "\"lodash\": \"~4.17.21\"", true)]
     [InlineData("pyproject.toml", null, "command = \"tool --level=1\"", "command = \"tool --level=2\"", false)]
     [InlineData("Directory.Packages.props", null, "<Exec Command=\"tool --level=1\" />", "<Exec Command=\"tool --level=2\" />", false)]
     [InlineData("yarn.lock", null, "  version \"1.0.0\"", "  version \"1.0.1\"", false)]
@@ -460,6 +533,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("extension/package.json", PackageJsonBase, "    \"preinstall\": \"1.0.0\"", "    \"preinstall\": \"1.0.1\"", "workspace", "non-version-manifest-edit")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"build\": \"vite --mode=1\",", "    \"build\": \"vite --mode=2\",", "workspace", "non-version-manifest-edit")]
     [InlineData("extension/package.json", PackageJsonBase, "  \"scripts\": {", "  \"scripts\": {\n    \"postinstall\": \"node x.js\",", "workspace", "non-version-manifest-edit")]
+    [InlineData("extension/package.json", "{\n  \"dependencies\": {\n    \"foo\": \">=1 <2\"\n  }\n}\n", "    \"foo\": \">=1 <2\"", "    \"foo\": \">=1 <3\"", "workspace", "non-version-manifest-edit")]
     [InlineData("pyproject.toml", PyprojectBase, "command = \"tool --level=1\"", "command = \"tool --level=2\"", "workspace", "non-version-manifest-edit")]
     [InlineData("app/yarn.lock", YarnLockBase, YarnVersion20, YarnVersion21, "stale", "unreconstructable-file-diff")]
     [InlineData("extension/package-lock.json", PackageLockBase, LockVersion20, "      \"version\": \"4.17.21\",\n      \"resolved\": \"https://evil.example/lodash/-/lodash-4.17.21.tgz\"", "workspace", "new-package-source")]
@@ -1119,6 +1193,54 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Empty(result["remaining"]!.AsArray());
         Assert.Null(result["stepOutputs"]!["publication_ready"]);
         Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AgentOutputScrubRequiresCompoundNpmSelectorsToRemainUnchanged(bool changeSelector)
+    {
+        const string lines = "    \"lodash\": \"^4.17.20\",\n    \"foo\": \">=1 <2\"";
+        const string baseText = "{\n  \"dependencies\": {\n" + lines + "\n  }\n}\n";
+        var newLines = lines.Replace("4.17.20", "4.17.21", StringComparison.Ordinal);
+        if (changeSelector)
+        {
+            newLines = newLines.Replace(">=1 <2", ">=1 <3", StringComparison.Ordinal);
+        }
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = output["body"]!.GetValue<string>().Replace(
+            "| lodash | extension/package-lock.json | 4.17.20 | 4.17.21 |",
+            "| lodash | extension/package-lock.json | 4.17.20 | 4.17.21 |\n| lodash | extension/package.json | 4.17.20 | 4.17.21 |",
+            StringComparison.Ordinal);
+        var dependencyPatch = ReplacementPatch("extension/package.json", baseText, lines, newLines);
+        var dependencyDiff = dependencyPatch[dependencyPatch.IndexOf("diff --git", StringComparison.Ordinal)..dependencyPatch.IndexOf("\n-- \n", StringComparison.Ordinal)];
+        var patch = PublicTextPatch.Replace("\r\n", "\n").Replace("\n-- \n", $"\n{dependencyDiff}\n-- \n", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["baseFiles"] = new JsonObject { ["extension/package-lock.json"] = PublicTextBase, ["extension/package.json"] = baseText },
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        if (changeSelector)
+        {
+            Assert.Equal(["create_pull_request.body row-not-in-patch", "aw-auto-sec-security-updates.patch non-version-manifest-edit"],
+                result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Empty(result["remaining"]!.AsArray());
+            Assert.Null(result["stepOutputs"]!["publication_ready"]);
+            Assert.Empty(result["publications"]!.AsArray());
+        }
+        else
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Single(result["outputs"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+            Assert.NotEmpty(result["publications"]!.AsArray());
+        }
     }
 
     [Theory]
@@ -2267,6 +2389,30 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 ? "approve"
                 : decision["reasons"]![0]!.GetValue<string>()));
         Assert.Equal(Enumerable.Range(4, 10), result["reviews"]!.AsArray().Select(review => review!["pull_number"]!.GetValue<int>()));
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task UnconfirmedSubmissionsStillConsumeApprovalQuota()
+    {
+        var scenario = CreateApprovalScenario();
+        scenario["approvalFailure"] = "submission-after-accept";
+        var items = new JsonArray();
+        for (var number = 1; number <= 12; number++)
+        {
+            items.Add(new JsonObject { ["type"] = "approve_dependabot_pr", ["pr_number"] = number, ["head_sha"] = HeadSha });
+        }
+        scenario["agentItems"] = items;
+
+        var result = await RunHarnessAsync(scenario);
+
+        Assert.Equal(Enumerable.Range(1, 10), result["reviews"]!.AsArray().Select(review => review!["pull_number"]!.GetValue<int>()));
+        Assert.Equal(Enumerable.Repeat("Auto-sec approval failed: approval-submission-failed.", 10),
+            result["failures"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.All(result["value"]!.AsArray(), decision => Assert.Equal("skip", decision!["decision"]!.GetValue<string>()));
+        Assert.Equal(Enumerable.Repeat("approval-submission-failed", 10).Concat(Enumerable.Repeat("approval-limit-reached", 2)),
+            result["value"]!.AsArray().Select(decision => Assert.Single(decision!["reasons"]!.AsArray())!.GetValue<string>()));
+        Assert.StartsWith("auto-sec Dependabot approvals\nRequests: 12. Approved: 0. Skipped: 12.", result["summary"]!.GetValue<string>(), StringComparison.Ordinal);
     }
 
     [Theory]

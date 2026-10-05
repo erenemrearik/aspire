@@ -80,7 +80,8 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
     commit authored by Dependabot, and `package.json`, `pyproject.toml`, and
     `Directory.Packages.props` change only one version token on dependency-version
     lines (for `package.json`, only inside the dependency, override, and resolution
-    maps)
+    maps, with only single-bound npm selectors eligible for edits; compound
+    selectors may remain unchanged)
   - no package source or feed is added (only the dnceng public feeds and sources the
     file already uses are accepted)
   - the alert's own manifest is changed and carries the fixed version, and no copy
@@ -91,6 +92,10 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
     7 days ago
   - no package the diff changes has an open malware alert (those always need a human
     review)
+- Approval API, input, and summary failures fail the job with fixed
+  `gate-evaluation-failed` or `approval-submission-failed` reason codes, not raw
+  exception text. Unconfirmed submissions do not count as confirmed approvals,
+  but still consume the submission quota because the remote review may have succeeded.
 - **Remaining alerts** are fixed in a single `[auto-sec]` PR on
   `auto-sec/security-updates`, labeled `auto-sec`. Later runs update that PR
   instead of opening another one. A deterministic step in the safe-outputs job
@@ -112,6 +117,8 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   All lockfile additions accept only recognized dependency-data syntax, not new
   free-text metadata. New override/resolution entries and unsupported lockfile
   metadata require human intervention and are reported as `update-failed`.
+  Compound npm selector edits also require human intervention: reducing `>=1 <2`
+  to its first bound cannot prove changes to the other bounds non-breaking.
   Public summary rows are bound to reconstructed manifest/package/version changes,
   covering every update exactly once per manifest/package/target. Counts-only reports
   require unique, positive blocked-reason counts whose sum equals the blocked total;
