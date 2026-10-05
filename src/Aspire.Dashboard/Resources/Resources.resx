@@ -308,7 +308,7 @@
   </data>
   <data name="ResourcesGraphExportMermaidButton" xml:space="preserve">
     <value>Export as Mermaid</value>
-    <comment>Downloads the currently visible resource graph as a Mermaid diagram.</comment>
+    <comment>Opens a dialog showing the currently visible resource graph as Mermaid source, with separate actions to copy the source or download it as a .mmd file.</comment>
   </data>
   <data name="ResourcesGraphResourceActionsButton" xml:space="preserve">
     <value>Resource actions for {0}</value>

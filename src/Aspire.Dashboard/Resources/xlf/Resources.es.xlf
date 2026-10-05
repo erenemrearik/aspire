@@ -230,7 +230,7 @@
       <trans-unit id="ResourcesGraphExportMermaidButton">
         <source>Export as Mermaid</source>
         <target state="new">Export as Mermaid</target>
-        <note>Downloads the currently visible resource graph as a Mermaid diagram.</note>
+        <note>Opens a dialog showing the currently visible resource graph as Mermaid source, with separate actions to copy the source or download it as a .mmd file.</note>
       </trans-unit>
       <trans-unit id="ResourcesGraphResetButton">
         <source>Reset</source>
