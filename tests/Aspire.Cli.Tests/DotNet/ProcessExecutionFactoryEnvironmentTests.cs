@@ -64,7 +64,12 @@ public sealed class ProcessExecutionFactoryEnvironmentTests(ITestOutputHelper ou
             @echo off
             node "%~dp0argv.cjs" %*
             """);
-        string[] arguments = ["literal %PATH%! & value", "", "a^b|c"];
+        string[] arguments =
+        [
+            "literal %PATH%! & value", "", "a^b|c",
+            "a \"quoted\" value", "quoted \"& text\" remains literal",
+            "backslash\\\"quote", @"C:\tools\trailing\"
+        ];
         var startInfo = new ProcessStartInfo { WorkingDirectory = directory.FullName };
         ProcessStartInfoHelper.SetCommand(startInfo, shim, arguments, isWindows: true);
         var output = new List<string>();
