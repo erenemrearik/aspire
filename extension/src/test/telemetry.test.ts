@@ -162,15 +162,31 @@ suite('telemetry utilities', () => {
             apphost_target_versions: '13.6.0',
             apphost_present: 'true',
         });
+        // Exercise the runtime filter even if a caller bypasses the event schema's TypeScript checks.
+        sendTelemetryEvent('aspire/vscode/survey/result', {
+            campaign_id: 'test-v1',
+            question_id: 'aspire-usefulness-v1',
+            outcome: 'yes',
+            microsoft_internal_alias: 'caller-supplied',
+            microsoft_internal_domain: 'caller.example',
+            apphost_present: 'caller-supplied',
+        } as never);
+        assert.deepStrictEqual(fake.events[0].properties, {
+            is_microsoft_internal: 'true',
+            campaign_id: 'test-v1',
+            question_id: 'aspire-usefulness-v1',
+            outcome: 'yes',
+        });
+
         sendTelemetryEvent('aspire/vscode/survey/result', {
             campaign_id: 'test-v1', question_id: 'aspire-usefulness-v1', outcome: 'yes',
         });
-        assert.deepStrictEqual(fake.events[0].properties, {
+        assert.deepStrictEqual(fake.events[1].properties, {
             is_microsoft_internal: 'true',
             campaign_id: 'test-v1', question_id: 'aspire-usefulness-v1', outcome: 'yes',
         });
         sendTelemetryEvent('aspire/vscode/command/invoked', { command: 'cmd.test' });
-        assert.strictEqual(fake.events[1].properties?.microsoft_internal_alias, 'test.user');
+        assert.strictEqual(fake.events[2].properties?.microsoft_internal_alias, 'test.user');
     });
 
     test('survey events are usage-only and never queued for identity enrichment', async () => {

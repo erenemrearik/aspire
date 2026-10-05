@@ -202,10 +202,21 @@ function mergeProperties<E extends KnownTelemetryEventName>(
     // Survey responses must not inherit employee alias/domain or future additions to the
     // shared property bag. VS Code still owns platform properties and consent enforcement.
     const isSurvey = eventName === 'aspire/vscode/survey/invitation' || eventName === 'aspire/vscode/survey/result';
+    if (isSurvey) {
+        const allowedProperties = eventName === 'aspire/vscode/survey/invitation'
+            ? ['campaign_id', 'question_id', 'is_microsoft_internal']
+            : ['campaign_id', 'question_id', 'outcome', 'is_microsoft_internal'];
+        const surveyProperties = Object.fromEntries(
+            Object.entries(eventProperties ?? {}).filter(([key]) => allowedProperties.includes(key)),
+        );
+        return {
+            ...(commonProperties.is_microsoft_internal === undefined ? {} : { is_microsoft_internal: commonProperties.is_microsoft_internal }),
+            ...surveyProperties,
+        } as Record<string, TelemetryPropertyValue>;
+    }
+
     return {
-        ...(isSurvey
-            ? (commonProperties.is_microsoft_internal === undefined ? {} : { is_microsoft_internal: commonProperties.is_microsoft_internal })
-            : commonProperties),
+        ...commonProperties,
         ...(eventProperties ?? {}),
     } as Record<string, TelemetryPropertyValue>;
 }

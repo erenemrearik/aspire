@@ -70,8 +70,13 @@ export class UsefulnessSurveyService implements vscode.Disposable {
             }
             return;
         }
-        if (!activityCommands.has(commandName) ||
-            !this._canCollect() || this._open) {
+        if (!activityCommands.has(commandName) || !this._canCollect()) {
+            return;
+        }
+        if (this._open) {
+            if (!this._awaitingResponse) {
+                this._cancelTimer();
+            }
             return;
         }
         try {

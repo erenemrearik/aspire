@@ -157,6 +157,15 @@ suite('Usefulness survey', () => {
         assert.deepStrictEqual(h.persistence.writes, [shownKey]);
     });
 
+    test('qualifying activity during suppression persistence cancels the pre-display invitation', async () => {
+        h.persistence.beforeWrite = () => h.service.recordCommand('aspire-vscode.viewResourceLogs');
+        h.service.recordCommand('aspire-vscode.runAppHost');
+        await h.show();
+        assert.strictEqual(h.shown, 0);
+        assert.deepStrictEqual(h.events, []);
+        assert.deepStrictEqual([...h.persistence.values], [[shownKey, true]]);
+    });
+
     test('disposal cancels a timer and invalidates an open answer', async () => {
         h.service.recordCommand('aspire-vscode.runAppHost');
         h.service.dispose();

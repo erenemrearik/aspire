@@ -231,15 +231,21 @@ export type TelemetryPropertyValue = string | vscode.TelemetryTrustedValue<strin
 
 /**
  * Property bag accepted by {@link sendTelemetryEvent} for a given event name.
- * The set is the event's own properties plus {@link CommonTelemetryProperty}
- * (which are merged in by the wrapper).
+ * The set is the event's own properties plus the common properties allowed for
+ * that event (which are merged in by the wrapper).
  *
  * Using `Partial<Record<...>>` keeps each property optional while binding the
  * key set to the registry. Assignments to unknown keys (e.g. `props.foo = ...`)
  * are rejected by the type checker.
  */
 export type EventProperties<E extends KnownTelemetryEventName> =
-    Partial<Record<TelemetryEventSchema[E]['properties'] | CommonTelemetryProperty, TelemetryPropertyValue>>;
+    Partial<Record<
+        TelemetryEventSchema[E]['properties'] |
+        (E extends 'aspire/vscode/survey/invitation' | 'aspire/vscode/survey/result'
+            ? 'is_microsoft_internal'
+            : CommonTelemetryProperty),
+        TelemetryPropertyValue
+    >>;
 
 /**
  * Numeric measurement bag accepted by {@link sendTelemetryEvent} for a given
