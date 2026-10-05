@@ -12,7 +12,6 @@ import unittest
 import check
 
 
-ROOT = Path(__file__).resolve().parents[2]
 POLICY = json.loads((Path(__file__).parent / "constraints.json").read_text())
 PACKAGES = (
     "<Project><PropertyGroup>"
@@ -70,6 +69,13 @@ class ConstraintTests(unittest.TestCase):
             "https://user@pkgs.dev.azure.com/dnceng/a",
             "https://api.nuget.org/v3/index.json",
             "file:///tmp/packages",
+            "https://pkgs.dev.azure.com/dnceng/../other/a",
+            "https://dnceng.pkgs.visualstudio.com/public/../private/a",
+            "https://pkgs.dev.azure.com/dnceng/%2e%2e/other/a",
+            "https://pkgs.dev.azure.com/dnceng/%252e%252e/other/a",
+            "https://pkgs.dev.azure.com/dnceng/%2e%2e%2fother/a",
+            "https://pkgs.dev.azure.com/dnceng/..%5cother/a",
+            "https://pkgs.dev.azure.com/dnceng/%00other/a",
         ):
             with self.subTest(value=value):
                 self.assertFalse(check.approved_source(value))
@@ -86,12 +92,43 @@ class ConstraintTests(unittest.TestCase):
         self.assertEqual(1, len(check.check_yarn(text.replace("pkgs.dev.azure.com/dnceng", "registry.npmjs.org"))))
         self.assertEqual(1, len(check.check_yarn('  resolved not-a-quoted-url')))
 
+    def test_encoded_package_scopes_remain_allowed(self):
+        self.assertTrue(check.approved_source("https://pkgs.dev.azure.com/dnceng/public/npm/%40types%2Fnode.tgz"))
+
+    def test_yarn_completeness_is_delegated_to_frozen_restore(self):
+        text = '"pkg@1.0.0":\n  version "1.0.0"\n'
+        text += '"other@1.0.0":\n  resolved "https://pkgs.dev.azure.com/dnceng/public/npm/other.tgz"\n'
+        self.assertEqual([], check.check_yarn(text))
+
+    def test_extension_lockfile_requires_download_entries_to_inspect(self):
+        for text in ("", "# yarn lockfile v1\n", '"pkg@1.0.0":\n  version "1.0.0"\n'):
+            with self.subTest(text=text):
+                self.assertEqual(1, len(check.check_yarn(text)))
+
     def test_cli_missing_inputs_are_errors_not_success(self):
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run([sys.executable, str(Path(check.__file__)), "--root", directory],
                                     capture_output=True, text=True, check=False)
         self.assertEqual(2, result.returncode)
         self.assertIn("could not complete", result.stderr)
+
+    def test_cli_reports_violations_and_malformed_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "extension").mkdir()
+            (root / "NuGet.config").write_text("<configuration><packageSources/></configuration>")
+            (root / "extension/yarn.lock").write_text('  resolved "https://pkgs.dev.azure.com/dnceng/public/npm/pkg.tgz"\n')
+            for text, exit_code in (
+                (PACKAGES.replace("<Npgsql8Version>8.0.9", "<Npgsql8Version>10.0.0"), 1),
+                ("<Project>", 2),
+            ):
+                with self.subTest(exit_code=exit_code):
+                    (root / "Directory.Packages.props").write_text(text)
+                    result = subprocess.run([sys.executable, str(Path(check.__file__)), "--root", directory],
+                                            capture_output=True, text=True, check=False)
+                    self.assertEqual(exit_code, result.returncode)
+                    self.assertEqual("", result.stdout)
+                    self.assertTrue(result.stderr)
 
 
 if __name__ == "__main__":

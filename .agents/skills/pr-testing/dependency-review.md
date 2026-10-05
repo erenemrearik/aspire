@@ -7,6 +7,8 @@ and its CI-infrastructure reference; it is not a separate testing framework.
    documented constraints. Check the head again before presenting results.
    Run `python3 eng/dependency-review/check.py` and its focused tests
    (`python3 -m unittest discover -s eng/dependency-review -p 'test_*.py'`).
+   Reuse the extension's exact-feed check:
+   `(cd extension && node scripts/validate-lockfile-registry.cjs)`.
    Preserve nonzero results; do not remove holds or switch feeds to make CI green.
 2. Identify **required consumers** from project references, runtime-only package
    loading, templates, generators, deployment outputs, host versions, and supported
@@ -35,6 +37,8 @@ and its CI-infrastructure reference; it is not a separate testing framework.
    Keep objective constraint findings separate from compatibility hypotheses.
    Do not assign numeric confidence or certify compatibility from aggregate CI.
    State precisely which behavior was exercised and what remains unknown.
+   For dependency reports, replace the generic `PR VERIFIED` verdict with
+   objective findings and the consumer execution/gap table, even when CI is green.
 
 For experimental copies, preserve source PR/head provenance, mark every draft
 `IGNORE — DO NOT MERGE`, and label reduced reproductions versus full diff copies.
