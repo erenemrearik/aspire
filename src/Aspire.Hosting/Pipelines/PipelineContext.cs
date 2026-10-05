@@ -24,6 +24,13 @@ public sealed class PipelineContext(
     ILogger logger,
     CancellationToken cancellationToken)
 {
+    private readonly Lazy<string> _defaultImageTag = new(() => $"aspire-deploy-{DateTime.UtcNow:yyyyMMddHHmmss}");
+
+    /// <summary>
+    /// Gets the default image label shared by publications in this pipeline execution.
+    /// </summary>
+    internal string DefaultImageTag => _defaultImageTag.Value;
+
     /// <summary>
     /// Gets the distributed application model to be deployed.
     /// </summary>

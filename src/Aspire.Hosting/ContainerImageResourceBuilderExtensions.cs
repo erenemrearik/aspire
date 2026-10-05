@@ -91,7 +91,8 @@ public static class ContainerImageResourceBuilderExtensions
     /// including multiple repositories within one registry. References use the published content digest,
     /// never a mutable tag. No publication or permission grant is performed during model construction.
     /// Deployment publishes this destination after source preparation and registry prerequisites.
-    /// Publication tags are retained transport addresses; consumer references use verified digests.
+    /// Default publication tags use the same <c>aspire-deploy-yyyyMMddHHmmss</c> UTC label as compute images.
+    /// Tags are retained transport addresses; consumer references use verified digests.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The name is invalid or the builders belong to different applications.</exception>
@@ -157,8 +158,8 @@ public static class ContainerImageResourceBuilderExtensions
     /// <returns>The original consumer builder.</returns>
     /// <remarks>
     /// Records image consumption for publication ordering and provider-specific pull access.
-    /// This method records the relationship only: permission provisioning and local dispatch
-    /// are not implemented. Use <c>WithEnvironment</c> separately to choose an environment variable name.
+    /// This method records the relationship only: publication ordering, permission provisioning,
+    /// and local dispatch are not implemented. Use <c>WithEnvironment</c> separately to choose an environment variable name.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required builder is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The builders belong to different applications.</exception>

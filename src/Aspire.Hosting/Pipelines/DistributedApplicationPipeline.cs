@@ -117,7 +117,7 @@ internal sealed class DistributedApplicationPipeline : IDistributedApplicationPi
                         .Where(r => r.RequiresImageBuild())
                         .ToList();
 
-                var uniqueDeployTag = $"aspire-deploy-{DateTime.UtcNow:yyyyMMddHHmmss}";
+                var uniqueDeployTag = context.PipelineContext.DefaultImageTag;
 
                 context.Logger.LogInformation("Setting default deploy tag '{Tag}' for compute resource(s).", uniqueDeployTag);
 

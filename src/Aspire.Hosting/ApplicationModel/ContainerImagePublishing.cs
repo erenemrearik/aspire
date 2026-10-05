@@ -86,9 +86,9 @@ internal static class ContainerImagePublishing
                             }
                             context.CancellationToken.ThrowIfCancellationRequested();
                             EnsureConfiguration(source, configuration);
-                            // Tags are retained transport addresses, not consumer identities. A per-execution
-                            // suffix prevents concurrent deployments from overwriting each other's verification tag.
-                            prepared = new(runtime, reference, resolved.Digest, $"aspire-deploy-{Guid.NewGuid():N}");
+                            // Share the compute-image label for this execution. Consumers still use
+                            // the verified content digest rather than this mutable transport tag.
+                            prepared = new(runtime, reference, resolved.Digest, context.PipelineContext.DefaultImageTag);
                             await task.CompleteAsync(new MarkdownString($"Prepared **{source.Name}** at `{reference}`"),
                                 CompletionState.Completed, context.CancellationToken).ConfigureAwait(false);
                         }
