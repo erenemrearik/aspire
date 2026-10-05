@@ -9,20 +9,31 @@ import json
 from pathlib import Path
 import re
 import sys
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 import xml.etree.ElementTree as ET
 
 
 def approved_source(value):
     url = urlsplit(value)
+    # Azure URLs such as /dnceng/../other/ and /public/%2e%2e/private/
+    # leave the approved namespace after decoding/normalization. Reject rather
+    # than normalize traversal, backslashes, control bytes, or nested escapes.
+    path = unquote(url.path, errors="strict")
+    if (
+        "\\" in path
+        or "%" in path
+        or any(ord(character) < 32 for character in path)
+        or any(segment in (".", "..") for segment in path.split("/"))
+    ):
+        return False
     return (
         url.scheme == "https"
         and url.username is None
         and url.password is None
         and url.port in (None, 443)
         and (
-            (url.hostname == "pkgs.dev.azure.com" and url.path.startswith("/dnceng/"))
-            or (url.hostname == "dnceng.pkgs.visualstudio.com" and url.path.startswith("/public/"))
+            (url.hostname == "pkgs.dev.azure.com" and path.startswith("/dnceng/"))
+            or (url.hostname == "dnceng.pkgs.visualstudio.com" and path.startswith("/public/"))
         )
     )
 
@@ -54,13 +65,19 @@ def check_nuget(text):
 
 def check_yarn(text):
     failures = []
+    resolved_count = 0
     # Yarn classic entries contain e.g. resolved "https://.../pkg-1.2.3.tgz#hash".
     # Selectors (pkg@^1.2.0) are NOT the resolved versions used for advisory review.
+    # This scans present download URLs only; frozen Yarn restore owns lockfile
+    # completeness/coherence, including missing resolutions.
     for number, line in enumerate(text.splitlines(), 1):
         if line.lstrip().startswith("resolved "):
+            resolved_count += 1
             match = re.fullmatch(r'\s*resolved "([^"]+)"\s*', line)
             if match is None or not approved_source(match[1]):
                 failures.append(f"yarn.lock:{number}: malformed or unapproved resolved source")
+    if resolved_count == 0:
+        failures.append("extension/yarn.lock: no resolved download entries; source inspection is incomplete")
     return failures
 
 
@@ -75,8 +92,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     args = parser.parse_args()
-    policy = json.loads((Path(__file__).parent / "constraints.json").read_text())
     try:
+        policy = json.loads((Path(__file__).parent / "constraints.json").read_text())
         failures = check_repository(args.root, policy)
     except (OSError, ET.ParseError, ValueError) as error:
         print(f"Dependency constraint check could not complete: {error}", file=sys.stderr)
@@ -86,7 +103,7 @@ def main():
     if failures:
         return 1
     print("Dependency constraints checked: protected pins, coupled majors, package download sources.")
-    print("Not assessed: compatibility, advisories, workflow generation, action policy, consumer execution.")
+    print("Not assessed: compatibility, advisories, lockfile coherence, workflow generation, action policy, consumer execution.")
     return 0
 
 
