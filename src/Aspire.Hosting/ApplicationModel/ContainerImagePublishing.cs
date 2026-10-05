@@ -82,6 +82,13 @@ internal static class ContainerImagePublishing
                         await using var taskLifetime = task.ConfigureAwait(false);
                         try
                         {
+                            var pushOptions = await source.ProcessImagePushOptionsCallbackAsync(context.CancellationToken).ConfigureAwait(false);
+                            var publicationTag = pushOptions.RemoteImageTag;
+                            if (string.IsNullOrWhiteSpace(publicationTag))
+                            {
+                                throw new DistributedApplicationException($"The publication tag for image source '{source.Name}' must not be empty.");
+                            }
+
                             var runtime = await context.Services.GetRequiredService<IContainerRuntimeResolver>()
                                 .ResolveAsync(context.CancellationToken).ConfigureAwait(false);
                             var reference = await runtime.ResolveRemoteImageAsync(configuration.Image, context.CancellationToken).ConfigureAwait(false);
@@ -94,9 +101,9 @@ internal static class ContainerImagePublishing
                             }
                             context.CancellationToken.ThrowIfCancellationRequested();
                             EnsureConfiguration(source, configuration);
-                            // Share the compute-image label for this execution. Consumers still use
-                            // the verified content digest rather than this mutable transport tag.
-                            prepared = new(runtime, reference, resolved.Digest, context.PipelineContext.DefaultImageTag);
+                            // Deploy prerequisites configure the same default label on compute and
+                            // artifact sources. Consumers still use the verified content digest.
+                            prepared = new(runtime, reference, resolved.Digest, publicationTag);
                             await task.CompleteAsync(new MarkdownString($"Prepared **{source.Name}** at `{reference}`"),
                                 CompletionState.Completed, context.CancellationToken).ConfigureAwait(false);
                         }

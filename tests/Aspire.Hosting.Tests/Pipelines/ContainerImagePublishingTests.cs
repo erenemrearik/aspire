@@ -7,7 +7,6 @@
 #pragma warning disable ASPIRECONTAINERRUNTIME001
 #pragma warning disable ASPIRECOMPUTE003
 
-using System.Globalization;
 using Aspire.Hosting.Pipelines;
 using Aspire.Hosting.Publishing;
 using Aspire.Hosting.Tests.Publishing;
@@ -15,6 +14,7 @@ using Aspire.Hosting.Tests.TestServices;
 using Aspire.Hosting.Utils;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.AspNetCore.InternalTesting;
 
 namespace Aspire.Hosting.Tests.Pipelines;
@@ -24,6 +24,7 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
 {
     private const string Digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private const string PinnedSource = "docker.io/library/busybox@" + Digest;
+    private const string DefaultImageTag = "aspire-deploy-20261005040506";
 
     [Theory]
     [InlineData("exclude-source")]
@@ -116,7 +117,7 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
         var second = builder.AddContainerRegistry("two", "second.example.com").AddImage("second", source);
         using var app = builder.Build();
         await app.ExecuteBeforeStartHooksAsync(default);
-        var context = await ExecuteAsync(app);
+        await ExecuteAsync(app);
 
         Assert.Equal(["docker.io/library/busybox:latest"], runtime.RemoteResolveCalls);
         var expectedCount = step == "push-first" ? 1 : 2;
@@ -124,7 +125,7 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
         Assert.All(runtime.RemoteCopyCalls, call =>
         {
             Assert.Equal(PinnedSource, call.Source);
-            Assert.Equal(context.DefaultImageTag, call.Destination[(call.Destination.LastIndexOf(':') + 1)..]);
+            Assert.Equal(DefaultImageTag, call.Destination[(call.Destination.LastIndexOf(':') + 1)..]);
         });
         Assert.Equal("first.example.com/team/first@" + Digest, await ((IValueProvider)first.Resource).GetValueAsync(default));
         if (expectedCount == 2)
@@ -163,17 +164,122 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
         registry.AddImage("second-image", second);
         using var app = builder.Build();
         await app.ExecuteBeforeStartHooksAsync(default);
-        var context = await ExecuteAsync(app);
+        await ExecuteAsync(app);
 
-        Assert.True(DateTime.TryParseExact(context.DefaultImageTag["aspire-deploy-".Length..],
-            "yyyyMMddHHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out _));
         Assert.Equal(2, runtime.RemoteCopyCalls.Count);
         Assert.All(runtime.RemoteCopyCalls, call =>
-            Assert.Equal(context.DefaultImageTag, call.Destination[(call.Destination.LastIndexOf(':') + 1)..]));
+            Assert.Equal(DefaultImageTag, call.Destination[(call.Destination.LastIndexOf(':') + 1)..]));
         var options = await compute.Resource.ProcessImagePushOptionsCallbackAsync(default);
-        Assert.Equal(customTag ?? context.DefaultImageTag, options.RemoteImageTag);
+        Assert.Equal(customTag ?? DefaultImageTag, options.RemoteImageTag);
         Assert.Single(runtime.BuildImageCalls);
         Assert.Same(compute.Resource, Assert.Single(runtime.PushImageCalls));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("release-1")]
+    public async Task EachExecutionRefreshesGeneratedLabelsWithoutReplacingUserCallbacks(string? customTag)
+    {
+        using var workspace = TemporaryWorkspace.Create(outputHelper);
+        await File.WriteAllTextAsync(Path.Combine(workspace.Path, "Dockerfile"), "FROM busybox\nENTRYPOINT [\"/bin/sh\"]\n");
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "push");
+        var runtime = AddRuntime(builder);
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var compute = builder.AddDockerfile("compute", workspace.Path).WithContainerRegistry(registry);
+        ContainerImagePushOptionsCallbackAnnotation? customOptions = null;
+        if (customTag is { } tag)
+        {
+            customOptions = new ContainerImagePushOptionsCallbackAnnotation(context => context.Options.RemoteImageTag = tag);
+            compute.WithAnnotation(customOptions);
+        }
+        var first = builder.AddContainerImage("first").WithImageSource("busybox");
+        var second = builder.AddContainerImage("second").WithImageSource("busybox:v2");
+        registry.AddImage("first-image", first);
+        registry.AddImage("second-image", second);
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        await ExecuteAsync(app);
+        var clock = Assert.IsType<FakeTimeProvider>(app.Services.GetRequiredService<TimeProvider>());
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await ExecuteAsync(app);
+
+        const string nextTag = "aspire-deploy-20261005040606";
+        Assert.Equal(new[] { DefaultImageTag, DefaultImageTag, nextTag, nextTag }.Order(StringComparer.Ordinal),
+            runtime.RemoteCopyCalls.Select(call => call.Destination[(call.Destination.LastIndexOf(':') + 1)..]).Order(StringComparer.Ordinal));
+        Assert.Equal(customTag ?? nextTag, (await compute.Resource.ProcessImagePushOptionsCallbackAsync(default)).RemoteImageTag);
+        var computeOptions = Assert.Single(compute.Resource.Annotations.OfType<ContainerImagePushOptionsCallbackAnnotation>());
+        if (customOptions is not null)
+        {
+            Assert.Same(customOptions, computeOptions);
+        }
+        else
+        {
+            Assert.True(computeOptions.IsDefaultImageTag);
+        }
+        Assert.True(Assert.Single(first.Resource.Annotations.OfType<ContainerImagePushOptionsCallbackAnnotation>()).IsDefaultImageTag);
+        Assert.True(Assert.Single(second.Resource.Annotations.OfType<ContainerImagePushOptionsCallbackAnnotation>()).IsDefaultImageTag);
+    }
+
+    [Fact]
+    public async Task UserCallbackAddedAfterDeploymentSupersedesTheGeneratedDefault()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "push");
+        var runtime = AddRuntime(builder);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        await ExecuteAsync(app);
+        var customOptions = new ContainerImagePushOptionsCallbackAnnotation(context => context.Options.RemoteImageTag = "release-1");
+        source.Resource.Annotations.Add(customOptions);
+        await ExecuteAsync(app);
+
+        Assert.Same(customOptions, Assert.Single(source.Resource.Annotations.OfType<ContainerImagePushOptionsCallbackAnnotation>()));
+        Assert.Equal(new[] { DefaultImageTag, "release-1" }.Order(StringComparer.Ordinal),
+            runtime.RemoteCopyCalls.Select(call => call.Destination[(call.Destination.LastIndexOf(':') + 1)..]).Order(StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task EmptyPublicationTagFailsBeforeRemoteResolution(string? tag)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "push");
+        var runtime = AddRuntime(builder);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox")
+            .WithAnnotation(new ContainerImagePushOptionsCallbackAnnotation(context => context.Options.RemoteImageTag = tag));
+        builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+
+        var exception = await Assert.ThrowsAsync<DistributedApplicationException>(() => ExecuteAsync(app));
+        Assert.Contains("publication tag", exception.Message);
+        Assert.Empty(runtime.RemoteResolveCalls);
+        Assert.Empty(runtime.RemoteCopyCalls);
+    }
+
+    [Fact]
+    public async Task BeforeStartAndStepInspectionDoNotInitializePublicationLabels()
+    {
+        using var workspace = TemporaryWorkspace.Create(outputHelper);
+        await File.WriteAllTextAsync(Path.Combine(workspace.Path, "Dockerfile"), "FROM busybox\nENTRYPOINT [\"/bin/sh\"]\n");
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "push");
+        var runtime = AddRuntime(builder);
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var compute = builder.AddDockerfile("compute", workspace.Path).WithContainerRegistry(registry);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        registry.AddImage("published", source);
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        var context = new PipelineContext(app.Services.GetRequiredService<DistributedApplicationModel>(),
+            app.Services.GetRequiredService<DistributedApplicationExecutionContext>(), app.Services, NullLogger.Instance, default);
+        await Assert.IsType<DistributedApplicationPipeline>(app.Services.GetRequiredService<IDistributedApplicationPipeline>()).ResolveStepsAsync(context);
+
+        Assert.Empty(compute.Resource.Annotations.OfType<ContainerImagePushOptionsCallbackAnnotation>());
+        Assert.Empty(source.Resource.Annotations.OfType<ContainerImagePushOptionsCallbackAnnotation>());
+        Assert.Empty(runtime.RemoteResolveCalls);
+        Assert.Empty(runtime.RemoteCopyCalls);
     }
 
     [Fact]
@@ -189,7 +295,7 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
         var state = app.Services.GetRequiredService<IDeploymentStateManager>();
         var section = await state.AcquireSectionAsync("ContainerImages:published");
         var publicationTag = section.Data["publicationTag"]!.GetValue<string>();
-        Assert.Equal($"registry.example.com/published:{context.DefaultImageTag}", publicationTag);
+        Assert.Equal($"registry.example.com/published:{DefaultImageTag}", publicationTag);
 
         await Verify(new
         {
@@ -465,6 +571,7 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
         };
         builder.Services.AddSingleton<IContainerRuntimeResolver>(runtime);
         builder.Services.AddSingleton<IDeploymentStateManager, InMemoryDeploymentStateManager>();
+        builder.Services.AddSingleton<TimeProvider>(new FakeTimeProvider(new DateTimeOffset(2026, 10, 5, 4, 5, 6, TimeSpan.Zero)));
 
         return runtime;
     }
