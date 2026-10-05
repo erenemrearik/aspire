@@ -37,7 +37,8 @@ public class AtsTypeScriptCodeGeneratorTests
                 "Aspire.Hosting/addContainerImage" or "Aspire.Hosting/withContainerImageSource" or
                 "Aspire.Hosting/addContainerRegistry" or "Aspire.Hosting/addRegistryImage" or
                 "Aspire.Hosting/addContainer" or "Aspire.Hosting/withEnvironment" or
-                "Aspire.Hosting/withReference").ToList(),
+                "Aspire.Hosting/withReference" ||
+                capability.CapabilityId.StartsWith("Aspire.Hosting.ApplicationModel/DestinationImageResource.", StringComparison.Ordinal)).ToList(),
             HandleTypes = scanned.HandleTypes,
             DtoTypes = scanned.DtoTypes.Where(dto => dto.Name is "AddContainerOptions" or "CreateBuilderOptions").ToList(),
             EnumTypes = scanned.EnumTypes,
@@ -71,9 +72,10 @@ public class AtsTypeScriptCodeGeneratorTests
                 client.invokeCapability = async <TResult,>(id: string, args: Record<string, unknown> = {}): Promise<TResult> => {
                     calls.push({ id, args });
                     const method = id.split('/').at(-1)!;
-                    const type = types[method];
+                    const type = types[method] ??
+                        (method.startsWith('DestinationImageResource.') ? 'ReferenceExpression' : undefined);
                     return (type
-                        ? new Handle({ $handle: String(args.name), $type: `Aspire.Hosting/Aspire.Hosting.ApplicationModel.${type}` })
+                        ? new Handle({ $handle: String(args.name ?? method), $type: `Aspire.Hosting/Aspire.Hosting.ApplicationModel.${type}` })
                         : args.builder) as TResult;
                 };
                 const builder = wrapIfHandle({
@@ -83,9 +85,10 @@ public class AtsTypeScriptCodeGeneratorTests
                 const source = builder.addContainerImage('tools').withImageSource('busybox:v1');
                 const registry = builder.addContainerRegistry('registry', 'registry.example.com');
                 const destination = registry.addImage('published', source);
-                await builder.addContainer('consumer', 'busybox')
+                const consumer = builder.addContainer('consumer', 'busybox');
+                await consumer
                     .withEnvironment('IMAGE_NAME', destination)
-                    .withReference(destination);
+                    .withReference(destination, { name: 'sandbox' });
                 const serialized = JSON.parse(JSON.stringify(calls));
                 assert.deepEqual(serialized.map((call: { id: string }) => call.id).sort(), [
                     'Aspire.Hosting/addContainer',
@@ -102,6 +105,31 @@ public class AtsTypeScriptCodeGeneratorTests
                 };
                 assert.deepEqual(serialized.at(-2).args.value, expectedImage);
                 assert.deepEqual(serialized.at(-1).args.source, expectedImage);
+                assert.equal(serialized.at(-1).args.name, 'sandbox');
+
+                const properties = [
+                    ['IMAGE', await destination.imageExpression()],
+                    ['TAG', await destination.tagExpression()],
+                    ['SHA256', await destination.sha256Expression()],
+                    ['REGISTRY', await destination.registryExpression()],
+                    ['REPOSITORY', await destination.repositoryExpression()]
+                ] as const;
+                for (const [name, expression] of properties) {
+                    await consumer.withEnvironment(`CUSTOM_${name}`, expression);
+                }
+                const propertyCalls = JSON.parse(JSON.stringify(calls.slice(serialized.length)));
+                assert.deepEqual(propertyCalls.slice(0, 5).map((call: { id: string }) => call.id), [
+                    'Aspire.Hosting.ApplicationModel/DestinationImageResource.imageExpression',
+                    'Aspire.Hosting.ApplicationModel/DestinationImageResource.tagExpression',
+                    'Aspire.Hosting.ApplicationModel/DestinationImageResource.sha256Expression',
+                    'Aspire.Hosting.ApplicationModel/DestinationImageResource.registryExpression',
+                    'Aspire.Hosting.ApplicationModel/DestinationImageResource.repositoryExpression'
+                ]);
+                assert.deepEqual(propertyCalls.slice(5).map((call: { args: { value: unknown } }) => call.args.value),
+                    propertyCalls.slice(0, 5).map((call: { id: string }) => ({
+                        $handle: call.id.split('/').at(-1)!,
+                        $type: 'Aspire.Hosting/Aspire.Hosting.ApplicationModel.ReferenceExpression'
+                    })));
                 """);
 
             // Restore the generated SDK's own dependency manifest, then compile a real consumer:

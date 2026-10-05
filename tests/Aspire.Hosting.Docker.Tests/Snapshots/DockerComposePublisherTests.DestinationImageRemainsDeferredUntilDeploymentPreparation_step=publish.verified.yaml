@@ -2,6 +2,11 @@
   consumer:
     image: "busybox:latest"
     environment:
+      PUBLISHED_IMAGE: "${PUBLISHED_IMAGE}"
+      PUBLISHED_TAG: "${PUBLISHED_TAG}"
+      PUBLISHED_SHA256: "${PUBLISHED_SHA256}"
+      PUBLISHED_REGISTRY: "${PUBLISHED_REGISTRYENDPOINT}"
+      PUBLISHED_REPOSITORY: "${PUBLISHED_REPOSITORY}"
       SANDBOX_IMAGE: "${PUBLISHED_IMAGE}"
     networks:
       - "aspire"

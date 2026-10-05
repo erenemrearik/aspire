@@ -55,7 +55,8 @@ public class DockerComposePublisherTests(ITestOutputHelper outputHelper)
         else
         {
             var environment = await File.ReadAllTextAsync(Path.Combine(workspace.Path, ".env.Production"));
-            await Verify(compose, "yaml").AppendContentAsFile(environment, "env");
+            await Verify(compose, "yaml").AppendContentAsFile(environment, "env")
+                .ScrubLinesWithReplace(line => Regex.Replace(line, @"aspire-deploy-\d{14}", "aspire-deploy-TIMESTAMP"));
         }
     }
 

@@ -10018,6 +10018,46 @@ public class DestinationImageResource extends ResourceBuilderBase {
         return (IExecutionConfigurationBuilder) result;
     }
 
+    /** Gets the complete, digest-qualified destination image reference. */
+    public ReferenceExpression imageExpression() {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("context", AspireClient.serializeValue(getHandle()));
+        var result = getClient().invokeCapability("Aspire.Hosting.ApplicationModel/DestinationImageResource.imageExpression", reqArgs);
+        return (ReferenceExpression) result;
+    }
+
+    /** Gets the tag used for the verified publication, not the source image tag. */
+    public ReferenceExpression tagExpression() {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("context", AspireClient.serializeValue(getHandle()));
+        var result = getClient().invokeCapability("Aspire.Hosting.ApplicationModel/DestinationImageResource.tagExpression", reqArgs);
+        return (ReferenceExpression) result;
+    }
+
+    /** Gets the verified root SHA-256 digest without the algorithm prefix. */
+    public ReferenceExpression sha256Expression() {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("context", AspireClient.serializeValue(getHandle()));
+        var result = getClient().invokeCapability("Aspire.Hosting.ApplicationModel/DestinationImageResource.sha256Expression", reqArgs);
+        return (ReferenceExpression) result;
+    }
+
+    /** Gets the destination registry authority, including its port when specified. */
+    public ReferenceExpression registryExpression() {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("context", AspireClient.serializeValue(getHandle()));
+        var result = getClient().invokeCapability("Aspire.Hosting.ApplicationModel/DestinationImageResource.registryExpression", reqArgs);
+        return (ReferenceExpression) result;
+    }
+
+    /** Gets the full destination repository path, including the registry namespace but not its authority. */
+    public ReferenceExpression repositoryExpression() {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("context", AspireClient.serializeValue(getHandle()));
+        var result = getClient().invokeCapability("Aspire.Hosting.ApplicationModel/DestinationImageResource.repositoryExpression", reqArgs);
+        return (ReferenceExpression) result;
+    }
+
     /** Adds an optional string parameter */
     public DestinationImageResource withOptionalString(WithOptionalStringOptions optionsBag) {
         var value = optionsBag == null ? null : optionsBag.getValue();

@@ -156,30 +156,70 @@ public static class ContainerImageResourceBuilderExtensions
     /// <typeparam name="T">The consuming resource type.</typeparam>
     /// <param name="builder">The consumer builder.</param>
     /// <param name="image">The destination image builder.</param>
+    /// <param name="name">An optional logical reference name used as the environment-variable prefix. Defaults to the destination resource name.</param>
     /// <returns>The original consumer builder.</returns>
     /// <remarks>
     /// Records image consumption for publication ordering and provider-specific pull access.
     /// Deployment waits for verified image publication. Azure Container Registry grants the
     /// consumer's managed identity pull access. Other registry providers must configure pull access separately.
-    /// This does not inject an image environment variable or implement local dispatch.
-    /// Use <c>WithEnvironment</c> separately to choose an environment variable name.
+    /// Injects <c>[NAME]_IMAGE</c>, <c>[NAME]_TAG</c>, <c>[NAME]_SHA256</c>,
+    /// <c>[NAME]_REGISTRY</c>, and <c>[NAME]_REPOSITORY</c>, using an environment-safe uppercase prefix.
+    /// Values describe the verified destination publication, not the source. SHA256 excludes the algorithm prefix.
+    /// Injection honors the connection-properties reference injection flag. Repeated identical references are idempotent;
+    /// distinct images cannot share an encoded prefix. Local publication and dispatch are not implemented.
+    /// Use <c>WithEnvironment</c> with the image's expression properties for individual values or custom variable names.
     /// </remarks>
+    /// <example>
+    /// <code>
+    /// var image = registry.AddImage("sandbox", source);
+    /// app.WithReference(image); // SANDBOX_IMAGE, SANDBOX_TAG, SANDBOX_SHA256, SANDBOX_REGISTRY, SANDBOX_REPOSITORY
+    /// app.WithEnvironment("WORKER_IMAGE", image.Resource.ImageExpression);
+    /// </code>
+    /// </example>
     /// <exception cref="ArgumentNullException">A required builder is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The builders belong to different applications.</exception>
+    /// <exception cref="ArgumentException">The reference name is empty or whitespace.</exception>
+    /// <exception cref="DistributedApplicationException">Distinct image references use the same encoded prefix.</exception>
     [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
     [AspireExportIgnore(Reason = "Polyglot AppHosts use custom resource dispatch through the canonical withReference export.")]
     public static IResourceBuilder<T> WithReference<T>(
-        this IResourceBuilder<T> builder, IResourceBuilder<DestinationImageResource> image)
+        this IResourceBuilder<T> builder, IResourceBuilder<DestinationImageResource> image, string? name = null)
         where T : IResourceWithEnvironment
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(image);
         ValidateApplication(builder.ApplicationBuilder, image.ApplicationBuilder);
+        if (name is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        }
+        var prefix = $"{EnvironmentVariableNameEncoder.Encode(name ?? image.Resource.Name).ToUpperInvariant()}_";
+        var existing = builder.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>()
+            .FirstOrDefault(reference => string.Equals(reference.Prefix, prefix, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            if (!ReferenceEquals(existing.Image, image.Resource))
+            {
+                throw new DistributedApplicationException(
+                    $"Image references '{existing.Image.Name}' and '{image.Resource.Name}' on resource '{builder.Resource.Name}' both use prefix '{prefix}'. Use unique name values when calling WithReference.");
+            }
+
+            return builder;
+        }
         if (!builder.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>()
             .Any(reference => ReferenceEquals(reference.Image, image.Resource)))
         {
-            builder.WithAnnotation(new DestinationImageReferenceAnnotation(image.Resource));
             builder.WithRelationship(image.Resource, KnownRelationshipTypes.Reference);
+        }
+        builder.WithAnnotation(new DestinationImageReferenceAnnotation(image.Resource, prefix));
+        builder.Resource.TryGetLastAnnotation<ReferenceEnvironmentInjectionAnnotation>(out var injection);
+        if ((injection?.Flags ?? ReferenceEnvironmentInjectionFlags.All).HasFlag(ReferenceEnvironmentInjectionFlags.ConnectionProperties))
+        {
+            builder.WithEnvironment($"{prefix}IMAGE", image.Resource.ImageExpression)
+                .WithEnvironment($"{prefix}TAG", image.Resource.TagExpression)
+                .WithEnvironment($"{prefix}SHA256", image.Resource.Sha256Expression)
+                .WithEnvironment($"{prefix}REGISTRY", image.Resource.RegistryExpression)
+                .WithEnvironment($"{prefix}REPOSITORY", image.Resource.RepositoryExpression);
         }
 
         return builder;
@@ -219,6 +259,11 @@ public static class ContainerImageResourceBuilderExtensions
         context.Writer.WriteString("type", "containerimagepublication.v0");
         context.Writer.WriteString("source", resource.Source.Name);
         context.Writer.WriteString("registry", resource.Parent.Name);
+        var registry = (IContainerRegistry)resource.Parent;
+        context.Writer.WriteString("registryEndpoint", registry.Endpoint.ValueExpression);
+        context.Writer.WriteString("repository", registry.Repository is { ValueExpression.Length: > 0 }
+            ? ReferenceExpression.Create($"{registry.Repository}/{resource.Name.ToLowerInvariant()}").ValueExpression
+            : resource.Name.ToLowerInvariant());
         context.Writer.WriteString("image", resource.GetImageExpression().ValueExpression);
         // The digest is a publication output, not a value inferred from a mutable source tag.
         context.TryAddDependentResources(resource.Source);

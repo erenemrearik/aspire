@@ -9671,6 +9671,9 @@ export interface ContainerRegistry {
      * Each call creates a distinct resource. Destinations are additive and can share a source,
      * including multiple repositories within one registry. References use the published content digest,
      * never a mutable tag. No publication or permission grant is performed during model construction.
+     * Deployment publishes this destination after source preparation and registry prerequisites.
+     * Default publication tags use the same `aspire-deploy-yyyyMMddHHmmss` UTC label as compute images.
+     * Tags are retained transport addresses; consumer references use verified digests.
      * @param name The destination resource name, also used as the repository name within the registry namespace.
      * @param image The source image artifact builder.
      * @returns A builder for the registry-scoped destination image.
@@ -9686,6 +9689,9 @@ export interface ContainerRegistryPromise extends PromiseLike<ContainerRegistry>
      * Each call creates a distinct resource. Destinations are additive and can share a source,
      * including multiple repositories within one registry. References use the published content digest,
      * never a mutable tag. No publication or permission grant is performed during model construction.
+     * Deployment publishes this destination after source preparation and registry prerequisites.
+     * Default publication tags use the same `aspire-deploy-yyyyMMddHHmmss` UTC label as compute images.
+     * Tags are retained transport addresses; consumer references use verified digests.
      * @param name The destination resource name, also used as the repository name within the registry namespace.
      * @param image The source image artifact builder.
      * @returns A builder for the registry-scoped destination image.
@@ -9722,6 +9728,9 @@ class ContainerRegistryImpl implements ContainerRegistry {
      * Each call creates a distinct resource. Destinations are additive and can share a source,
      * including multiple repositories within one registry. References use the published content digest,
      * never a mutable tag. No publication or permission grant is performed during model construction.
+     * Deployment publishes this destination after source preparation and registry prerequisites.
+     * Default publication tags use the same `aspire-deploy-yyyyMMddHHmmss` UTC label as compute images.
+     * Tags are retained transport addresses; consumer references use verified digests.
      * @param name The destination resource name, also used as the repository name within the registry namespace.
      * @param image The source image artifact builder.
      * @returns A builder for the registry-scoped destination image.
@@ -9791,6 +9800,8 @@ export interface DistributedApplicationBuilder {
      * Configure an existing registry image with `WithImageSource`. Sources are independent
      * of destinations and can be shared across registries. This experimental API registers
      * artifacts in publish mode only; local image preparation and registry emulation are not implemented.
+     * Deployment resolves each associated remote source once and publishes its complete referenced
+     * content to each destination using Docker with Buildx. Separate OCI referrers are not copied.
      * @param name The source artifact resource name.
      * @returns The image artifact builder.
      * @experimental
@@ -10035,6 +10046,8 @@ export interface DistributedApplicationBuilderPromise extends PromiseLike<Distri
      * Configure an existing registry image with `WithImageSource`. Sources are independent
      * of destinations and can be shared across registries. This experimental API registers
      * artifacts in publish mode only; local image preparation and registry emulation are not implemented.
+     * Deployment resolves each associated remote source once and publishes its complete referenced
+     * content to each destination using Docker with Buildx. Separate OCI referrers are not copied.
      * @param name The source artifact resource name.
      * @returns The image artifact builder.
      * @experimental
@@ -10346,6 +10359,8 @@ class DistributedApplicationBuilderImpl implements DistributedApplicationBuilder
      * Configure an existing registry image with `WithImageSource`. Sources are independent
      * of destinations and can be shared across registries. This experimental API registers
      * artifacts in publish mode only; local image preparation and registry emulation are not implemented.
+     * Deployment resolves each associated remote source once and publishes its complete referenced
+     * content to each destination using Docker with Buildx. Separate OCI referrers are not copied.
      * @param name The source artifact resource name.
      * @returns The image artifact builder.
      * @experimental
@@ -15156,6 +15171,9 @@ export interface ContainerRegistryResource {
      * Each call creates a distinct resource. Destinations are additive and can share a source,
      * including multiple repositories within one registry. References use the published content digest,
      * never a mutable tag. No publication or permission grant is performed during model construction.
+     * Deployment publishes this destination after source preparation and registry prerequisites.
+     * Default publication tags use the same `aspire-deploy-yyyyMMddHHmmss` UTC label as compute images.
+     * Tags are retained transport addresses; consumer references use verified digests.
      * @param name The destination resource name, also used as the repository name within the registry namespace.
      * @param image The source image artifact builder.
      * @returns A builder for the registry-scoped destination image.
@@ -15493,6 +15511,9 @@ export interface ContainerRegistryResourcePromise extends PromiseLike<ContainerR
      * Each call creates a distinct resource. Destinations are additive and can share a source,
      * including multiple repositories within one registry. References use the published content digest,
      * never a mutable tag. No publication or permission grant is performed during model construction.
+     * Deployment publishes this destination after source preparation and registry prerequisites.
+     * Default publication tags use the same `aspire-deploy-yyyyMMddHHmmss` UTC label as compute images.
+     * Tags are retained transport addresses; consumer references use verified digests.
      * @param name The destination resource name, also used as the repository name within the registry namespace.
      * @param image The source image artifact builder.
      * @returns A builder for the registry-scoped destination image.
@@ -15849,6 +15870,9 @@ class ContainerRegistryResourceImpl extends ResourceBuilderBase<ContainerRegistr
      * Each call creates a distinct resource. Destinations are additive and can share a source,
      * including multiple repositories within one registry. References use the published content digest,
      * never a mutable tag. No publication or permission grant is performed during model construction.
+     * Deployment publishes this destination after source preparation and registry prerequisites.
+     * Default publication tags use the same `aspire-deploy-yyyyMMddHHmmss` UTC label as compute images.
+     * Tags are retained transport addresses; consumer references use verified digests.
      * @param name The destination resource name, also used as the repository name within the registry namespace.
      * @param image The source image artifact builder.
      * @returns A builder for the registry-scoped destination image.
@@ -25497,6 +25521,42 @@ const CSharpAppResourcePromiseImpl = $aspireCreateFluentPromiseClass<CSharpAppRe
 export interface DestinationImageResource {
     toJSON(): MarshalledHandle;
     /**
+     * Gets the complete, digest-qualified destination image reference.
+     *
+     * Resolves only after verified publication. For multi-platform images, the digest identifies the root index.
+     * @experimental
+     */
+    imageExpression(): Promise<ReferenceExpression>;
+    /**
+     * Gets the tag used for the verified publication, not the source image tag.
+     *
+     * The value is deferred until publication completes.
+     * @experimental
+     */
+    tagExpression(): Promise<ReferenceExpression>;
+    /**
+     * Gets the verified root SHA-256 digest without the algorithm prefix.
+     *
+     * For multi-platform images, this identifies the root index. Resolution fails if the publication
+     * uses another digest algorithm; no alternative hash is calculated or assumed to be addressable.
+     * @experimental
+     */
+    sha256Expression(): Promise<ReferenceExpression>;
+    /**
+     * Gets the destination registry authority, including its port when specified.
+     *
+     * The value is deferred and validated against the verified publication.
+     * @experimental
+     */
+    registryExpression(): Promise<ReferenceExpression>;
+    /**
+     * Gets the full destination repository path, including the registry namespace but not its authority.
+     *
+     * The value is deferred and validated against the verified publication.
+     * @experimental
+     */
+    repositoryExpression(): Promise<ReferenceExpression>;
+    /**
      * Configures the resource to use the specified container registry for container image operations.
      *
      * This method adds a `ContainerRegistryReferenceAnnotation` to the resource,
@@ -25821,6 +25881,42 @@ export interface DestinationImageResource {
 }
 
 export interface DestinationImageResourcePromise extends PromiseLike<DestinationImageResource> {
+    /**
+     * Gets the complete, digest-qualified destination image reference.
+     *
+     * Resolves only after verified publication. For multi-platform images, the digest identifies the root index.
+     * @experimental
+     */
+    imageExpression(): Promise<ReferenceExpression>;
+    /**
+     * Gets the tag used for the verified publication, not the source image tag.
+     *
+     * The value is deferred until publication completes.
+     * @experimental
+     */
+    tagExpression(): Promise<ReferenceExpression>;
+    /**
+     * Gets the verified root SHA-256 digest without the algorithm prefix.
+     *
+     * For multi-platform images, this identifies the root index. Resolution fails if the publication
+     * uses another digest algorithm; no alternative hash is calculated or assumed to be addressable.
+     * @experimental
+     */
+    sha256Expression(): Promise<ReferenceExpression>;
+    /**
+     * Gets the destination registry authority, including its port when specified.
+     *
+     * The value is deferred and validated against the verified publication.
+     * @experimental
+     */
+    registryExpression(): Promise<ReferenceExpression>;
+    /**
+     * Gets the full destination repository path, including the registry namespace but not its authority.
+     *
+     * The value is deferred and validated against the verified publication.
+     * @experimental
+     */
+    repositoryExpression(): Promise<ReferenceExpression>;
     /**
      * Configures the resource to use the specified container registry for container image operations.
      *
@@ -26159,6 +26255,41 @@ export interface DestinationImageResourcePromise extends PromiseLike<Destination
 class DestinationImageResourceImpl extends ResourceBuilderBase<DestinationImageResourceHandle> implements DestinationImageResource {
     constructor(handle: DestinationImageResourceHandle, client: AspireClientRpc) {
         super(handle, client);
+    }
+
+    async imageExpression(): Promise<ReferenceExpression> {
+        return await this._client.invokeCapability<ReferenceExpression>(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.imageExpression',
+            { context: this._handle }
+        );
+    }
+
+    async tagExpression(): Promise<ReferenceExpression> {
+        return await this._client.invokeCapability<ReferenceExpression>(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.tagExpression',
+            { context: this._handle }
+        );
+    }
+
+    async sha256Expression(): Promise<ReferenceExpression> {
+        return await this._client.invokeCapability<ReferenceExpression>(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.sha256Expression',
+            { context: this._handle }
+        );
+    }
+
+    async registryExpression(): Promise<ReferenceExpression> {
+        return await this._client.invokeCapability<ReferenceExpression>(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.registryExpression',
+            { context: this._handle }
+        );
+    }
+
+    async repositoryExpression(): Promise<ReferenceExpression> {
+        return await this._client.invokeCapability<ReferenceExpression>(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.repositoryExpression',
+            { context: this._handle }
+        );
     }
 
     /** @internal */
@@ -27416,6 +27547,11 @@ class DestinationImageResourceImpl extends ResourceBuilderBase<DestinationImageR
 
 /** @internal */
 const DestinationImageResourcePromiseImpl = $aspireCreateFluentPromiseClass<DestinationImageResource, DestinationImageResourcePromise>((): $aspireFluentPromiseTransitions => ({
+    ["imageExpression"]: null,
+    ["tagExpression"]: null,
+    ["sha256Expression"]: null,
+    ["registryExpression"]: null,
+    ["repositoryExpression"]: null,
     ["withContainerRegistry"]: () => DestinationImageResourcePromiseImpl,
     ["withDockerfileBaseImage"]: () => DestinationImageResourcePromiseImpl,
     ["withRequiredCommand"]: () => DestinationImageResourcePromiseImpl,

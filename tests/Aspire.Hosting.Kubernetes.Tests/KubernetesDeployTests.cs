@@ -9,6 +9,7 @@
 #pragma warning disable ASPIRECONTAINERRUNTIME001
 
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Pipelines;
 using Aspire.Hosting.Publishing;
@@ -58,7 +59,8 @@ public class KubernetesDeployTests(ITestOutputHelper outputHelper)
         else
         {
             var resolved = await File.ReadAllTextAsync(Path.Combine(workspace.Path, HelmDeploymentEngine.GetDeployValuesFileName("env")));
-            await Verify(values, "yaml").AppendContentAsFile(config, "yaml").AppendContentAsFile(resolved, "yaml");
+            await Verify(values, "yaml").AppendContentAsFile(config, "yaml").AppendContentAsFile(resolved, "yaml")
+                .ScrubLinesWithReplace(line => Regex.Replace(line, @"aspire-deploy-\d{14}", "aspire-deploy-TIMESTAMP"));
         }
     }
 

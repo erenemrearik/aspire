@@ -143,6 +143,48 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
     }
 
     [Theory]
+    [InlineData("tag")]
+    [InlineData("sha256")]
+    [InlineData("registry")]
+    [InlineData("repository")]
+    public async Task IndividualPropertiesWaitForPublicationBeforeConsumerResolution(string property)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "apply-consumer");
+        var runtime = AddRuntime(builder);
+        var source = builder.AddContainerImage("source").WithImageSource("busybox:source-tag");
+        var image = builder.AddContainerRegistry("registry", "registry.example.com", "team").AddImage("published", source);
+        var expression = property switch
+        {
+            "tag" => image.Resource.TagExpression,
+            "sha256" => image.Resource.Sha256Expression,
+            "registry" => image.Resource.RegistryExpression,
+            "repository" => image.Resource.RepositoryExpression,
+            _ => throw new InvalidOperationException()
+        };
+        string? resolved = null;
+        builder.AddContainer("consumer", "busybox")
+            .WithEnvironment("VALUE", expression)
+            .WithPipelineStepFactory(_ => new PipelineStep
+            {
+                Name = "apply-consumer",
+                Tags = [WellKnownPipelineTags.DeployCompute],
+                Action = async context => resolved = await expression.GetValueAsync(context.CancellationToken)
+            });
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        await ExecuteAsync(app);
+        Assert.Single(runtime.RemoteCopyCalls);
+        Assert.Equal(property switch
+        {
+            "tag" => DefaultImageTag,
+            "sha256" => Digest["sha256:".Length..],
+            "registry" => "registry.example.com",
+            "repository" => "team/published",
+            _ => throw new InvalidOperationException()
+        }, resolved);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("release-1")]
     public async Task ArtifactSourcesShareTheComputeDefaultLabelWithoutOverridingCustomTags(string? customTag)
@@ -372,7 +414,7 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
         using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
         var source = builder.AddContainerImage("tools").WithImageSource("busybox");
         var destination = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
-        destination.Resource.RecordPublishedImage("registry.example.com/previous-repository", Digest);
+        destination.Resource.RecordPublishedImage("registry.example.com/previous-repository", Digest, DefaultImageTag);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await ((IValueProvider)destination.Resource).GetValueAsync(default));

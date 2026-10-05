@@ -21,6 +21,7 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
 {
     private string? _publishedDigest;
     private string? _publishedRepository;
+    private string? _publishedTag;
     private ContainerImageSourceAnnotation? _publishedSource;
 
     /// <summary>
@@ -54,6 +55,46 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
     /// </summary>
     public IResource Parent { get; }
 
+    /// <summary>
+    /// Gets the complete, digest-qualified destination image reference.
+    /// </summary>
+    /// <remarks>
+    /// Resolves only after verified publication. For multi-platform images, the digest identifies the root index.
+    /// </remarks>
+    [AspireExport]
+    public ReferenceExpression ImageExpression => ReferenceExpression.Create($"{this}");
+
+    /// <summary>
+    /// Gets the tag used for the verified publication, not the source image tag.
+    /// </summary>
+    /// <remarks>The value is deferred until publication completes.</remarks>
+    [AspireExport]
+    public ReferenceExpression TagExpression => GetPropertyExpression("tag");
+
+    /// <summary>
+    /// Gets the verified root SHA-256 digest without the algorithm prefix.
+    /// </summary>
+    /// <remarks>
+    /// For multi-platform images, this identifies the root index. Resolution fails if the publication
+    /// uses another digest algorithm; no alternative hash is calculated or assumed to be addressable.
+    /// </remarks>
+    [AspireExport]
+    public ReferenceExpression Sha256Expression => GetPropertyExpression("sha256");
+
+    /// <summary>
+    /// Gets the destination registry authority, including its port when specified.
+    /// </summary>
+    /// <remarks>The value is deferred and validated against the verified publication.</remarks>
+    [AspireExport]
+    public ReferenceExpression RegistryExpression => GetPropertyExpression("registryEndpoint");
+
+    /// <summary>
+    /// Gets the full destination repository path, including the registry namespace but not its authority.
+    /// </summary>
+    /// <remarks>The value is deferred and validated against the verified publication.</remarks>
+    [AspireExport]
+    public ReferenceExpression RepositoryExpression => GetPropertyExpression("repository");
+
     /// <inheritdoc/>
     public string ValueExpression
     {
@@ -71,13 +112,21 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
     /// <inheritdoc/>
     async ValueTask<string?> IValueProvider.GetValueAsync(ValueProviderContext context, CancellationToken cancellationToken)
     {
+        var repository = await GetVerifiedRepositoryAsync(context, cancellationToken).ConfigureAwait(false);
+
+        return $"{repository}@{GetPublishedDigest()}";
+    }
+
+    private async ValueTask<string> GetVerifiedRepositoryAsync(ValueProviderContext context, CancellationToken cancellationToken)
+    {
         var repository = await GetRepositoryAsync(context, cancellationToken).ConfigureAwait(false);
+        _ = GetPublishedDigest();
         if (_publishedRepository is not null && !StringComparer.Ordinal.Equals(repository, _publishedRepository))
         {
             throw new InvalidOperationException($"Destination image '{Name}' has a different registry or repository than its verified publication. Publish the image again before resolving its value.");
         }
 
-        return $"{repository}@{GetPublishedDigest()}";
+        return repository;
     }
 
     internal async ValueTask<string> GetRepositoryAsync(ValueProviderContext context, CancellationToken cancellationToken)
@@ -113,18 +162,22 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
         _publishedSource = Source.GetSource();
         _publishedDigest = digest;
         _publishedRepository = null;
+        _publishedTag = null;
     }
 
-    internal void RecordPublishedImage(string repository, string digest)
+    internal void RecordPublishedImage(string repository, string digest, string tag)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
         RecordPublishedDigest(digest);
         _publishedRepository = repository;
+        _publishedTag = tag;
     }
 
     internal void ClearPublishedDigest()
     {
         _publishedDigest = null;
         _publishedRepository = null;
+        _publishedTag = null;
         _publishedSource = null;
     }
 
@@ -163,6 +216,27 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
         return ReferenceExpression.Create($"{registry.Endpoint}/{Name.ToLowerInvariant()}@{digest}");
     }
 
+    private ReferenceExpression GetPropertyExpression(string property) =>
+        ReferenceExpression.Create($"{new PublishedPropertyValue(this, property)}");
+
+    private async ValueTask<string> GetPropertyAsync(string property, ValueProviderContext context, CancellationToken cancellationToken)
+    {
+        var qualifiedRepository = await GetVerifiedRepositoryAsync(context, cancellationToken).ConfigureAwait(false);
+        // Verified repositories have the shape "registry.example.com:5000/team/image".
+        // Registry authorities cannot contain '/', so the first slash separates the full repository path.
+        var separator = qualifiedRepository.IndexOf('/');
+        return property switch
+        {
+            "registryEndpoint" => qualifiedRepository[..separator],
+            "repository" => qualifiedRepository[(separator + 1)..],
+            "tag" => _publishedTag ?? throw new InvalidOperationException($"Destination image '{Name}' has no verified publication tag."),
+            "sha256" => GetPublishedDigest() is { } digest && digest.StartsWith("sha256:", StringComparison.Ordinal)
+                ? digest["sha256:".Length..]
+                : throw new InvalidOperationException($"Destination image '{Name}' was not published with a SHA-256 digest."),
+            _ => throw new InvalidOperationException($"Unknown destination image property '{property}'.")
+        };
+    }
+
     static IResourceBuilder<TDestination>? IResourceWithCustomWithReference<DestinationImageResource>.TryWithReference<TDestination>(
         IResourceBuilder<TDestination> builder, IResourceBuilder<IResource> source, string? connectionName, bool optional, string? name)
     {
@@ -170,12 +244,32 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
         {
             return null;
         }
-        if (connectionName is not null || optional || name is not null)
+        if (connectionName is not null || optional)
         {
-            throw new InvalidOperationException("Image references do not support connectionName, optional, or service discovery name options.");
+            throw new InvalidOperationException("Image references do not support connectionName or optional options. Use name to override the image property prefix.");
         }
 
-        return builder.WithReference(image);
+        return builder.WithReference(image, name);
+    }
+
+    private sealed class PublishedPropertyValue(DestinationImageResource destination, string property) : IExpressionValue, IValueWithReferences
+    {
+        public string ValueExpression
+        {
+            get
+            {
+                destination.EnsureCurrentPublication();
+                return $"{{{destination.Name}.{property}}}";
+            }
+        }
+
+        public IEnumerable<object> References => [destination];
+
+        public async ValueTask<string?> GetValueAsync(ValueProviderContext context, CancellationToken cancellationToken) =>
+            await destination.GetPropertyAsync(property, context, cancellationToken).ConfigureAwait(false);
+
+        public ValueTask<string?> GetValueAsync(CancellationToken cancellationToken) =>
+            GetValueAsync(new ValueProviderContext(), cancellationToken);
     }
 
     private sealed class PublishedDigestValue(DestinationImageResource destination) : IExpressionValue

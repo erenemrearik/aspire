@@ -47,7 +47,7 @@ public class ResourceDependencyTests
             dependencies.Select(resource => resource.Name).Order(StringComparer.Ordinal));
         if (!environmentOnly)
         {
-            Assert.Empty(consumer.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
+            Assert.Equal(5, consumer.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Count());
         }
     }
 

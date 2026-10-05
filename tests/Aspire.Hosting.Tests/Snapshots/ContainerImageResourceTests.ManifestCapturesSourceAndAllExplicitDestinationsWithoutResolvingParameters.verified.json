@@ -45,12 +45,16 @@
       "type": "containerimagepublication.v0",
       "source": "tools",
       "registry": "first",
+      "registryEndpoint": "{endpoint.value}",
+      "repository": "{repository.value}/first-tools",
       "image": "{endpoint.value}/{repository.value}/first-tools@{first-tools.digest}"
     },
     "second-tools": {
       "type": "containerimagepublication.v0",
       "source": "tools",
       "registry": "second",
+      "registryEndpoint": "second.example.com",
+      "repository": "second-tools",
       "image": "second.example.com/second-tools@{second-tools.digest}"
     },
     "consumer": {

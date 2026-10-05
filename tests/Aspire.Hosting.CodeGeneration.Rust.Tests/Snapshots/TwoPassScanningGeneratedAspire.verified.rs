@@ -7462,6 +7462,46 @@ impl DestinationImageResource {
         Ok(IExecutionConfigurationBuilder::new(handle, self.client.clone()))
     }
 
+    /// Gets the complete, digest-qualified destination image reference.
+    pub fn image_expression(&self) -> Result<ReferenceExpression, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("context".to_string(), self.handle.to_json());
+        let result = self.client.invoke_capability("Aspire.Hosting.ApplicationModel/DestinationImageResource.imageExpression", args)?;
+        Ok(serde_json::from_value(result)?)
+    }
+
+    /// Gets the tag used for the verified publication, not the source image tag.
+    pub fn tag_expression(&self) -> Result<ReferenceExpression, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("context".to_string(), self.handle.to_json());
+        let result = self.client.invoke_capability("Aspire.Hosting.ApplicationModel/DestinationImageResource.tagExpression", args)?;
+        Ok(serde_json::from_value(result)?)
+    }
+
+    /// Gets the verified root SHA-256 digest without the algorithm prefix.
+    pub fn sha256_expression(&self) -> Result<ReferenceExpression, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("context".to_string(), self.handle.to_json());
+        let result = self.client.invoke_capability("Aspire.Hosting.ApplicationModel/DestinationImageResource.sha256Expression", args)?;
+        Ok(serde_json::from_value(result)?)
+    }
+
+    /// Gets the destination registry authority, including its port when specified.
+    pub fn registry_expression(&self) -> Result<ReferenceExpression, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("context".to_string(), self.handle.to_json());
+        let result = self.client.invoke_capability("Aspire.Hosting.ApplicationModel/DestinationImageResource.registryExpression", args)?;
+        Ok(serde_json::from_value(result)?)
+    }
+
+    /// Gets the full destination repository path, including the registry namespace but not its authority.
+    pub fn repository_expression(&self) -> Result<ReferenceExpression, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("context".to_string(), self.handle.to_json());
+        let result = self.client.invoke_capability("Aspire.Hosting.ApplicationModel/DestinationImageResource.repositoryExpression", args)?;
+        Ok(serde_json::from_value(result)?)
+    }
+
     /// Adds an optional string parameter
     pub fn with_optional_string(&self, value: Option<&str>, enabled: Option<bool>) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();

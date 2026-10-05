@@ -11519,6 +11519,51 @@ class DestinationImageResource(_BaseResource, AbstractResourceWithoutLifetime, A
     def __repr__(self) -> str:
         return "DestinationImageResource(handle={self._handle.handle_id})"
 
+    @_cached_property
+    def image_expression(self) -> ReferenceExpression:
+        """Gets the complete, digest-qualified destination image reference."""
+        result = self._client.invoke_capability(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.imageExpression',
+            {'context': self._handle}
+        )
+        return typing.cast(ReferenceExpression, result)
+
+    @_cached_property
+    def tag_expression(self) -> ReferenceExpression:
+        """Gets the tag used for the verified publication, not the source image tag."""
+        result = self._client.invoke_capability(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.tagExpression',
+            {'context': self._handle}
+        )
+        return typing.cast(ReferenceExpression, result)
+
+    @_cached_property
+    def sha256_expression(self) -> ReferenceExpression:
+        """Gets the verified root SHA-256 digest without the algorithm prefix."""
+        result = self._client.invoke_capability(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.sha256Expression',
+            {'context': self._handle}
+        )
+        return typing.cast(ReferenceExpression, result)
+
+    @_cached_property
+    def registry_expression(self) -> ReferenceExpression:
+        """Gets the destination registry authority, including its port when specified."""
+        result = self._client.invoke_capability(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.registryExpression',
+            {'context': self._handle}
+        )
+        return typing.cast(ReferenceExpression, result)
+
+    @_cached_property
+    def repository_expression(self) -> ReferenceExpression:
+        """Gets the full destination repository path, including the registry namespace but not its authority."""
+        result = self._client.invoke_capability(
+            'Aspire.Hosting.ApplicationModel/DestinationImageResource.repositoryExpression',
+            {'context': self._handle}
+        )
+        return typing.cast(ReferenceExpression, result)
+
     def __init__(self, handle: Handle, client: AspireClient, **kwargs: typing.Unpack[DestinationImageResourceKwargs]) -> None:
         super().__init__(handle, client, **kwargs)
 

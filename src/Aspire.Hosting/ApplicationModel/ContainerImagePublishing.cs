@@ -185,7 +185,7 @@ internal static class ContainerImagePublishing
             await state.SaveSectionAsync(section, context.CancellationToken).ConfigureAwait(false);
             context.CancellationToken.ThrowIfCancellationRequested();
             EnsureConfiguration(destination.Source, configuration);
-            destination.RecordPublishedImage(repository, prepared.Digest);
+            destination.RecordPublishedImage(repository, prepared.Digest, prepared.PublicationTag);
             context.Summary.Add($"Image {destination.Name}", reference);
             await task.CompleteAsync(new MarkdownString($"Published **{destination.Name}** as `{reference}`"),
                 CompletionState.Completed, context.CancellationToken).ConfigureAwait(false);

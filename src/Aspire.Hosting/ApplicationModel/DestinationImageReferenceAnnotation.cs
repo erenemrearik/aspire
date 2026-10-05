@@ -5,7 +5,9 @@
 
 namespace Aspire.Hosting.ApplicationModel;
 
-internal sealed class DestinationImageReferenceAnnotation(DestinationImageResource image) : IResourceAnnotation
+internal sealed class DestinationImageReferenceAnnotation(DestinationImageResource image, string prefix) : IResourceAnnotation
 {
     internal DestinationImageResource Image { get; } = image;
+
+    internal string Prefix { get; } = prefix;
 }

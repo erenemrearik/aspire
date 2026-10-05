@@ -229,6 +229,197 @@ public class ContainerImageResourceTests
         Assert.Same(destination.Resource, Assert.Single(consumer.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>()).Image);
         var environment = await EnvironmentVariableEvaluator.GetEnvironmentVariablesAsync(consumer.Resource, DistributedApplicationOperation.Publish);
         Assert.Equal("{published.image}", environment["IMAGE_NAME"]);
+        Assert.Equal("{published.tag}", environment["PUBLISHED_TAG"]);
+        Assert.Equal("{published.sha256}", environment["PUBLISHED_SHA256"]);
+        Assert.Equal("{published.registryEndpoint}", environment["PUBLISHED_REGISTRY"]);
+        Assert.Equal("{published.repository}", environment["PUBLISHED_REPOSITORY"]);
+    }
+
+    [Fact]
+    public async Task DestinationPropertiesDescribeTheVerifiedPublication()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("source").WithImageSource("ghcr.io/example/tools:source-tag");
+        var image = builder.AddContainerRegistry("registry", "localhost:5000", "team/nested").AddImage("Published", source);
+        var properties = new Dictionary<string, ReferenceExpression>
+        {
+            ["image"] = image.Resource.ImageExpression,
+            ["tag"] = image.Resource.TagExpression,
+            ["sha256"] = image.Resource.Sha256Expression,
+            ["registryEndpoint"] = image.Resource.RegistryExpression,
+            ["repository"] = image.Resource.RepositoryExpression
+        };
+        foreach (var (name, expression) in properties)
+        {
+            Assert.Equal($"{{Published.{name}}}", expression.ValueExpression);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => expression.GetValueAsync(default).AsTask());
+        }
+        image.Resource.RecordPublishedImage("localhost:5000/team/nested/published", Digest, "destination-tag");
+        var values = new Dictionary<string, string?>();
+        foreach (var (name, expression) in properties)
+        {
+            values.Add(name, await expression.GetValueAsync(default));
+        }
+        await Verify(values);
+
+        source.WithImageSource("busybox:v2");
+        foreach (var expression in properties.Values)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => expression.GetValueAsync(default).AsTask());
+        }
+    }
+
+    [Theory]
+    [InlineData("image")]
+    [InlineData("tag")]
+    [InlineData("sha256")]
+    [InlineData("registry")]
+    [InlineData("repository")]
+    public async Task IndividualImagePropertiesPreservePublicationDependencies(string property)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("source").WithImageSource("busybox");
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var image = registry.AddImage("published", source);
+        var value = property switch
+        {
+            "image" => image.Resource.ImageExpression,
+            "tag" => image.Resource.TagExpression,
+            "sha256" => image.Resource.Sha256Expression,
+            "registry" => image.Resource.RegistryExpression,
+            "repository" => image.Resource.RepositoryExpression,
+            _ => throw new InvalidOperationException()
+        };
+        var consumer = builder.AddContainer("consumer", "busybox").WithEnvironment("CUSTOM", value);
+        var dependencies = await consumer.Resource.GetResourceDependenciesAsync(builder.ExecutionContext);
+        Assert.Equal(new IResource[] { image.Resource, source.Resource, registry.Resource }.OrderBy(resource => resource.Name),
+            dependencies.OrderBy(resource => resource.Name));
+        Assert.Empty(consumer.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>());
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("worker-image", false)]
+    [InlineData("worker-image", true)]
+    public async Task ImageReferenceInjectsPropertiesWithTheDefaultOrAliasedPrefix(string? name, bool dispatcher)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("source").WithImageSource("busybox");
+        var image = builder.AddContainerRegistry("registry", "registry.example.com", "team").AddImage("published-image", source);
+        var consumer = builder.AddContainer("consumer", "busybox");
+        if (dispatcher)
+        {
+            ResourceBuilderExtensions.WithReference(consumer, (object)image, name: name);
+        }
+        else
+        {
+            consumer.WithReference(image, name);
+        }
+        consumer.WithReference(image, name);
+        var prefix = name is null ? "PUBLISHED_IMAGE_" : "WORKER_IMAGE_";
+        var deferred = await EnvironmentVariableEvaluator.GetEnvironmentVariablesAsync(consumer.Resource, DistributedApplicationOperation.Publish);
+        Assert.Equal(5, deferred.Count);
+        Assert.Equal("{published-image.image}", deferred[$"{prefix}IMAGE"]);
+        Assert.Single(consumer.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>());
+        image.Resource.RecordPublishedImage("registry.example.com/team/published-image", Digest, "publication-tag");
+        var resolved = await EnvironmentVariableEvaluator.GetEnvironmentVariablesAsync(consumer.Resource);
+        await Verify(new { Deferred = deferred, Resolved = resolved });
+    }
+
+    [Fact]
+    public async Task ImageReferencesCanUseDistinctAliasesButCannotCollideAfterEncoding()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("source").WithImageSource("busybox");
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var first = registry.AddImage("first-image", source);
+        var second = registry.AddImage("second-image", source);
+        var consumer = builder.AddContainer("consumer", "busybox").WithReference(first, name: "worker-image");
+        consumer.WithReference(first, name: "other");
+        Assert.Throws<DistributedApplicationException>(() => consumer.WithReference(second, name: "WORKER_IMAGE"));
+        consumer.WithReference(second, name: "second");
+        Assert.Equal(3, consumer.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>().Count());
+        var values = await EnvironmentVariableEvaluator.GetEnvironmentVariablesAsync(consumer.Resource, DistributedApplicationOperation.Publish);
+        await Verify(values);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void ImageReferenceAliasMustNotBeEmpty(string name)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("source").WithImageSource("busybox");
+        var image = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        var consumer = builder.AddContainer("consumer", "busybox");
+        Assert.Throws<ArgumentException>(() => consumer.WithReference(image, name));
+        Assert.Empty(consumer.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>());
+    }
+
+    [Fact]
+    public async Task DisablingPropertyInjectionRetainsImageConsumption()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("source").WithImageSource("busybox");
+        var registry = builder.AddContainerRegistry("registry", "registry.example.com");
+        var image = registry.AddImage("published", source);
+        var consumer = builder.AddContainer("consumer", "busybox")
+            .WithReferenceEnvironment(ReferenceEnvironmentInjectionFlags.None)
+            .WithReference(image);
+        Assert.Empty(await EnvironmentVariableEvaluator.GetEnvironmentVariablesAsync(consumer.Resource, DistributedApplicationOperation.Publish));
+        Assert.Same(image.Resource, Assert.Single(consumer.Resource.Annotations.OfType<DestinationImageReferenceAnnotation>()).Image);
+        Assert.Equal(3, (await consumer.Resource.GetResourceDependenciesAsync(builder.ExecutionContext)).Count);
+    }
+
+    [Fact]
+    public async Task ImagePropertiesRejectEvidenceForAnotherRepositoryAndClearOnRetry()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("source").WithImageSource("busybox");
+        var image = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        image.Resource.RecordPublishedImage("other.example.com/published", Digest, "old-tag");
+        var properties = new[] { image.Resource.ImageExpression, image.Resource.TagExpression, image.Resource.Sha256Expression,
+            image.Resource.RegistryExpression, image.Resource.RepositoryExpression };
+        foreach (var property in properties)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => property.GetValueAsync(default).AsTask());
+        }
+        image.Resource.RecordPublishedImage("registry.example.com/published", Digest, "new-tag");
+        Assert.Equal("new-tag", await image.Resource.TagExpression.GetValueAsync(default));
+        image.Resource.ClearPublishedDigest();
+        foreach (var property in properties)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => property.GetValueAsync(default).AsTask());
+        }
+    }
+
+    [Fact]
+    public async Task SHA256PropertyDoesNotMisrepresentAnotherAlgorithm()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish);
+        var source = builder.AddContainerImage("source").WithImageSource("busybox");
+        var image = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        var digest = "sha512:" + new string('a', 128);
+        image.Resource.RecordPublishedImage("registry.example.com/published", digest, "tag");
+        Assert.Equal("registry.example.com/published@" + digest, await image.Resource.ImageExpression.GetValueAsync(default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => image.Resource.Sha256Expression.GetValueAsync(default).AsTask());
+    }
+
+    [Fact]
+    public async Task RunModeDoesNotSubstituteSourceValuesForImageProperties()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Run);
+        var source = builder.AddContainerImage("source").WithImageSource("busybox@" + Digest);
+        var image = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        var consumer = builder.AddContainer("consumer", "busybox").WithReference(image);
+        var exception = await Assert.ThrowsAsync<AggregateException>(() =>
+            EnvironmentVariableEvaluator.GetEnvironmentVariablesAsync(consumer.Resource).AsTask());
+        Assert.Equal(5, exception.InnerExceptions.Count);
+        Assert.All(exception.InnerExceptions, error =>
+        {
+            Assert.IsType<InvalidOperationException>(error);
+            Assert.Equal("Destination image 'published' has no published digest for its current source. Publish the image before resolving its value.", error.Message);
+        });
     }
 
     [Theory]

@@ -123,6 +123,38 @@ public class AzureContainerRegistryTests(ITestOutputHelper testOutputHelper)
             .Order(StringComparer.Ordinal), roles);
     }
 
+    [Theory]
+    [InlineData("image")]
+    [InlineData("tag")]
+    [InlineData("sha256")]
+    [InlineData("registry")]
+    [InlineData("repository")]
+    public async Task IndividualImagePropertiesGrantSelectedRegistryPullAccess(string property)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, testOutputHelper);
+        builder.AddAzureContainerAppEnvironment("env");
+        var registry = builder.AddAzureContainerRegistry("acr");
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var image = registry.AddImage("published", source);
+        var expression = property switch
+        {
+            "image" => image.Resource.ImageExpression,
+            "tag" => image.Resource.TagExpression,
+            "sha256" => image.Resource.Sha256Expression,
+            "registry" => image.Resource.RegistryExpression,
+            "repository" => image.Resource.RepositoryExpression,
+            _ => throw new InvalidOperationException()
+        };
+        var consumer = builder.AddProject<Project>("api", launchProfileName: null).WithEnvironment("VALUE", expression);
+        builder.AddAzureContainerRegistry("other").AddImage("unrelated", source);
+        using var app = builder.Build();
+        await ExecuteBeforeStartHooksAsync(app, default);
+        var assignments = consumer.Resource.Annotations.OfType<RoleAssignmentAnnotation>().ToArray();
+        Assert.All(assignments, assignment => Assert.Same(registry.Resource, assignment.Target));
+        Assert.Equal([ContainerRegistryBuiltInRole.AcrPull.ToString()],
+            assignments.SelectMany(assignment => assignment.Roles).Select(role => role.Id));
+    }
+
     [Fact]
     public async Task ImageOnlyDeploymentIncludesRegistryProvisioningLoginAndPublication()
     {

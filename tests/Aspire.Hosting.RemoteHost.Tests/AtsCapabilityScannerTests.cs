@@ -55,6 +55,24 @@ public class AtsCapabilityScannerTests
         return builder;
     }
 
+    [Theory]
+    [InlineData("imageExpression")]
+    [InlineData("tagExpression")]
+    [InlineData("sha256Expression")]
+    [InlineData("registryExpression")]
+    [InlineData("repositoryExpression")]
+    public void ScanAssembly_ImageProperties_AreDeferredExpressionGetters(string property)
+    {
+        var result = AtsCapabilityScanner.ScanAssembly(typeof(DistributedApplication).Assembly);
+        var capability = Assert.Single(result.Capabilities,
+            candidate => candidate.CapabilityId.EndsWith($"/DestinationImageResource.{property}", StringComparison.Ordinal));
+        Assert.Equal(AtsCapabilityKind.PropertyGetter, capability.CapabilityKind);
+        Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(ReferenceExpression)), capability.ReturnType.TypeId);
+#pragma warning disable ASPIREPIPELINES003
+        Assert.Equal(AtsTypeMapping.DeriveTypeId(typeof(DestinationImageResource)), capability.TargetTypeId);
+#pragma warning restore ASPIREPIPELINES003
+    }
+
     private static IResourceBuilder<T> RegistryFirstResourceConstraint<T>(IResourceBuilder<T> builder)
         where T : IContainerRegistry, IResource
     {

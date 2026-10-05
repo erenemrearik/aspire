@@ -10619,11 +10619,16 @@ type DestinationImageResource interface {
 	ExcludeFromManifest() DestinationImageResource
 	ExcludeFromMcp() DestinationImageResource
 	GetResourceName() (string, error)
+	ImageExpression() *ReferenceExpression
 	OnBeforeResourceStarted(callback func(arg BeforeResourceStartedEvent)) DestinationImageResource
 	OnInitializeResource(callback func(arg InitializeResourceEvent)) DestinationImageResource
 	OnResourceReady(callback func(arg ResourceReadyEvent)) DestinationImageResource
 	OnResourceStopped(callback func(arg ResourceStoppedEvent)) DestinationImageResource
+	RegistryExpression() *ReferenceExpression
+	RepositoryExpression() *ReferenceExpression
+	Sha256Expression() *ReferenceExpression
 	SubscribeHttpsEndpointsUpdate(callback func(obj HttpsEndpointUpdateCallbackContext)) DestinationImageResource
+	TagExpression() *ReferenceExpression
 	TestWaitFor(dependency Resource) DestinationImageResource
 	WithCancellableOperation(operation func(arg *CancellationToken)) DestinationImageResource
 	WithChildRelationship(child Resource) DestinationImageResource
@@ -10740,6 +10745,23 @@ func (s *destinationImageResource) GetResourceName() (string, error) {
 	return decodeAs[string](result)
 }
 
+// ImageExpression gets the complete, digest-qualified destination image reference.
+func (s *destinationImageResource) ImageExpression() *ReferenceExpression {
+	if s.err != nil { return nil }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"context": s.handle.ToJSON(),
+	}
+	result, err := s.client.invokeCapability(ctx, "Aspire.Hosting.ApplicationModel/DestinationImageResource.imageExpression", reqArgs)
+	if err != nil { s.setErr(err); return nil }
+	typed, ok := result.(*ReferenceExpression)
+	if !ok {
+		s.setErr(fmt.Errorf("aspire: Aspire.Hosting.ApplicationModel/DestinationImageResource.imageExpression returned unexpected type %T", result))
+		return nil
+	}
+	return typed
+}
+
 // OnBeforeResourceStarted subscribes to the BeforeResourceStarted event.
 func (s *destinationImageResource) OnBeforeResourceStarted(callback func(arg BeforeResourceStartedEvent)) DestinationImageResource {
 	if s.err != nil { return s }
@@ -10816,6 +10838,57 @@ func (s *destinationImageResource) OnResourceStopped(callback func(arg ResourceS
 	return s
 }
 
+// RegistryExpression gets the destination registry authority, including its port when specified.
+func (s *destinationImageResource) RegistryExpression() *ReferenceExpression {
+	if s.err != nil { return nil }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"context": s.handle.ToJSON(),
+	}
+	result, err := s.client.invokeCapability(ctx, "Aspire.Hosting.ApplicationModel/DestinationImageResource.registryExpression", reqArgs)
+	if err != nil { s.setErr(err); return nil }
+	typed, ok := result.(*ReferenceExpression)
+	if !ok {
+		s.setErr(fmt.Errorf("aspire: Aspire.Hosting.ApplicationModel/DestinationImageResource.registryExpression returned unexpected type %T", result))
+		return nil
+	}
+	return typed
+}
+
+// RepositoryExpression gets the full destination repository path, including the registry namespace but not its authority.
+func (s *destinationImageResource) RepositoryExpression() *ReferenceExpression {
+	if s.err != nil { return nil }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"context": s.handle.ToJSON(),
+	}
+	result, err := s.client.invokeCapability(ctx, "Aspire.Hosting.ApplicationModel/DestinationImageResource.repositoryExpression", reqArgs)
+	if err != nil { s.setErr(err); return nil }
+	typed, ok := result.(*ReferenceExpression)
+	if !ok {
+		s.setErr(fmt.Errorf("aspire: Aspire.Hosting.ApplicationModel/DestinationImageResource.repositoryExpression returned unexpected type %T", result))
+		return nil
+	}
+	return typed
+}
+
+// Sha256Expression gets the verified root SHA-256 digest without the algorithm prefix.
+func (s *destinationImageResource) Sha256Expression() *ReferenceExpression {
+	if s.err != nil { return nil }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"context": s.handle.ToJSON(),
+	}
+	result, err := s.client.invokeCapability(ctx, "Aspire.Hosting.ApplicationModel/DestinationImageResource.sha256Expression", reqArgs)
+	if err != nil { s.setErr(err); return nil }
+	typed, ok := result.(*ReferenceExpression)
+	if !ok {
+		s.setErr(fmt.Errorf("aspire: Aspire.Hosting.ApplicationModel/DestinationImageResource.sha256Expression returned unexpected type %T", result))
+		return nil
+	}
+	return typed
+}
+
 // SubscribeHttpsEndpointsUpdate subscribes to the `BeforeStartEvent` and invokes the specified callback when an HTTPS certificate is determined to be available for the resource. This is used to conditionally update endpoint URI schemes or perform other HTTPS-related configuration at startup.
 func (s *destinationImageResource) SubscribeHttpsEndpointsUpdate(callback func(obj HttpsEndpointUpdateCallbackContext)) DestinationImageResource {
 	if s.err != nil { return s }
@@ -10833,6 +10906,23 @@ func (s *destinationImageResource) SubscribeHttpsEndpointsUpdate(callback func(o
 	}
 	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/subscribeHttpsEndpointsUpdate", reqArgs); err != nil { s.setErr(err) }
 	return s
+}
+
+// TagExpression gets the tag used for the verified publication, not the source image tag.
+func (s *destinationImageResource) TagExpression() *ReferenceExpression {
+	if s.err != nil { return nil }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"context": s.handle.ToJSON(),
+	}
+	result, err := s.client.invokeCapability(ctx, "Aspire.Hosting.ApplicationModel/DestinationImageResource.tagExpression", reqArgs)
+	if err != nil { s.setErr(err); return nil }
+	typed, ok := result.(*ReferenceExpression)
+	if !ok {
+		s.setErr(fmt.Errorf("aspire: Aspire.Hosting.ApplicationModel/DestinationImageResource.tagExpression returned unexpected type %T", result))
+		return nil
+	}
+	return typed
 }
 
 // TestWaitFor waits for another resource (test version)
