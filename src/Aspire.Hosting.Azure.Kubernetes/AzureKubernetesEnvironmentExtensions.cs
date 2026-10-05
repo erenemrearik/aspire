@@ -122,11 +122,14 @@ public static class AzureKubernetesEnvironmentExtensions
                 // Ensure push waits for push-prereq (ACR login)
                 pushStep.DependsOn(WellKnownPipelineSteps.PushPrereq);
 
-                // Ensure push waits for its corresponding build step
-                var resourceName = pushStep.Resource?.Name;
-                if (resourceName is not null)
+                // Remote image publications have preparation steps, not compute build steps.
+                // Depend on the resource's actual build steps rather than inventing a name.
+                if (pushStep.Resource is { } pushResource)
                 {
-                    pushStep.DependsOn($"build-{resourceName}");
+                    foreach (var buildStep in context.GetSteps(pushResource, WellKnownPipelineTags.BuildCompute))
+                    {
+                        pushStep.DependsOn(buildStep.Name);
+                    }
                 }
             }
         }));

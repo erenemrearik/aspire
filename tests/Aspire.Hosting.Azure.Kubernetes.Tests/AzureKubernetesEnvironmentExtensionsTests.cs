@@ -5,6 +5,7 @@
 #pragma warning disable ASPIRECOMPUTE003 // Type is for evaluation purposes only
 #pragma warning disable ASPIREPIPELINES001 // PipelineStepAnnotation is evaluation-only
 #pragma warning disable ASPIREPIPELINES003
+#pragma warning disable ASPIREAZURE001
 
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
@@ -13,11 +14,43 @@ using Aspire.Hosting.Kubernetes;
 using Aspire.Hosting.Pipelines;
 using Aspire.Hosting.Utils;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aspire.Hosting.Azure.Tests;
 
 public class AzureKubernetesEnvironmentExtensionsTests(ITestOutputHelper outputHelper)
 {
+    [Fact]
+    public async Task RemoteImagePushUsesPreparationWithoutInventingAComputeBuildStep()
+    {
+        using var workspace = TemporaryWorkspace.Create(outputHelper);
+        using var builder = AzureKubernetesTestBuilder.Create(outputHelper, workspace);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var environment = builder.AddAzureKubernetesEnvironment("aks");
+        var registry = Assert.IsType<AzureContainerRegistryResource>(
+            Assert.Single(environment.Resource.Annotations.OfType<ContainerRegistryReferenceAnnotation>()).Registry);
+        builder.CreateResourceBuilder(registry).AddImage("published", source);
+        IReadOnlyList<PipelineStep> steps = [];
+        builder.Pipeline.AddPipelineConfiguration(context =>
+        {
+            steps = context.Steps;
+            return Task.CompletedTask;
+        });
+        builder.Services.Configure<PipelineOptions>(options => options.Step = WellKnownPipelineSteps.Diagnostics);
+        using var app = builder.Build();
+        await AzureManifestUtils.ExecuteBeforeStartHooksAsync(app, default);
+        await app.Services.GetRequiredService<IDistributedApplicationPipeline>().ExecuteAsync(
+            new PipelineContext(app.Services.GetRequiredService<DistributedApplicationModel>(),
+                app.Services.GetRequiredService<DistributedApplicationExecutionContext>(),
+                app.Services, NullLogger.Instance, default));
+
+        var push = Assert.Single(steps, step => step.Name == "push-published");
+        Assert.Equal(
+            new[] { AzureEnvironmentResource.ProvisionInfrastructureStepName, "prepare-image-tools", "provision-aks-acr", WellKnownPipelineSteps.PushPrereq }.Order(StringComparer.Ordinal),
+            push.DependsOnSteps.Order(StringComparer.Ordinal));
+        Assert.All(push.DependsOnSteps, name => Assert.Single(steps, step => step.Name == name));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

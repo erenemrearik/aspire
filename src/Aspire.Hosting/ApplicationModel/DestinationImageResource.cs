@@ -20,6 +20,7 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
     IExpressionValue, IValueWithReferences, IResourceWithCustomWithReference<DestinationImageResource>
 {
     private string? _publishedDigest;
+    private string? _publishedRepository;
     private ContainerImageSourceAnnotation? _publishedSource;
 
     /// <summary>
@@ -70,6 +71,17 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
     /// <inheritdoc/>
     async ValueTask<string?> IValueProvider.GetValueAsync(ValueProviderContext context, CancellationToken cancellationToken)
     {
+        var repository = await GetRepositoryAsync(context, cancellationToken).ConfigureAwait(false);
+        if (_publishedRepository is not null && !StringComparer.Ordinal.Equals(repository, _publishedRepository))
+        {
+            throw new InvalidOperationException($"Destination image '{Name}' has a different registry or repository than its verified publication. Publish the image again before resolving its value.");
+        }
+
+        return $"{repository}@{GetPublishedDigest()}";
+    }
+
+    internal async ValueTask<string> GetRepositoryAsync(ValueProviderContext context, CancellationToken cancellationToken)
+    {
         EnsureCurrentPublication();
         var registry = (IContainerRegistry)Parent;
         var endpoint = await registry.Endpoint.GetValueAsync(context, cancellationToken).ConfigureAwait(false);
@@ -87,7 +99,7 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
             throw new InvalidOperationException($"Destination image '{Name}' has a registry and repository exceeding 255 characters.");
         }
 
-        return $"{qualifiedRepository}@{GetPublishedDigest()}";
+        return qualifiedRepository;
     }
 
     /// <inheritdoc/>
@@ -100,6 +112,20 @@ public sealed class DestinationImageResource : Resource, IResourceWithoutLifetim
         EnsureCurrentPublication();
         _publishedSource = Source.GetSource();
         _publishedDigest = digest;
+        _publishedRepository = null;
+    }
+
+    internal void RecordPublishedImage(string repository, string digest)
+    {
+        RecordPublishedDigest(digest);
+        _publishedRepository = repository;
+    }
+
+    internal void ClearPublishedDigest()
+    {
+        _publishedDigest = null;
+        _publishedRepository = null;
+        _publishedSource = null;
     }
 
     internal string GetPublishedDigest()

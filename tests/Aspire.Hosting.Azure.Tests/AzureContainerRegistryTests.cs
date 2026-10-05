@@ -2,6 +2,8 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 #pragma warning disable ASPIREPIPELINES001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+#pragma warning disable ASPIREPIPELINES003
+#pragma warning disable ASPIREAZURE001
 
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Azure.AppContainers;
@@ -9,12 +11,49 @@ using Aspire.Hosting.Pipelines;
 using Aspire.Hosting.Utils;
 using Azure.Provisioning.ContainerRegistry;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using static Aspire.Hosting.Utils.AzureManifestUtils;
 
 namespace Aspire.Hosting.Azure.Tests;
 
 public class AzureContainerRegistryTests(ITestOutputHelper testOutputHelper)
 {
+    [Fact]
+    public async Task ImageOnlyDeploymentIncludesRegistryProvisioningLoginAndPublication()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, testOutputHelper);
+        var source = builder.AddContainerImage("tools").WithImageSource("busybox");
+        var registry = builder.AddAzureContainerRegistry("acr");
+        registry.AddImage("published", source);
+        IReadOnlyList<PipelineStep> steps = [];
+        builder.Pipeline.AddPipelineConfiguration(context =>
+        {
+            steps = context.Steps;
+            return Task.CompletedTask;
+        });
+        builder.Services.Configure<PipelineOptions>(options => options.Step = WellKnownPipelineSteps.Diagnostics);
+        using var app = builder.Build();
+        await ExecuteBeforeStartHooksAsync(app, default);
+        var model = app.Services.GetRequiredService<DistributedApplicationModel>();
+        await app.Services.GetRequiredService<IDistributedApplicationPipeline>().ExecuteAsync(
+            new PipelineContext(model, app.Services.GetRequiredService<DistributedApplicationExecutionContext>(),
+                app.Services, NullLogger.Instance, default));
+
+        Assert.Empty(model.Resources.OfType<IComputeResource>());
+        Assert.Single(model.Resources.OfType<AzureEnvironmentResource>());
+        var provision = Assert.Single(steps, step => step.Resource == registry.Resource &&
+            step.Tags.Contains(WellKnownPipelineTags.ProvisionInfrastructure));
+        var login = Assert.Single(steps, step => step.Name == "login-to-acr-acr");
+        var push = Assert.Single(steps, step => step.Name == "push-published");
+        var prepare = Assert.Single(steps, step => step.Name == "prepare-image-tools");
+        Assert.Contains(provision.Name, login.DependsOnSteps);
+        Assert.Contains(login.Name, Assert.Single(steps, step => step.Name == WellKnownPipelineSteps.PushPrereq).DependsOnSteps);
+        Assert.Contains(WellKnownPipelineSteps.PushPrereq, prepare.DependsOnSteps);
+        Assert.Contains(prepare.Name, push.DependsOnSteps);
+        Assert.Contains(provision.Name, push.DependsOnSteps);
+        Assert.Contains(push.Name, Assert.Single(steps, step => step.Name == WellKnownPipelineSteps.Deploy).DependsOnSteps);
+    }
+
     [Fact]
     public async Task AddAzureContainerRegistry_AddsResourceAndImplementsIContainerRegistry()
     {

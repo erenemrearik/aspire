@@ -26,6 +26,8 @@ public static class ContainerImageResourceBuilderExtensions
     /// Configure an existing registry image with <c>WithImageSource</c>. Sources are independent
     /// of destinations and can be shared across registries. This experimental API registers
     /// artifacts in publish mode only; local image preparation and registry emulation are not implemented.
+    /// Deployment resolves each associated remote source once and publishes its complete referenced
+    /// content to each destination using Docker with Buildx. Separate OCI referrers are not copied.
     /// </remarks>
     /// <example>
     /// <code>
@@ -47,6 +49,7 @@ public static class ContainerImageResourceBuilderExtensions
         var resourceBuilder = builder.ExecutionContext.IsRunMode
             ? builder.CreateResourceBuilder(resource)
             : builder.AddResource(resource);
+        ContainerImagePublishing.Configure(resource);
 
         return resourceBuilder.WithManifestPublishingCallback(context => WriteSourceManifestAsync(context, resource));
     }
@@ -87,6 +90,8 @@ public static class ContainerImageResourceBuilderExtensions
     /// Each call creates a distinct resource. Destinations are additive and can share a source,
     /// including multiple repositories within one registry. References use the published content digest,
     /// never a mutable tag. No publication or permission grant is performed during model construction.
+    /// Deployment publishes this destination after source preparation and registry prerequisites.
+    /// Publication tags are retained transport addresses; consumer references use verified digests.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A required argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The name is invalid or the builders belong to different applications.</exception>
