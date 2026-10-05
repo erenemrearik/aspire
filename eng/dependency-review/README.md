@@ -39,3 +39,43 @@ Generated workflow coherence uses the existing
 second compiler or a wrapper/runtime-version equality check. Approved-source
 checks cannot establish feed reachability or permissions. The evidence procedure
 is in `.agents/skills/pr-testing/dependency-review.md`.
+
+## Detection-only local paired study
+
+`corpus.json` contains 15 clearly synthetic blind-input cases, including ordinary
+code and visual changes. `expected.json` is the separately frozen outcome oracle;
+never supply it, adjudications, checker output, or previous model outputs to an
+evaluator. This study does not repair the pilot's source PRs or dependency bumps.
+
+`study.py` prepares exact prompts from read-only baseline skill snapshots and
+additional dependency guidance, then scores **explicit human adjudications**.
+It does not call a model or infer correctness from claim keywords. The caller
+must use the same requested agent type/default settings for all paired calls.
+The expected case set is enforced so dropping a case cannot improve scores.
+Primary TP/miss counts finding emission against prespecified targets; secondary
+recognition includes correct explicit states/tables. Format and state-label
+errors are not automatically substantive false positives.
+
+```bash
+# Export original skills from the recorded snapshot into an artifact directory
+# as baseline-code-review.txt and baseline-pr-testing.txt before preparing.
+python3 eng/dependency-review/study.py prepare <artifact-directory>
+# Independently execute each prepared prompt; retain raw JSON outputs.
+# Record actual tool invocation history in invocations.json, not inferred usage.
+# Inspect every output and update an explicit adjudication plan for a NEW study.
+python3 eng/dependency-review/study.py adjudicate <artifact-directory>
+python3 eng/dependency-review/study.py score <artifact-directory> --run baseline-review
+python3 eng/dependency-review/study.py deterministic <artifact-directory>
+python3 -m unittest discover -s eng/dependency-review -p 'test_*.py'
+```
+
+`adjudication-plan.json` and `local-study-results.json` belong to the recorded
+2026-10-05 run, not future outputs. `adjudicate` writes the retained output bundle
+in this directory; do not overwrite it accidentally with a different experiment.
+`deterministic-fixtures.json` is a separate post-model projection of objective
+hold/source cases, not blind input or a compatibility oracle.
+
+See `local-study-report.md` for scores, paths, repeat variability and limits.
+The enhanced skill evaluators could not invoke `skill(pr-testing)` because the
+task tool did not expose it. Their outputs are **guide-loaded only**, not compliant
+skill-invoked assessments. No result is a compatibility/safety certificate.
