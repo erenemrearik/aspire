@@ -19,9 +19,9 @@ public partial class MainLayout : IGlobalKeydownListener, IAsyncDisposable
 {
     private bool _isNavMenuOpen;
 
-    private TerminalDock? _terminalDock;
     private bool _runSelectionChanged;
     private bool _isSwitchingRuns;
+    private bool _hasResourceTerminals;
     // Fluent v5 has no API to notify the provider after mutating an existing toast's options. This value is
     // rendered as an additional provider attribute so changing it forces FluentToastProvider to read them again.
     private int _toastProviderUpdateVersion;
@@ -65,9 +65,6 @@ public partial class MainLayout : IGlobalKeydownListener, IAsyncDisposable
 
     [Inject]
     public required IStringLocalizer<Resources.Layout> Loc { get; init; }
-
-    [Inject]
-    public required IStringLocalizer<Resources.TerminalStrings> TerminalLoc { get; init; }
 
     [Inject]
     public required DashboardDialogService DialogService { get; init; }
@@ -295,6 +292,7 @@ public partial class MainLayout : IGlobalKeydownListener, IAsyncDisposable
         }
 
         _isSwitchingRuns = true;
+        _hasResourceTerminals = false;
         await InvokeAsync(StateHasChanged);
 
         try
@@ -458,16 +456,24 @@ public partial class MainLayout : IGlobalKeydownListener, IAsyncDisposable
         _openPageDialog = await DialogService.ShowPanelAsync<NotificationsDialog>(parameters).ConfigureAwait(true);
     }
 
-    public IReadOnlySet<AspireKeyboardShortcut> SubscribedShortcuts { get; } = new HashSet<AspireKeyboardShortcut>
+    private static readonly IReadOnlySet<AspireKeyboardShortcut> s_subscribedShortcuts = new HashSet<AspireKeyboardShortcut>
     {
         AspireKeyboardShortcut.Help,
         AspireKeyboardShortcut.Settings,
-        AspireKeyboardShortcut.GoToResources,
-        AspireKeyboardShortcut.GoToConsoleLogs,
         AspireKeyboardShortcut.GoToStructuredLogs,
         AspireKeyboardShortcut.GoToTraces,
         AspireKeyboardShortcut.GoToMetrics
     };
+
+    private static readonly IReadOnlySet<AspireKeyboardShortcut> s_resourceServiceSubscribedShortcuts = new HashSet<AspireKeyboardShortcut>(
+        s_subscribedShortcuts)
+    {
+        AspireKeyboardShortcut.GoToResources,
+        AspireKeyboardShortcut.GoToConsoleLogs
+    };
+
+    public IReadOnlySet<AspireKeyboardShortcut> SubscribedShortcuts =>
+        DashboardClient.IsEnabled ? s_resourceServiceSubscribedShortcuts : s_subscribedShortcuts;
 
     public async Task OnPageKeyDownAsync(AspireKeyboardShortcut shortcut)
     {
@@ -479,10 +485,10 @@ public partial class MainLayout : IGlobalKeydownListener, IAsyncDisposable
             case AspireKeyboardShortcut.Settings:
                 await LaunchSettingsAsync();
                 break;
-            case AspireKeyboardShortcut.GoToResources:
+            case AspireKeyboardShortcut.GoToResources when DashboardClient.IsEnabled:
                 NavigationManager.NavigateTo(DashboardUrls.ResourcesUrl());
                 break;
-            case AspireKeyboardShortcut.GoToConsoleLogs:
+            case AspireKeyboardShortcut.GoToConsoleLogs when DashboardClient.IsEnabled:
                 NavigationManager.NavigateTo(DashboardUrls.ConsoleLogsUrl());
                 break;
             case AspireKeyboardShortcut.GoToStructuredLogs:
@@ -545,7 +551,4 @@ public partial class MainLayout : IGlobalKeydownListener, IAsyncDisposable
         await JSInteropHelpers.SafeDisposeAsync(_jsModule);
         await JSInteropHelpers.SafeDisposeAsync(_keyboardHandlers);
     }
-
-    private Task ToggleTerminalDockAsync()
-        => IsTerminalDockEnabled && _terminalDock is { } dock ? dock.ToggleAsync() : Task.CompletedTask;
 }

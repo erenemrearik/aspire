@@ -23,6 +23,9 @@
     <Compile Include="$(SharedDir)CompareHelpers.cs" Link="Utils\CompareHelpers.cs" />
     <Compile Include="$(SharedDir)CustomResourceSnapshotExtensions.cs" Link="CustomResourceSnapshotExtensions.cs" />
     <Compile Include="$(SharedDir)DirectoryHelper.cs" Link="Utils\DirectoryHelper.cs" />
+    <Compile Include="$(SharedDir)SocketPermissionHelper.cs" Link="Utils\SocketPermissionHelper.cs" />
+    <Compile Include="$(SharedDir)SocketExceptionHelpers.cs" Link="Utils\SocketExceptionHelpers.cs" />
+    <Compile Include="$(SharedDir)SocketDirectoryNames.cs" Link="Utils\SocketDirectoryNames.cs" />
     <Compile Include="$(SharedDir)Model\KnownProperties.cs" Link="Dashboard\KnownProperties.cs" />
     <Compile Include="$(SharedDir)Model\KnownResourceTypes.cs" Link="Dashboard\KnownResourceTypes.cs" />
     <Compile Include="$(SharedDir)Model\KnownRelationshipTypes.cs" Link="Dashboard\KnownRelationshipTypes.cs" />
@@ -65,6 +68,7 @@
     <Compile Include="$(SharedDir)PathLookupHelper.cs" Link="Utils\PathLookupHelper.cs" />
     <Compile Include="$(SharedDir)MsBuildResponseFile.cs" Link="Utils\MsBuildResponseFile.cs" />
     <Compile Include="$(SharedDir)BackchannelConstants.cs" Link="Backchannel\BackchannelConstants.cs" />
+    <Compile Include="$(SharedDir)RequestIdTypeInfoResolver.cs" Link="Backchannel\RequestIdTypeInfoResolver.cs" />
     <Compile Include="$(SharedDir)AppHostSocketManager.cs" Link="Backchannel\AppHostSocketManager.cs" />
     <Compile Include="$(SharedDir)TerminalHost\*.cs" Link="Backchannel\TerminalHost\%(Filename)%(Extension)" />
     <Compile Include="$(SharedDir)UserSecrets\UserSecretsPathHelper.cs" Link="UserSecrets\UserSecretsPathHelper.cs" />

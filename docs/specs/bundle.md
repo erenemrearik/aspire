@@ -27,13 +27,14 @@ The Aspire Bundle distributes the CLI with its runtime components:
 
 | Component | Deployment | Purpose |
 |-----------|------------|---------|
-| `aspire[.exe]` | Native AOT | CLI, including native development-certificate management |
-| `managed/aspire-managed[.exe]` | Self-contained single-file executable | AppHost Server, NuGet operations, terminal hosting, and a Dashboard compatibility forwarder |
+| `aspire[.exe]` | Native AOT | CLI, including native development-certificate management and in-process NuGet operations |
+| `managed/aspire-managed[.exe]` | Self-contained single-file executable | AppHost Server, terminal hosting, and a Dashboard compatibility forwarder |
 | `dashboard/Aspire.Dashboard[.exe]` | Native AOT | Dashboard web application |
 | `dashboard/wwwroot/` and native dependencies | Publish assets | Dashboard scripts, styles, fonts, images, and SQLite native library |
 | `dcp/` | Platform-specific native binaries | Developer Control Plane |
+| `tray/` | NativeAOT, macOS and Windows only | Experimental menu-bar or notification-area companion |
 
-The bundle removes the need to acquire DCP and Dashboard separately when using the bundled components. Its pre-built AppHost Server and NuGet helper do not require a globally installed .NET SDK.
+The bundle removes the need to acquire DCP and Dashboard separately when using the bundled components. Its pre-built AppHost Server and in-process NuGet client do not require a globally installed .NET SDK.
 
 This does **not** mean every application can run without other prerequisites. .NET application development still requires the appropriate SDK, guest languages require their own toolchains, and container resources require a container runtime. Integration packages and application dependencies must be available locally or restored from their configured sources. Offline operation requires those dependencies to have been acquired already.
 
@@ -44,9 +45,10 @@ The managed helper contains its own runtime. The CLI and Dashboard are Native AO
 ```text
 aspire (Native AOT CLI)
   |
+  +-- in-process NuGet.Client: package search, restore, and probe manifests
+  |
   +-- managed/aspire-managed
   |     +-- server: AppHost Server and integration loading
-  |     +-- nuget: package search, restore, and probe manifests
   |     +-- terminalhost: terminal hosting
   |     +-- dashboard: compatibility forwarder to native Dashboard
   |
@@ -54,6 +56,7 @@ aspire (Native AOT CLI)
   |     +-- wwwroot/ and native dependencies
   |
   +-- dcp/ (Developer Control Plane)
+  +-- tray/ (optional native desktop companion on macOS and Windows)
 
 Guest AppHost <---- JSON-RPC ----> AppHost Server
                                       |
@@ -85,9 +88,13 @@ Standalone `aspire dashboard run` and CLI profile capture launch Dashboard direc
 │   │                             # macOS: libe_sqlite3.dylib
 │   ├── wwwroot/
 │   └── ...                      # Other publish assets, excluding debug symbols
-└── dcp/
-    ├── dcp[.exe]
-    └── ...                      # DCP extensions and supporting files
+├── dcp/
+│   ├── dcp[.exe]
+│   └── ...                      # DCP extensions and supporting files
+└── tray/                        # macOS and Windows only
+    ├── Aspire Tray.app/         # macOS; complete signed app bundle
+    ├── aspire-tray.exe          # Windows
+    └── Aspire.ico               # Windows
 ```
 
 The CLI is published separately with the payload embedded. `CreateLayout` does not copy the CLI into the payload or modify a CLI binary.
@@ -95,6 +102,8 @@ The CLI is published separately with the payload embedded. `CreateLayout` does n
 Windows bundles also include `managed/hex1bpty.exe`, `managed/conpty.dll`, and `managed/arm64/OpenConsole.exe`; `win-x64` additionally includes `managed/x64/OpenConsole.exe`. These PTY sidecars stay outside the managed single-file executable because Hex1b locates its helper beside the application. ConPTY selects `OpenConsole.exe` relative to its DLL using the **OS architecture**, so the x64 bundle must retain the ARM64 helper for execution under emulation. `CreateLayout` preserves this layout and fails if a required sidecar is missing.
 
 Dashboard layout creation requires a RID-specific publish for the requested configuration. It fails if the executable, `wwwroot`, or a nonempty platform-specific SQLite library is missing. It copies the publish assets and native dependencies, excluding debug symbols. DCP must also be available for the requested target platform; it is acquired from build-time NuGet packages and copied into the payload.
+
+New macOS and Windows layouts also require the matching native tray payload; Linux layouts do not include one. Existing installed layouts without a tray remain valid.
 
 ### Installed Layout
 
@@ -113,6 +122,7 @@ For a script installation using the default prefix, the installed structure is:
 │   │   ├── managed/
 │   │   ├── dashboard/
 │   │   ├── dcp/
+│   │   ├── tray/                 # macOS and Windows bundles
 │   │   └── .leases/            # Live bundle users
 │   └── ...                     # Older versions retained while in use
 ├── hives/
@@ -123,7 +133,7 @@ This is an example of the script route, not a universal install location. Packag
 
 The stable `bundle/` path selects the active version. Processes started through a leased layout use paths rooted in the selected `versions/{id}/` directory, so a later update cannot redirect them to another version mid-operation.
 
-Flat layouts with `managed/`, `dashboard/`, and `dcp/` directly under a root remain useful for build output and explicit layout discovery. They are distinct from the versioned extraction layout above.
+Flat layouts with `managed/`, `dashboard/`, `dcp/`, and, on macOS or Windows, `tray/` directly under a root remain useful for build output and explicit layout discovery. Older layouts may omit the optional tray directory. They are distinct from the versioned extraction layout above.
 
 ## Self-Extracting Binary
 
@@ -231,7 +241,7 @@ The native-version gate and executable-selection behavior are defined in [Layout
 
 ## NuGet and AppHost Server
 
-`aspire-managed nuget` provides package search, restore, and package probe-manifest generation without requiring a globally installed SDK. Its command definitions live in [Aspire.Managed/NuGet](../../src/Aspire.Managed/NuGet); use the subcommands' `--help` output for their current arguments.
+The CLI calls NuGet.Client APIs in-process for package search, restore, asset selection, and package probe-manifest generation, without requiring a globally installed SDK or an `aspire-managed` subprocess. The implementation lives in [Aspire.Cli/NuGet](../../src/Aspire.Cli/NuGet).
 
 The pre-built AppHost Server loads the integrations required by the project. Package restore artifacts and probe manifests are cached beneath `<workspace>/.aspire/integrations/`:
 
@@ -312,9 +322,10 @@ The build sequence is:
 
 1. Publish `Aspire.Managed` as a self-contained single-file executable.
 2. Publish `Aspire.Dashboard` with Native AOT for the same RID and configuration.
-3. Restore the matching DCP package, using the target OS/architecture rather than the build machine's defaults.
-4. Run `CreateLayout` to assemble the payload and create its `.tar.gz` archive.
-5. Publish the Native AOT CLI with `BundlePayloadPath` pointing to that archive.
+3. Publish the native tray payload on macOS or Windows, before signing bundle components.
+4. Restore the matching DCP package, using the target OS/architecture rather than the build machine's defaults.
+5. Run `CreateLayout` to assemble the payload and create its `.tar.gz` archive.
+6. Publish the Native AOT CLI with `BundlePayloadPath` pointing to that archive.
 
 The assembled directories are under `artifacts/bundle/{rid}/`; the payload archive is `artifacts/bundle/aspire-{version}-{rid}.tar.gz`. The self-extracting CLI is in the CLI project's publish output, not in the payload directory.
 
@@ -338,6 +349,14 @@ dotnet run --project tools/CreateLayout -- \
 
 For the complete tool contract, see [CreateLayout](../../tools/CreateLayout/README.md). CI packaging additionally uses [dashboardpack](../../eng/dashboardpack/Common.projitems), [clipack](../../eng/clipack/Common.projitems), signing targets, and the native-archive workflows.
 
+### Experimental Native Tray Companion
+
+`aspire tray start` starts or restores the native companion from the invoking CLI's leased bundle; `aspire tray stop` shuts down the companion without stopping AppHosts. The companion uses the CLI's versioned discovery and exact-instance stop contracts. Linux and standalone CLI binaries without a bundled payload are unsupported.
+
+macOS bundles contain the complete `Aspire Tray.app`, including its executable, plist, artwork, and signature. Windows x64 and ARM64 bundles contain `tray/aspire-tray.exe` and the shared `tray/Aspire.ico`. `CreateLayout` copies the already-published payload and rejects missing or incompatible files. The native archive verification targets check the actual packaged payload before it is embedded in the CLI.
+
+Official packaging signs the macOS app as a whole and signs the Windows executable before layout assembly. Pipeline wiring and local ad-hoc signatures do not establish that official signing or notarization has been validated. Windows ARM64 native UI, installed-bundle lifecycle, real monitor/DPI behavior, and formal security review remain outstanding; successful cross-publishing or payload verification is not runtime validation.
+
 ## Security Considerations
 
 - The embedded resource is part of the executable being signed. There is no post-signing appended payload or trailer whose integrity must be handled separately.
@@ -345,7 +364,7 @@ For the complete tool contract, see [CreateLayout](../../tools/CreateLayout/READ
 - Extraction validates archive paths and links to prevent traversal outside the extraction root. Validate the staged layout before switching the active link.
 - Version-rooted paths and leases protect running consumers from cleanup and mixed-version component selection during updates.
 - Native Dashboard startup does not require a globally selected .NET runtime. The managed helper carries its runtime; SDK-based development remains a separate workflow.
-- Package source configuration, authentication, and package trust remain the responsibility of the NuGet acquisition path. Bundling the NuGet helper does not remove those requirements.
+- Package source configuration, authentication, and package trust remain the responsibility of the NuGet acquisition path. Running NuGet in-process does not remove those requirements.
 
 ## Validation
 
@@ -356,6 +375,7 @@ Tests cover different parts of the distribution contract:
 | Payload extraction and lifetime | `BundleServiceTests`, `BundleServiceIntegrationTests` |
 | CLI layout discovery and leases | `LayoutConfigurationTests`, `LayoutDiscoveryReparsePointTests`, `LayoutProcessRunnerTests` |
 | Layout assembly and required assets | `tests/Infrastructure.Tests/CreateLayout/` |
+| Tray payload verification and lifecycle contracts | `tests/Aspire.Tray.Tests/`, native archive verification scripts |
 | AppHost build and launch compatibility | SDK resolution, .NET project, pre-built server, and Hosting Dashboard tests |
 | Native startup and static assets | `eng/scripts/test-native-dashboard.ps1` |
 | Native browser interactivity | `NativeAotDashboardTests`, including a working directory outside the publish directory and lease cleanup |

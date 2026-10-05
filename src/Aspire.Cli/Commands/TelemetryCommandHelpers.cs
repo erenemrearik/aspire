@@ -4,7 +4,6 @@
 using System.CommandLine;
 using System.Globalization;
 using System.Net;
-using System.Net.Http.Json;
 using Aspire.Cli.Backchannel;
 using Aspire.Cli.Diagnostics;
 using Aspire.Cli.Interaction;
@@ -601,13 +600,35 @@ internal static class TelemetryCommandHelpers
     /// <summary>
     /// Reads lines from an HTTP streaming response, yielding each complete line as it arrives.
     /// </summary>
+    public static IAsyncEnumerable<string> ReadLinesAsync(this StreamReader reader, CancellationToken cancellationToken)
+    {
+        return reader.ReadLinesAsync(onError: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads complete lines, stopping if the optional error handler returns true and propagating unhandled errors.
+    /// </summary>
     public static async IAsyncEnumerable<string> ReadLinesAsync(
         this StreamReader reader,
+        Func<Exception, bool>? onError,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            string? line;
+            try
+            {
+                line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (onError is not null)
+            {
+                if (!onError(ex))
+                {
+                    throw;
+                }
+
+                yield break;
+            }
             if (line is null)
             {
                 yield break;
@@ -617,6 +638,40 @@ internal static class TelemetryCommandHelpers
             {
                 yield return line;
             }
+        }
+    }
+
+    /// <summary>
+    /// Reads complete lines from an HTTP streaming response and reports expected disconnects.
+    /// </summary>
+    public static async IAsyncEnumerable<string> ReadLinesWithDisconnectHandlingAsync(
+        this StreamReader reader,
+        IInteractionService interactionService,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await foreach (var line in reader.ReadLinesAsync(OnError, cancellationToken).ConfigureAwait(false))
+        {
+            yield return line;
+        }
+
+        bool OnError(Exception ex)
+        {
+            if (ex is IOException ioException &&
+                (ioException is HttpIOException { HttpRequestError: HttpRequestError.ResponseEnded } ||
+                SocketExceptionHelpers.IsConnectionReset(ioException)))
+            {
+                // Dashboard shutdown can truncate a chunked NDJSON response instead of sending its
+                // final chunk. Treat the closed follow stream like a backchannel disconnect, but
+                // keep request failures, invalid telemetry, and other I/O failures as errors.
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    interactionService.DisplayRawText(TelemetryCommandStrings.DashboardConnectionLost, ConsoleOutput.Error);
+                }
+
+                return true;
+            }
+
+            return false;
         }
     }
 
