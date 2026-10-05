@@ -2581,9 +2581,22 @@ function checkPatchUploadSafety(patchText) {
  * agent transcript, drops free-text output types, and validates the rest. When anything
  * is off-template, it empties the safe outputs and deletes the patches so no downstream
  * job, artifact, or summary carries the text, then fails the job naming only the field
- * and reason.
+ * and reason. Publication is authorized only after every filesystem operation succeeds;
+ * generated downstream steps must check both this step's outcome and publication_ready.
  */
 async function runAgentOutputScrub({ core, fs = require('node:fs'), env = process.env, workDir = '/tmp/gh-aw' }) {
+    try {
+        return scrubAgentOutputs({ core, fs, env, workDir });
+    } catch {
+        // Filesystem errors can include private paths or data. Report only a fixed reason;
+        // do not authorize publication even if some earlier cleanup operations succeeded.
+        const violations = [{ source: 'filesystem', reason: 'io-error' }];
+        core.setFailed('auto-sec agent output scrub failed: filesystem io-error');
+        return { kept: 0, dropped: 0, violations };
+    }
+}
+
+function scrubAgentOutputs({ core, fs, env, workDir }) {
     const path = require('node:path');
     for (const relative of AGENT_TRANSCRIPT_PATHS) {
         fs.rmSync(path.join(workDir, relative), { recursive: true, force: true });
@@ -2610,6 +2623,7 @@ async function runAgentOutputScrub({ core, fs = require('node:fs'), env = proces
         fs.writeFileSync(outputPath, kept.map(item => JSON.stringify(item)).join('\n') + (kept.length > 0 ? '\n' : ''));
     }
     core.info(`Agent output scrub kept ${kept.length} of ${lines.length} output(s).`);
+    core.setOutput('publication_ready', 'true');
     return { kept: kept.length, dropped: lines.length - kept.length, violations };
 }
 

@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Aspire.TestUtilities;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace Infrastructure.Tests;
 
@@ -769,6 +770,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         var result = await RunHarnessAsync(new JsonObject
         {
             ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
             ["outputLines"] = new JsonArray(
                 new JsonObject { ["type"] = "create_pull_request", ["branch"] = "auto-sec/security-updates", ["title"] = "Automated dependency updates", ["body"] = PublicTextBody.Replace("\r\n", "\n") }.ToJsonString(),
                 new JsonObject { ["type"] = "approve_dependabot_pr", ["pr_number"] = 101, ["head_sha"] = headSha, ["note"] = "fixes alert 42" }.ToJsonString(),
@@ -789,6 +791,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         });
 
         Assert.Empty(result["failures"]!.AsArray());
+        Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
         Assert.Equal(["agent_execution.json", "aw-auto-sec-security-updates.patch"], result["remaining"]!.AsArray().Select(name => name!.GetValue<string>()));
         var outputs = result["outputs"]!.AsArray().Select(line => JsonNode.Parse(line!.GetValue<string>())!).ToArray();
         Assert.Collection(
@@ -850,9 +854,172 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Equal([expected], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
         Assert.Empty(result["outputs"]!.AsArray());
         Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
         // The failure names the field and reason only, never the rejected text.
         var failure = Assert.Single(result["failures"]!.AsArray())!.GetValue<string>();
         Assert.DoesNotContain("alert 42", failure, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("rmSync", "sandbox/agent/logs", false)]
+    [InlineData("readFileSync", "outputs.jsonl", false)]
+    [InlineData("readFileSync", "aw-auto-sec-security-updates.patch", false)]
+    [InlineData("readdirSync", "", false)]
+    [InlineData("writeFileSync", "outputs.jsonl", false)]
+    [InlineData("writeFileSync", "outputs.jsonl", true)]
+    [InlineData("rmSync", "aw-auto-sec-security-updates.patch", true)]
+    public async Task AgentOutputScrubIoFailuresNeverAuthorizePublication(string operation, string path, bool invalidOutput)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["ioFailure"] = new JsonObject { ["operation"] = operation, ["path"] = path },
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "noop",
+                ["message"] = invalidOutput ? "synthetic private output" : "alerts=1 dependabot-pr=0 auto-sec-pr=0 blocked=1 code-findings-out-of-scope=0",
+            }.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+            ["workFiles"] = new JsonObject { ["sandbox/agent/logs/session.jsonl"] = "synthetic private transcript" },
+        });
+
+        Assert.Equal(["filesystem io-error"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Equal(["auto-sec agent output scrub failed: filesystem io-error"], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+        Assert.NotEmpty(result["remaining"]!.AsArray());
+        AssertPublicationGuards(File.ReadAllText(Path.Combine(RepoRoot.Path, ".github", "workflows", "auto-sec.lock.yml")));
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("success", "true", true)]
+    [InlineData("success", null, false)]
+    [InlineData("success", "false", false)]
+    [InlineData("failure", "true", false)]
+    [InlineData("skipped", "true", false)]
+    [InlineData("cancelled", "true", false)]
+    public async Task CompiledPublicationsRequireSuccessfulScrubAndExplicitAuthorization(string outcome, string? ready, bool expected)
+    {
+        var conditions = CompiledPublicationConditions();
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "publication-decisions",
+            ["conditions"] = conditions,
+            ["outcome"] = outcome,
+            ["stepOutputs"] = ready is null ? new JsonObject() : new JsonObject { ["publication_ready"] = ready },
+        });
+        Assert.Equal(expected ? conditions.Count : 0, result["publications"]!.AsArray().Count);
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public async Task PublicationGuardPreservesOtherJobsAndGatesEveryLaterStep(string newline)
+    {
+        var workflow = PublicationGuardFixture.ReplaceLineEndings(newline);
+        var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
+        var guarded = result["value"]!.GetValue<string>();
+        Assert.Equal(guarded, result["repeated"]!.GetValue<string>());
+        AssertPublicationGuards(guarded);
+        Assert.Equal(
+            workflow[..workflow.IndexOf("  agent:", StringComparison.Ordinal)],
+            guarded[..guarded.IndexOf("  agent:", StringComparison.Ordinal)]);
+        Assert.Equal(
+            workflow[workflow.IndexOf("  other_job:", StringComparison.Ordinal)..],
+            guarded[guarded.IndexOf("  other_job:", StringComparison.Ordinal)..]);
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("missing-agent")]
+    [InlineData("missing-scrub")]
+    [InlineData("duplicate-scrub")]
+    [InlineData("publication-before-scrub")]
+    [InlineData("missing-upload")]
+    public async Task PublicationGuardRejectsUnexpectedCompilerLayout(string scenario)
+    {
+        var workflow = PublicationGuardFixture.ReplaceLineEndings("\n");
+        workflow = scenario switch
+        {
+            "missing-agent" => workflow.Replace("  agent:", "  renamed_agent:", StringComparison.Ordinal),
+            "missing-scrub" => workflow.Replace("id: auto_sec_scrub", "id: renamed_scrub", StringComparison.Ordinal),
+            "duplicate-scrub" => workflow.Replace("      - name: Ingest agent output\n", "      - name: Ingest agent output\n        id: auto_sec_scrub\n", StringComparison.Ordinal),
+            "publication-before-scrub" => workflow.Replace("name: Before scrub", "name: Append agent step summary", StringComparison.Ordinal)
+                .Replace("name: Append agent step summary\n        if: always()", "name: Renamed summary\n        if: always()", StringComparison.Ordinal),
+            "missing-upload" => workflow.Replace("name: Upload agent artifacts", "name: Renamed upload", StringComparison.Ordinal),
+            _ => throw new InvalidOperationException(),
+        };
+        var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
+        Assert.StartsWith("auto-sec publication guard:", result["error"]!.GetValue<string>());
+    }
+
+    private const string PublicationGuardFixture = """
+        name: Fixture
+        jobs:
+          earlier_job:
+            steps:
+              - run: echo unchanged
+          agent:
+            steps:
+              - name: Before scrub
+                run: echo unchanged
+              - name: Scrub auto-sec agent transcript and outputs
+                id: auto_sec_scrub
+                if: always()
+                run: echo scrub
+              - name: Append agent step summary
+                if: always()
+                run: echo summary
+              - name: Ingest agent output
+                if: always()
+                run: echo ingest
+              - name: Future publication
+                run: echo future
+              - name: Conditional publication
+                if: steps.collect_output.outcome == 'success'
+                run: echo conditional
+              - name: Upload agent output fallback artifact
+                if: always()
+                uses: actions/upload-artifact@example
+              - name: Upload agent artifacts
+                if: always()
+                uses: actions/upload-artifact@example
+          other_job:
+            steps:
+              - run: echo unchanged
+        """;
+
+    private static void AssertPublicationGuards(string workflow)
+    {
+        var publications = PublicationSteps(workflow);
+        Assert.All(publications, step =>
+        {
+            var condition = step.Children[new YamlScalarNode("if")].ToString();
+            Assert.EndsWith(" && steps.auto_sec_scrub.outcome == 'success' && steps.auto_sec_scrub.outputs.publication_ready == 'true'", condition);
+        });
+    }
+
+    private static JsonArray CompiledPublicationConditions()
+        => new(PublicationSteps(File.ReadAllText(Path.Combine(RepoRoot.Path, ".github", "workflows", "auto-sec.lock.yml")))
+            .Select(step => (JsonNode?)JsonValue.Create(step.Children[new YamlScalarNode("if")].ToString())).ToArray());
+
+    private static YamlMappingNode[] PublicationSteps(string workflow)
+    {
+        var yaml = new YamlStream();
+        yaml.Load(new StringReader(workflow));
+        var root = Assert.IsType<YamlMappingNode>(Assert.Single(yaml.Documents).RootNode);
+        var jobs = Assert.IsType<YamlMappingNode>(root.Children[new YamlScalarNode("jobs")]);
+        var agent = Assert.IsType<YamlMappingNode>(jobs.Children[new YamlScalarNode("agent")]);
+        var steps = Assert.IsType<YamlSequenceNode>(agent.Children[new YamlScalarNode("steps")]).Children.Cast<YamlMappingNode>().ToArray();
+        var scrub = Assert.Single(steps, step => step.Children.TryGetValue(new YamlScalarNode("id"), out var id) && id.ToString() == "auto_sec_scrub");
+        Assert.Equal("always()", scrub.Children[new YamlScalarNode("if")].ToString());
+        var publications = steps[(Array.IndexOf(steps, scrub) + 1)..];
+        Assert.NotEmpty(publications);
+        return publications;
     }
 
     [Theory]

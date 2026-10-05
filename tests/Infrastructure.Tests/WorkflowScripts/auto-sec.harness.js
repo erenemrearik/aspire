@@ -10,7 +10,8 @@
 //   { mode: "push-gate", agentItems, pr, prOverrides } -> { value, info, failures }
 //   { mode: "patch-gate", patchFiles, workspaceFiles, branchFiles, responses, now } -> { value, info, failures, urls }
 //   { mode: "public-text-gate", agentItems, patchFiles } -> { value, info, failures }
-//   { mode: "agent-scrub", outputLines, patchFiles, workFiles } -> { value, info, failures, remaining, outputs }
+//   { mode: "agent-scrub", outputLines, patchFiles, workFiles, ioFailure } -> { value, info, failures, remaining, outputs, stepOutputs }
+//   { mode: "publication-guard", workflow } -> { value, repeated } or { error }
 // PRs may carry `head_repo` (defaults to microsoft/aspire) and `base_ref` (defaults to main).
 // Alerts may carry `vulnerable_version_range` and `advisory_ranges` (every range the
 // advisory lists for the package).
@@ -19,6 +20,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const gate = require(path.join(__dirname, '..', '..', '..', '.github', 'workflows', 'auto-sec', 'auto-sec.js'));
 
@@ -292,6 +294,7 @@ async function main() {
         case 'agent-scrub': {
             const info = [];
             const failures = [];
+            const stepOutputs = {};
             const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-'));
             const outputPath = path.join(workDir, 'outputs.jsonl');
             fs.writeFileSync(outputPath, (request.outputLines ?? []).join('\n'));
@@ -300,8 +303,26 @@ async function main() {
                 fs.writeFileSync(path.join(workDir, name), text);
             }
             try {
+                const scrubFs = new Proxy(fs, {
+                    get(target, property) {
+                        if (property !== request.ioFailure?.operation) {
+                            return target[property];
+                        }
+                        return (filename, ...args) => {
+                            if (path.relative(workDir, filename).replace(/\\/g, '/') === request.ioFailure.path) {
+                                throw Object.assign(new Error('EACCES synthetic private GHSA-xxxx content'), { code: 'EACCES' });
+                            }
+                            return target[property](filename, ...args);
+                        };
+                    },
+                });
                 const value = await gate.runAgentOutputScrub({
-                    core: { info: message => info.push(message), setFailed: message => failures.push(message) },
+                    core: {
+                        info: message => info.push(message),
+                        setFailed: message => failures.push(message),
+                        setOutput: (name, value) => { stepOutputs[name] = value; },
+                    },
+                    fs: scrubFs,
                     env: { GH_AW_SAFE_OUTPUTS: outputPath },
                     workDir,
                 });
@@ -310,10 +331,37 @@ async function main() {
                     .filter(name => name !== 'outputs.jsonl' && fs.statSync(path.join(workDir, name)).isFile())
                     .sort();
                 const outputs = fs.readFileSync(outputPath, 'utf8').split('\n').filter(line => line !== '');
-                result = { value, info, failures, remaining, outputs };
+                // Evaluate the actual generated conditions with Actions' always() behavior,
+                // so a failed scrub would expose the original unconditional publishers.
+                // Expressions come only from the trusted workflow fixture, never agent data.
+                const publications = (request.publicationConditions ?? []).filter(condition => vm.runInNewContext(condition, {
+                    steps: { auto_sec_scrub: { outcome: failures.length > 0 ? 'failure' : 'success', outputs: stepOutputs } },
+                    always: () => true,
+                    success: () => failures.length === 0,
+                }, { timeout: 1000 }));
+                result = { value, info, failures, remaining, outputs, stepOutputs, publications };
             } finally {
                 fs.rmSync(workDir, { recursive: true, force: true });
             }
+            break;
+        }
+        case 'publication-guard': {
+            const { guardPublications } = require(path.join(__dirname, '..', '..', '..', '.github', 'workflows', 'auto-sec', 'publication-guard.js'));
+            try {
+                const value = guardPublications(request.workflow);
+                result = { value, repeated: guardPublications(value) };
+            } catch (error) {
+                result = { error: error.message };
+            }
+            break;
+        }
+        case 'publication-decisions': {
+            const publications = request.conditions.filter(condition => vm.runInNewContext(condition, {
+                steps: { auto_sec_scrub: { outcome: request.outcome, outputs: request.stepOutputs } },
+                always: () => true,
+                success: () => request.outcome === 'success',
+            }, { timeout: 1000 }));
+            result = { publications };
             break;
         }
         default:

@@ -11,7 +11,9 @@ gh extension upgrade aw
 gh aw version
 gh aw fix
 gh aw compile --force-refresh-action-pins
+node .github/workflows/auto-sec/publication-guard.js
 gh aw compile
+node .github/workflows/auto-sec/publication-guard.js
 ```
 
 `gh aw fix` is a dry run unless `--write` is supplied. Its write mode also refreshes
@@ -111,6 +113,15 @@ Prerequisites:
 
 Because the compiler's Windows build mis-handles redaction paths, compile this
 workflow on Linux or WSL.
+
+After compiling `auto-sec`, run
+`node .github/workflows/auto-sec/publication-guard.js`. The pinned compiler emits
+`always()` on post-agent publication steps without a custom scrub-success hook.
+This deterministic compilation pass gates every step after the scrub on both its
+successful outcome and explicit `publication_ready` output. CI applies the same
+pass before checking generated-file drift. Failed or skipped scrubbing blocks
+summaries, output ingestion, and both artifact uploads even when filesystem errors
+leave private files on disk. Do not replace this gate with best-effort deletion.
 
 ## Main to Release 14.0 Synchronization
 

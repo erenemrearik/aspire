@@ -197,12 +197,17 @@ pre-agent-steps:
 secret-masking:
   steps:
     - name: Scrub auto-sec agent transcript and outputs
+      id: auto_sec_scrub
       if: always()
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       env:
         GH_AW_SAFE_OUTPUTS: ${{ steps.set-runtime-paths.outputs.GH_AW_SAFE_OUTPUTS }}
       with:
         script: await require(`${process.env.RUNNER_TEMP}/auto-sec-gate/auto-sec.js`).runAgentOutputScrub({ core });
+
+# The compiler has no post-agent publication condition hook. After compiling, run
+# node .github/workflows/auto-sec/publication-guard.js to gate every later agent step
+# on this scrub's successful outcome and explicit publication_ready output.
 
 safe-outputs:
   github-app:
