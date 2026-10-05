@@ -902,7 +902,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         var patch = PublicTextPatch.Replace("\r\n", "\n");
         var body = PublicTextBody.Replace("\r\n", "\n");
         var title = "Automated dependency updates";
-        var pushMessage = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21";
+        var pushMessage = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21\n@types/node 22.0.0 -> 22.1.0";
         var push = false;
         switch (scenario)
         {
@@ -1049,6 +1049,211 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
         Assert.Empty(result["failures"]!.AsArray());
         Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData("commit", "empty", false)]
+    [InlineData("commit", "missing", false)]
+    [InlineData("commit", "duplicate", false)]
+    [InlineData("commit", "normalized-duplicate", false)]
+    [InlineData("commit", "complete", true)]
+    [InlineData("commit", "reordered-normalized", true)]
+    [InlineData("push", "empty", false)]
+    [InlineData("push", "missing", false)]
+    [InlineData("push", "duplicate", false)]
+    [InlineData("push", "normalized-duplicate", false)]
+    [InlineData("push", "complete", true)]
+    [InlineData("push", "reordered-normalized", true)]
+    public async Task AgentOutputScrubRequiresCompleteCommitAndPushTuples(string field, string scenario, bool accepted)
+    {
+        const string complete = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21\n@types/node 22.0.0 -> 22.1.0";
+        var message = scenario switch
+        {
+            "empty" => "Update dependencies",
+            "missing" => "Update dependencies\n\nlodash 4.17.20 -> 4.17.21",
+            "duplicate" => complete + "\nlodash 4.17.20 -> 4.17.21",
+            "normalized-duplicate" => complete + "\nLODASH v4.17.20 -> v4.17.21",
+            "reordered-normalized" => "Update dependencies\n\n@types/node 22.0.0 -> 22.1.0\nLODASH v4.17.20 -> v4.17.21",
+            _ => complete,
+        };
+        var output = PublicOutputFixture("push_to_pull_request_branch");
+        output["message"] = field == "push" ? message : complete;
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["baseFiles"] = new JsonObject { ["extension/package-lock.json"] = PublicTextBase },
+            ["generatedPatch"] = new JsonObject
+            {
+                ["headFiles"] = new JsonObject
+                {
+                    ["extension/package-lock.json"] = PublicTextBase.Replace("4.17.20", "4.17.21", StringComparison.Ordinal).Replace("22.0.0", "22.1.0", StringComparison.Ordinal),
+                },
+                ["message"] = field == "commit" ? message : complete,
+            },
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        if (accepted)
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Single(result["outputs"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        }
+        else
+        {
+            var source = field == "commit" ? "aw-auto-sec-security-updates.patch" : "push_to_pull_request_branch.message";
+            var reason = scenario == "empty"
+                ? field == "commit" ? "non-template-commit-message" : "non-template-text"
+                : "incomplete-or-duplicate-summary";
+            Assert.Equal([$"{source} {reason}"],
+                result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Empty(result["remaining"]!.AsArray());
+            Assert.Null(result["stepOutputs"]!["publication_ready"]);
+            Assert.Empty(result["publications"]!.AsArray());
+        }
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData("complete", true)]
+    [InlineData("borrowed", false)]
+    [InlineData("extra-borrowed", false)]
+    [InlineData("empty", false)]
+    [InlineData("intermediate", false)]
+    public async Task AgentOutputScrubBindsRowsToEachCommitInAPatchSeries(string scenario, bool accepted)
+    {
+        const string node = "Update dependencies\n\n@types/node 22.0.0 -> 22.1.0";
+        const string lodash = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21";
+        var firstHead = PublicTextBase.Replace("22.0.0", "22.1.0", StringComparison.Ordinal);
+        if (scenario == "intermediate")
+        {
+            firstHead = PublicTextBase.Replace("22.0.0", "22.0.1", StringComparison.Ordinal);
+        }
+        var firstMessage = scenario switch
+        {
+            "borrowed" => lodash,
+            "extra-borrowed" => node + "\nlodash 4.17.20 -> 4.17.21",
+            "empty" => "Update dependencies",
+            "intermediate" => "Update dependencies\n\n@types/node 22.0.0 -> 22.0.1",
+            _ => node,
+        };
+        var output = PublicOutputFixture("push_to_pull_request_branch");
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["baseFiles"] = new JsonObject { ["extension/package-lock.json"] = PublicTextBase },
+            ["generatedPatch"] = new JsonObject
+            {
+                ["commits"] = new JsonArray(
+                    new JsonObject { ["headFiles"] = new JsonObject { ["extension/package-lock.json"] = firstHead }, ["message"] = firstMessage },
+                    new JsonObject
+                    {
+                        ["headFiles"] = new JsonObject { ["extension/package-lock.json"] = firstHead.Replace("4.17.20", "4.17.21", StringComparison.Ordinal).Replace("22.0.1", "22.1.0", StringComparison.Ordinal) },
+                        ["message"] = scenario == "intermediate" ? lodash + "\n@types/node 22.0.1 -> 22.1.0" : lodash,
+                    }),
+            },
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        if (accepted)
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        }
+        else
+        {
+            var reason = scenario == "empty" ? "non-template-commit-message" : "commit-row-not-in-patch";
+            var expected = scenario == "intermediate"
+                ? new[] { $"aw-auto-sec-security-updates.patch {reason}", $"aw-auto-sec-security-updates.patch {reason}" }
+                : [$"aw-auto-sec-security-updates.patch {reason}"];
+            Assert.Equal(expected,
+                result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Null(result["stepOutputs"]!["publication_ready"]);
+            Assert.Empty(result["publications"]!.AsArray());
+        }
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData("commit", "same-tuple", true)]
+    [InlineData("push", "same-tuple", true)]
+    [InlineData("commit", "same-tuple", false)]
+    [InlineData("push", "same-tuple", false)]
+    [InlineData("commit", "different-priors", true)]
+    [InlineData("push", "different-priors", true)]
+    [InlineData("commit", "different-priors", false)]
+    [InlineData("push", "different-priors", false)]
+    [InlineData("commit", "installed-copies", true)]
+    [InlineData("push", "installed-copies", true)]
+    [InlineData("commit", "installed-copies", false)]
+    [InlineData("push", "installed-copies", false)]
+    [InlineData("commit", "introduced", false)]
+    [InlineData("push", "introduced", false)]
+    public async Task AgentOutputScrubDeduplicatesManifestCopiesButCoversEveryPriorVersion(string field, string layout, bool accepted)
+    {
+        var files = layout is "installed-copies" or "introduced"
+            ? new JsonObject
+            {
+                ["extension/package-lock.json"] = """{"packages":{"node_modules/x":{"version":"1.0.0"},"node_modules/y/node_modules/x":{"version":"1.0.1"}}}""" + "\n",
+            }
+            : new JsonObject
+            {
+                ["one/package.json"] = """{"dependencies":{"x":"1.0.0"}}""" + "\n",
+                ["two/package.json"] = layout == "same-tuple"
+                    ? """{"dependencies":{"x":"1.0.0"}}""" + "\n"
+                    : """{"dependencies":{"x":"1.0.1"}}""" + "\n",
+            };
+        var heads = new JsonObject();
+        foreach (var path in files.Select(pair => pair.Key).ToArray())
+        {
+            var text = JsonNode.Parse(files[path]!.GetValue<string>())!.ToJsonString(new JsonSerializerOptions { WriteIndented = true }).ReplaceLineEndings("\n") + "\n";
+            files[path] = text;
+            heads[path] = text.Replace("1.0.0", "1.0.2", StringComparison.Ordinal).Replace("1.0.1", "1.0.2", StringComparison.Ordinal);
+        }
+        if (layout == "introduced")
+        {
+            var head = JsonNode.Parse(heads["extension/package-lock.json"]!.GetValue<string>())!;
+            head["packages"]!["node_modules/y"] = new JsonObject { ["version"] = "1.0.2" };
+            heads["extension/package-lock.json"] = head.ToJsonString(new JsonSerializerOptions { WriteIndented = true }).ReplaceLineEndings("\n") + "\n";
+        }
+        const string first = "Update dependencies\n\nx 1.0.0 -> 1.0.2";
+        var complete = layout == "same-tuple" ? first : first + "\nx 1.0.1 -> 1.0.2";
+        var message = accepted || layout == "introduced" ? complete : layout == "same-tuple" ? first + "\nx 1.0.0 -> 1.0.2" : first;
+        var output = PublicOutputFixture("push_to_pull_request_branch");
+        output["message"] = field == "push" ? message : complete;
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["baseFiles"] = files,
+            ["generatedPatch"] = new JsonObject { ["headFiles"] = heads, ["message"] = field == "commit" ? message : complete },
+            ["outputLines"] = layout == "introduced" && field == "commit" ? new JsonArray() : new JsonArray(output.ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        if (accepted)
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        }
+        else
+        {
+            var source = field == "commit" ? "aw-auto-sec-security-updates.patch" : "push_to_pull_request_branch.message";
+            var expected = layout == "introduced" && field == "push"
+                ? new[] { $"{source} incomplete-or-duplicate-summary", "aw-auto-sec-security-updates.patch incomplete-or-duplicate-summary" }
+                : [$"{source} incomplete-or-duplicate-summary"];
+            Assert.Equal(expected,
+                result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Empty(result["publications"]!.AsArray());
+        }
     }
 
     [Theory]
@@ -1470,8 +1675,10 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         }
         else
         {
-            var reason = transition == "none" ? "no-version-transitions" : "unbound-lockfile-metadata";
-            Assert.Equal([$"aw-auto-sec-security-updates.patch {reason}"],
+            string[] expected = transition == "none"
+                ? ["push_to_pull_request_branch.message non-template-text", "aw-auto-sec-security-updates.patch non-template-commit-message", "aw-auto-sec-security-updates.patch no-version-transitions"]
+                : ["aw-auto-sec-security-updates.patch unbound-lockfile-metadata"];
+            Assert.Equal(expected,
                 result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
             Assert.Empty(result["outputs"]!.AsArray());
             Assert.Empty(result["remaining"]!.AsArray());
@@ -1555,8 +1762,10 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         }
         else
         {
-            var reason = transition == "none" ? "no-version-transitions" : "unbound-lockfile-metadata";
-            Assert.Equal([$"aw-auto-sec-security-updates.patch {reason}"],
+            string[] expected = transition == "none"
+                ? ["push_to_pull_request_branch.message non-template-text", "aw-auto-sec-security-updates.patch non-template-commit-message", "aw-auto-sec-security-updates.patch no-version-transitions"]
+                : ["aw-auto-sec-security-updates.patch unbound-lockfile-metadata"];
+            Assert.Equal(expected,
                 result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
             Assert.Empty(result["outputs"]!.AsArray());
             Assert.Empty(result["remaining"]!.AsArray());
@@ -2335,7 +2544,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     private static JsonObject PublicOutputFixture(string type) => type switch
     {
         "create_pull_request" => new JsonObject { ["type"] = type, ["branch"] = "auto-sec/security-updates", ["title"] = "Automated dependency updates", ["body"] = PublicTextBody.Replace("\r\n", "\n") },
-        "push_to_pull_request_branch" => new JsonObject { ["type"] = type, ["pull_request_number"] = 202, ["message"] = "Update dependencies" },
+        "push_to_pull_request_branch" => new JsonObject { ["type"] = type, ["pull_request_number"] = 202, ["message"] = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21\n@types/node 22.0.0 -> 22.1.0" },
         "approve_dependabot_pr" => new JsonObject { ["type"] = type, ["pr_number"] = 101, ["head_sha"] = "0123456789abcdef0123456789abcdef01234567" },
         "noop" => new JsonObject { ["type"] = type, ["message"] = "alerts=1 dependabot-pr=0 auto-sec-pr=1 blocked=0 code-findings-out-of-scope=0" },
         _ => throw new ArgumentOutOfRangeException(nameof(type)),

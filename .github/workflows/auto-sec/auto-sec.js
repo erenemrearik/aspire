@@ -2890,18 +2890,18 @@ function publicLines(text) {
     return String(text ?? '').replace(/\r\n/g, '\n').trim().split('\n').map(line => line.trimEnd());
 }
 
-// A commit message must be `Update dependencies`, optionally followed by a blank line and
-// one `<name> <from> -> <to>` line per package.
+// A commit message must be `Update dependencies`, followed by a blank line and
+// at least one `<name> <from> -> <to>` line. Reconstruction verifies the complete set.
 function checkPublicCommitMessage(text) {
     const [subject, ...rest] = publicLines(text);
     if (subject !== PUBLIC_COMMIT_SUBJECT) {
         return false;
     }
     if (rest.length === 0) {
-        return true;
+        return false;
     }
     const [separator, ...updates] = rest;
-    return separator === '' && updates.length <= MAX_PUBLIC_ROWS && updates.every(line => parsePublicUpdate(line, 'commit') !== null);
+    return separator === '' && updates.length > 0 && updates.length <= MAX_PUBLIC_ROWS && updates.every(line => parsePublicUpdate(line, 'commit') !== null);
 }
 
 // Returns the table rows of a PR body that matches the fixed template, or null.
@@ -2938,7 +2938,7 @@ function parsePatchCommits(patchText) {
     let inHeaders = false;
     for (const line of String(patchText ?? '').split('\n').map(text => text.replace(/\r$/, ''))) {
         if (/^From [0-9a-f]{40} Mon Sep 17 00:00:00 2001$/.test(line)) {
-            current = { headers: [], message: [], diffstat: [], closed: false, inDiff: false };
+            current = { headers: [], message: [], diffstat: [], patch: [line], closed: false, inDiff: false };
             commits.push(current);
             inHeaders = true;
             continue;
@@ -2946,6 +2946,7 @@ function parsePatchCommits(patchText) {
         if (!current) {
             continue;
         }
+        current.patch.push(line);
         if (current.closed) {
             if (line.startsWith('diff --git ')) {
                 current.inDiff = true;
@@ -2973,14 +2974,35 @@ function parsePatchCommits(patchText) {
     return commits;
 }
 
+function publicVersionValue(version) {
+    return version.replace(/^[~^=<>v]+/, '');
+}
+
 function matchesPublicUpdate(row, updates) {
     return updates.some(update => (!row.manifest || row.manifest === update.manifest)
         && normalizePackageName(update.ecosystem, row.name) === normalizePackageName(update.ecosystem, update.name)
-        && sameVersion(row.to.replace(/^[~^=<>v]+/, ''), update.to)
-        && update.from.some(from => sameVersion(row.from.replace(/^[~^=<>v]+/, ''), from)));
+        && sameVersion(publicVersionValue(row.to), update.to)
+        && update.from.some(from => sameVersion(publicVersionValue(row.from), from)));
 }
 
-function checkPatchCommits(patchText, updates = null) {
+function isCompletePublicCommitSummary(rows, updates) {
+    // One package/target can replace several installed versions. Commit rows have
+    // no manifest column, so cover every prior-version tuple and deduplicate only
+    // identical tuples, including those repeated across manifests.
+    const expected = updates.flatMap(update => update.from.map(from => ({ ...update, from: [from] })));
+    return expected.length > 0 && rows.length > 0 && updates.every(update => update.from.length > 0)
+        && rows.every(row => matchesPublicUpdate(row, updates))
+        && expected.every(update => rows.some(row => matchesPublicUpdate(row, [update])))
+        && rows.every((row, index) => {
+            const update = updates.find(change => matchesPublicUpdate(row, [change]));
+            return !rows.slice(0, index).some(other =>
+                normalizePackageName(update.ecosystem, row.name) === normalizePackageName(update.ecosystem, other.name)
+                && sameVersion(publicVersionValue(row.from), publicVersionValue(other.from))
+                && sameVersion(publicVersionValue(row.to), publicVersionValue(other.to)));
+        });
+}
+
+function checkPatchCommits(patchText, updates = null, readBaseTexts) {
     const reasons = [];
     const commits = parsePatchCommits(patchText);
     if (commits.length === 0) {
@@ -3001,7 +3023,21 @@ function checkPatchCommits(patchText, updates = null) {
         || commits.some(commit => commit.diffstat.some(line => !publicDiffstat(line))))) {
         reasons.push('unsupported-patch-text');
     }
+    const previousHeads = new Map();
     for (const commit of commits) {
+        const commitUpdates = [];
+        if (updates) {
+            const rebuilt = new Map();
+            checkPatchContents(commit.patch.join('\n'),
+                (path, blob) => previousHeads.has(path) ? [previousHeads.get(path)] : readBaseTexts(path, blob), rebuilt);
+            for (const [manifest, { base, head }] of rebuilt) {
+                previousHeads.set(manifest, head);
+                const ecosystem = PATH_ECOSYSTEMS.get(basenameOf(manifest).toLowerCase());
+                if (ecosystem) {
+                    commitUpdates.push(...manifestVersionChanges(manifest, base, head, ecosystem).map(change => ({ manifest, ecosystem, ...change })));
+                }
+            }
+        }
         const headers = new Map();
         let unknownHeader = false;
         for (const header of commit.headers) {
@@ -3041,8 +3077,15 @@ function checkPatchCommits(patchText, updates = null) {
         const message = [subject, '', ...commit.message].join('\n');
         if (!checkPublicCommitMessage(message)) {
             reasons.push('non-template-commit-message');
-        } else if (updates && !publicLines(message).slice(2).every(line => matchesPublicUpdate(parsePublicUpdate(line, 'commit'), updates))) {
-            reasons.push('commit-row-not-in-patch');
+        } else if (updates) {
+            const rows = publicLines(message).slice(2).map(line => parsePublicUpdate(line, 'commit'));
+            // Keep final-state binding too: an intermediate version absent from the
+            // final reconstructed files has not passed the artifact's version policy.
+            if (!rows.every(row => matchesPublicUpdate(row, updates) && matchesPublicUpdate(row, commitUpdates))) {
+                reasons.push('commit-row-not-in-patch');
+            } else if (!isCompletePublicCommitSummary(rows, commitUpdates)) {
+                reasons.push('incomplete-or-duplicate-summary');
+            }
         }
     }
     return reasons;
@@ -3086,7 +3129,7 @@ function checkPublicText(items, patches, readBaseTexts = () => []) {
                     // several installed versions or repeats the package in multiple hunks.
                     return row.manifest === other.manifest
                         && normalizePackageName(ecosystem, row.name) === normalizePackageName(ecosystem, other.name)
-                        && sameVersion(row.to.replace(/^[~^=<>v]+/, ''), other.to.replace(/^[~^=<>v]+/, ''));
+                        && sameVersion(publicVersionValue(row.to), publicVersionValue(other.to));
                 }))) {
                 violations.push({ source: 'create_pull_request.body', reason: 'incomplete-or-duplicate-summary' });
             }
@@ -3095,11 +3138,13 @@ function checkPublicText(items, patches, readBaseTexts = () => []) {
                 violations.push({ source: 'push_to_pull_request_branch.message', reason: 'non-template-text' });
             } else if (!publicLines(item.message).slice(2).every(line => matchesPublicUpdate(parsePublicUpdate(line, 'commit'), updates))) {
                 violations.push({ source: 'push_to_pull_request_branch.message', reason: 'row-not-in-patch' });
+            } else if (!isCompletePublicCommitSummary(publicLines(item.message).slice(2).map(line => parsePublicUpdate(line, 'commit')), updates)) {
+                violations.push({ source: 'push_to_pull_request_branch.message', reason: 'incomplete-or-duplicate-summary' });
             }
         }
     }
     for (const [name, text] of patches) {
-        violations.push(...checkPatchCommits(text, updates.filter(update => update.artifact === name)).map(reason => ({ source: name, reason })));
+        violations.push(...checkPatchCommits(text, updates.filter(update => update.artifact === name), readBaseTexts).map(reason => ({ source: name, reason })));
     }
     return violations;
 }

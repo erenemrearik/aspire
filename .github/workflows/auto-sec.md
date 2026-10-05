@@ -550,8 +550,14 @@ block publication; do not substitute package names mentioned elsewhere in the di
 Confirm
 only dependency manifests changed, no new registry host appears, and every version
 change is within the same major. Commit once with exactly this message: the subject
-`Update dependencies`, a blank line, then one line per package
-(`<name> <from> -> <to>`, for example `lodash 4.17.20 -> 4.17.21`). Use the default
+`Update dependencies`, a blank line, then one line per distinct package/from/target
+tuple (`<name> <from> -> <to>`, for example `lodash 4.17.20 -> 4.17.21`).
+Cover every reconstructed prior version and target; identical tuples repeated
+across manifests appear only once. Empty, partial, and duplicate summaries are
+rejected, including case and version-prefix aliases. Each commit must describe
+its own changes, and a push message must cover the complete emitted patch batch.
+Intermediate-only targets absent from the final reconstructed files remain blocked.
+Do not invent a prior version for a newly introduced package. Use the default
 git identity; never pass `--author` or change `user.name`/`user.email`. The
 safe-output job rejects any other commit message, author, title, or body.
 

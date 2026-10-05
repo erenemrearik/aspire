@@ -373,14 +373,18 @@ async function main() {
                                 GIT_AUTHOR_DATE: '2026-10-03T09:00:00+00:00', GIT_COMMITTER_DATE: '2026-10-03T09:00:00+00:00',
                             } };
                             baseSha = exec('git', ['commit-tree', baseSha, '-m', 'Fixture base'], commitOptions).toString().trim();
-                            for (const [file, text] of Object.entries(request.generatedPatch.headFiles)) {
-                                fs.writeFileSync(path.join(checkout, file), text);
+                            let head = baseSha;
+                            for (const commit of request.generatedPatch.commits ?? [request.generatedPatch]) {
+                                for (const [file, text] of Object.entries(commit.headFiles)) {
+                                    fs.mkdirSync(path.dirname(path.join(checkout, file)), { recursive: true });
+                                    fs.writeFileSync(path.join(checkout, file), text);
+                                }
+                                exec('git', ['-c', 'core.autocrlf=false', 'add', '--all'], options);
+                                const headTree = exec('git', ['write-tree'], options).toString().trim();
+                                head = exec('git', ['commit-tree', headTree, '-p', head, '-F', '-'],
+                                    { ...commitOptions, input: commit.message }).toString().trim();
                             }
-                            exec('git', ['-c', 'core.autocrlf=false', 'add', '--all'], options);
-                            const headTree = exec('git', ['write-tree'], options).toString().trim();
-                            const head = exec('git', ['commit-tree', headTree, '-p', baseSha, '-F', '-'],
-                                { ...commitOptions, input: request.generatedPatch.message }).toString().trim();
-                            const format = ['format-patch', '--stdout', '-1', head, ...(request.generatedPatch.fullIndex ? ['--full-index'] : [])];
+                            const format = ['format-patch', '--stdout', `${baseSha}..${head}`, ...(request.generatedPatch.fullIndex ? ['--full-index'] : [])];
                             let patch = exec('git', format, commitOptions).toString();
                             if (request.generatedPatch.embedBaseCommit) {
                                 patch = patch.replace(/^(From [^\n]*\n)/, `$1X-GH-AW-Base-Commit: ${baseSha}\n`);

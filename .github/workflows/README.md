@@ -137,6 +137,12 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   to its first bound cannot prove changes to the other bounds non-breaking.
   Public summary rows are bound to reconstructed manifest/package/version changes,
   covering every update exactly once per manifest/package/target in the emitted batch.
+  Commit and push summaries instead cover each distinct package/from/target tuple
+  exactly once, including all prior versions and coalescing identical tuples across
+  manifests. Each commit is bound to its own reconstructed changes; the push message
+  covers the complete batch. Empty, partial, and normalized duplicate summaries
+  cannot authorize publication. Intermediate-only targets absent from final files
+  remain blocked by the final-state version-policy boundary.
   A created PR's fixed body explicitly identifies its table as the initial batch,
   not a cumulative inventory; subsequent updates remain in validated commit messages
   and the full branch diff. A live cumulative body refresh is not implemented.
