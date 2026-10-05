@@ -3,7 +3,6 @@
 
 #pragma warning disable ASPIRECOMPUTE002 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 #pragma warning disable ASPIREPIPELINES001
-#pragma warning disable ASPIREDOTNETPROJECT001
 
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Kubernetes.Resources;
