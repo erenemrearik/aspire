@@ -136,8 +136,11 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   Compound npm selector edits also require human intervention: reducing `>=1 <2`
   to its first bound cannot prove changes to the other bounds non-breaking.
   Public summary rows are bound to reconstructed manifest/package/version changes,
-  covering every update exactly once per manifest/package/target. Counts-only reports
-  require unique, positive blocked-reason counts whose sum equals the blocked total;
+  covering every update exactly once per manifest/package/target in the emitted batch.
+  A created PR's fixed body explicitly identifies its table as the initial batch,
+  not a cumulative inventory; subsequent updates remain in validated commit messages
+  and the full branch diff. A live cumulative body refresh is not implemented.
+  Counts-only reports require unique, positive blocked-reason counts whose sum equals the blocked total;
   the breakdown is omitted only when that total is zero.
   Manifest paths must be canonical repository-relative paths; dot-segment aliases,
   rooted paths, backslashes, and empty path segments cannot authorize publication.
@@ -156,6 +159,13 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   all other entries, including prompts and telemetry, are removed before summaries
   can consume them. Telemetry-dependent framework steps report that telemetry is
   withheld rather than parsing agent-written files or fabricating zero metrics.
+  The compiler hardening also redirects the gateway and agent host-shell stdout
+  and stderr to `/dev/null` before execution, including inherited child streams.
+  Alert collection suppresses its own diagnostics. Pre-scrub error detection and
+  secret-redaction parsers are withheld because they can re-emit private log data;
+  their transcript-derived classifications are unavailable, not reported as zero.
+  GitHub still records actual execution failures and exit statuses. Unsupported
+  execution layouts fail compilation rather than silently losing this boundary.
 
 Prerequisites:
 - The `auto-sec` label must exist.

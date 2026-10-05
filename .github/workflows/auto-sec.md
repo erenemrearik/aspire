@@ -91,6 +91,9 @@ pre-agent-steps:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
     run: |
+      # Suppress CLI diagnostics before any private alert response is processed.
+      # The runner still records the exit status; public counts come from the scrub.
+      exec >/dev/null 2>&1
       set -euo pipefail
       mkdir -p .auto-sec
 
@@ -190,7 +193,8 @@ pre-agent-steps:
       echo "Open Dependabot PRs: $(jq length .auto-sec/dependabot-prs.json)"
       echo "Open auto-sec PRs: $(jq length .auto-sec/auto-sec-prs.json)"
 
-# Runs in the agent job right after the built-in secret redaction, before the step
+# Runs in the agent job after the framework's secret-redaction slot (whose parser
+# the hardening pass withholds), before the step
 # summaries, the safe-output ingestion, and the public `agent` artifact upload. The
 # agent reads private alert details, so this deletes its transcript and logs, drops
 # free-text outputs, and empties the outputs and patches if anything is off-template.
@@ -210,6 +214,8 @@ secret-masking:
 # on this scrub's successful outcome and explicit publication_ready output, and
 # restrict uploads to validated outputs and the two canonical patch filenames.
 # Telemetry-dependent summaries report withholding instead of parsing writable files.
+# The same pass suppresses host-shell streams before the gateway and agent start,
+# and withholds pre-scrub diagnostic parsers that could re-emit private log content.
 
 safe-outputs:
   github-app:
@@ -416,7 +422,10 @@ these states:
 
 ## Inputs
 
-The pre-agent step wrote these files (read them with `cat`/`jq`):
+The pre-agent step wrote these private files (read them with `cat`/`jq`).
+The compiled logging boundary suppresses gateway/agent stdout and stderr before
+execution; the later scrub separately prevents transcript and artifact publication.
+Do not print alert contents into public safe outputs:
 
 - `.auto-sec/alerts.json`: open Dependabot alerts. `malware: true` marks malware
   alerts; they have no `first_patched_version`, and the only fix is moving to a
@@ -565,6 +574,9 @@ code-writing requests are rejected before publication.
   | Package | Manifest | From | To |
   | --- | --- | --- | --- |
   | ... | ... | ... | ... |
+
+  This table records the initial update batch. Subsequent automated updates are
+  listed in the commit history; review the full branch diff for the current changes.
 
   No package sources or feeds were changed. Please review the lockfile diffs and
   CI results before merging.

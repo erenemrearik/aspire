@@ -12,6 +12,7 @@
 //   { mode: "public-text-gate", agentItems, patchFiles } -> { value, info, failures }
 //   { mode: "agent-scrub", outputLines, patchFiles, workFiles, ioFailure } -> { value, info, failures, remaining, outputs, stepOutputs }
 //   { mode: "publication-guard", workflow } -> { value, repeated } or { error }
+//   { mode: "private-shell", script } -> { stdout, stderr, exitCode }
 // PRs may carry `head_repo` (defaults to microsoft/aspire) and `base_ref` (defaults to main).
 // Alerts may carry `vulnerable_version_range` and `advisory_ranges` (every range the
 // advisory lists for the package).
@@ -464,6 +465,20 @@ async function main() {
             } catch (error) {
                 result = { error: error.message };
             }
+            break;
+        }
+        case 'private-shell': {
+            const { spawnSync } = require('node:child_process');
+            const child = spawnSync('bash', ['-e', '-s'], {
+                input: request.script,
+                encoding: 'utf8',
+                windowsHide: true,
+                timeout: 30000,
+            });
+            if (child.error) {
+                throw child.error;
+            }
+            result = { stdout: child.stdout, stderr: child.stderr, exitCode: child.status };
             break;
         }
         case 'publication-decisions': {

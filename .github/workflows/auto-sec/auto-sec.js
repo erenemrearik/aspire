@@ -2842,6 +2842,9 @@ const PUBLIC_PR_BODY_HEAD = [
 ];
 const PUBLIC_PR_BODY_TAIL = [
     '',
+    'This table records the initial update batch. Subsequent automated updates are',
+    'listed in the commit history; review the full branch diff for the current changes.',
+    '',
     'No package sources or feeds were changed. Please review the lockfile diffs and',
     'CI results before merging.',
 ];

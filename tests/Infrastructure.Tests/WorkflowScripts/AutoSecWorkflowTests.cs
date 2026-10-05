@@ -772,9 +772,34 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         | lodash | extension/package-lock.json | 4.17.20 | 4.17.21 |
         | `@types/node` | extension/package-lock.json | 22.0.0 | 22.1.0 |
 
+        This table records the initial update batch. Subsequent automated updates are
+        listed in the commit history; review the full branch diff for the current changes.
+
         No package sources or feeds were changed. Please review the lockfile diffs and
         CI results before merging.
         """;
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task PublicTextGateRequiresInitialBatchQualification()
+    {
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = PublicTextBody.ReplaceLineEndings("\n").Replace(
+            "This table records the initial update batch. Subsequent automated updates are\n"
+            + "listed in the commit history; review the full branch diff for the current changes.\n\n",
+            "", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "public-text-gate",
+            ["useCheckedOutBases"] = true,
+            ["workspaceFiles"] = new JsonObject { ["extension/package-lock.json"] = PublicTextBase },
+            ["agentItems"] = new JsonArray(output),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch },
+        });
+
+        Assert.Equal(["create_pull_request.body non-template-text"],
+            result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+    }
 
     [Theory]
     [RequiresTools(["node"])]
@@ -2472,6 +2497,84 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     }
 
     [Theory]
+    [RequiresTools(["node", "bash"])]
+    [InlineData(0)]
+    [InlineData(23)]
+    public async Task PublicationGuardSuppressesLiveAgentStreamsWithoutChangingExitStatus(int exitCode)
+    {
+        var script = $"set -x\nsh -c 'printf \"private-alert-123\\n\"; printf \"private-range-malware\\n\" >&2; exit {exitCode}'\n";
+        var unguarded = await RunHarnessAsync(new JsonObject { ["mode"] = "private-shell", ["script"] = script });
+        Assert.Equal("private-alert-123\n", unguarded["stdout"]!.GetValue<string>().ReplaceLineEndings("\n"));
+        Assert.Contains("private-range-malware", unguarded["stderr"]!.GetValue<string>());
+        Assert.Equal(exitCode, unguarded["exitCode"]!.GetValue<int>());
+
+        var workflow = PublicationGuardFixture.ReplaceLineEndings("\n").Replace(
+            "          echo private-agent\n", string.Concat(script.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => $"          {line}\n")),
+            StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
+        var guarded = result["value"]!.GetValue<string>();
+        var execution = Assert.Single(AgentSteps(guarded),
+            step => step.Children.TryGetValue(new YamlScalarNode("id"), out var id) && id.ToString() == "agentic_execution");
+        var quiet = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "private-shell",
+            ["script"] = execution.Children[new YamlScalarNode("run")].ToString(),
+        });
+
+        Assert.Equal("", quiet["stdout"]!.GetValue<string>());
+        Assert.Equal("", quiet["stderr"]!.GetValue<string>());
+        Assert.Equal(exitCode, quiet["exitCode"]!.GetValue<int>());
+        Assert.Equal(guarded, result["repeated"]!.GetValue<string>());
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task PublicationGuardWithholdsPrivateDiagnosticsBeforeScrubbing()
+    {
+        var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = PublicationGuardFixture });
+        var steps = AgentSteps(result["value"]!.GetValue<string>());
+        foreach (var name in new[] { "Detect agent errors", "Redact secrets in logs" })
+        {
+            var step = Assert.Single(steps, step => step.Children[new YamlScalarNode("name")].ToString() == name);
+            Assert.Equal("echo \"Auto-sec withholds agent-writable telemetry.\"", step.Children[new YamlScalarNode("run")].ToString());
+            Assert.Equal("always()", step.Children[new YamlScalarNode("if")].ToString());
+            Assert.False(step.Children.ContainsKey(new YamlScalarNode("uses")));
+            Assert.False(step.Children.ContainsKey(new YamlScalarNode("with")));
+        }
+        var cleanup = Assert.Single(steps, step => step.Children[new YamlScalarNode("name")].ToString() == "Stop MCP Gateway");
+        Assert.Equal("exec >/dev/null 2>&1\nbash stop-gateway.sh\n", cleanup.Children[new YamlScalarNode("run")].ToString());
+    }
+
+    [Theory]
+    [RequiresTools(["node", "bash"])]
+    [InlineData(0)]
+    [InlineData(23)]
+    public async Task PublicationGuardPreservesGatewayMaskAndSuppressesBackgroundChildStreams(int exitCode)
+    {
+        var script = $"sh -c 'printf \"private-gateway\\n\"; printf \"private-gateway-error\\n\" >&2; exit {exitCode}' &\nwait $!\n";
+        var original = await RunHarnessAsync(new JsonObject { ["mode"] = "private-shell", ["script"] = script });
+        Assert.Equal("private-gateway\n", original["stdout"]!.GetValue<string>().ReplaceLineEndings("\n"));
+        Assert.Equal("private-gateway-error\n", original["stderr"]!.GetValue<string>().ReplaceLineEndings("\n"));
+        Assert.Equal(exitCode, original["exitCode"]!.GetValue<int>());
+        var workflow = PublicationGuardFixture.ReplaceLineEndings("\n").Replace(
+            "          echo start-gateway\n", string.Concat(script.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => $"          {line}\n")),
+            StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
+        var gateway = Assert.Single(AgentSteps(result["value"]!.GetValue<string>()),
+            step => step.Children[new YamlScalarNode("name")].ToString() == "Start MCP Gateway");
+        var quiet = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "private-shell",
+            ["script"] = gateway.Children[new YamlScalarNode("run")].ToString(),
+        });
+
+        Assert.Equal("::add-mask::fixture-gateway-id\n", quiet["stdout"]!.GetValue<string>().ReplaceLineEndings("\n"));
+        Assert.Equal("", quiet["stderr"]!.GetValue<string>());
+        Assert.Equal(exitCode, quiet["exitCode"]!.GetValue<int>());
+        Assert.Equal(result["value"]!.GetValue<string>(), result["repeated"]!.GetValue<string>());
+    }
+
+    [Theory]
     [RequiresTools(["node"])]
     [InlineData("\n", "      - run: echo future")]
     [InlineData("\r\n", "      - run: echo future")]
@@ -2582,6 +2685,12 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("missing-upload-path")]
     [InlineData("duplicate-condition")]
     [InlineData("empty-condition")]
+    [InlineData("missing-execution")]
+    [InlineData("duplicate-execution")]
+    [InlineData("execution-after-scrub")]
+    [InlineData("unexpected-private-action")]
+    [InlineData("missing-gateway-mask")]
+    [InlineData("late-mcp-cli-mount")]
     public async Task PublicationGuardRejectsUnexpectedCompilerLayout(string scenario)
     {
         var workflow = PublicationGuardFixture.ReplaceLineEndings("\n");
@@ -2598,6 +2707,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
                 "      - name: Future publication\n        if: always()\n        if: success()\n", StringComparison.Ordinal),
             "empty-condition" => workflow.Replace("      - name: Future publication\n",
                 "      - name: Future publication\n        if:\n", StringComparison.Ordinal),
+            "missing-execution" => workflow.Replace("id: agentic_execution", "id: renamed_execution", StringComparison.Ordinal),
+            "duplicate-execution" => workflow.Replace("name: Before scrub\n", "name: Before scrub\n        id: agentic_execution\n", StringComparison.Ordinal),
+            "execution-after-scrub" => workflow.Replace("id: agentic_execution", "id: renamed_execution", StringComparison.Ordinal)
+                .Replace("name: Future publication\n", "name: Future publication\n        id: agentic_execution\n", StringComparison.Ordinal),
+            "unexpected-private-action" => workflow.Replace("        run: bash stop-gateway.sh", "        uses: unexpected/action@example", StringComparison.Ordinal),
+            "missing-gateway-mask" => workflow.Replace("echo \"::add-mask::${MCP_GATEWAY_AGENT_ID}\"", "echo renamed-mask", StringComparison.Ordinal),
+            "late-mcp-cli-mount" => workflow.Replace("name: Stop MCP Gateway", "name: Mount MCP servers as CLIs", StringComparison.Ordinal)
+                .Replace("        run: bash stop-gateway.sh", "        uses: actions/github-script@example", StringComparison.Ordinal),
             _ => throw new InvalidOperationException(),
         };
         var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
@@ -2621,6 +2738,29 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             steps:
               - name: Before scrub
                 run: echo unchanged
+              - name: Start MCP Gateway
+                run: |
+                  MCP_GATEWAY_AGENT_ID=fixture-gateway-id
+                  echo "::add-mask::${MCP_GATEWAY_AGENT_ID}"
+                  echo start-gateway
+              - name: Execute GitHub Copilot CLI
+                id: agentic_execution
+                run: |
+                  echo private-agent
+              - name: Detect agent errors
+                id: detect-agent-errors
+                if: always()
+                uses: actions/github-script@example
+                with:
+                  script: console.log('private diagnostic');
+              - name: Stop MCP Gateway
+                if: always()
+                run: bash stop-gateway.sh
+              - name: Redact secrets in logs
+                if: always()
+                uses: actions/github-script@example
+                with:
+                  script: console.log('private diagnostic');
               - name: Scrub auto-sec agent transcript and outputs
                 id: auto_sec_scrub
                 if: always()
@@ -2683,6 +2823,28 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         }
     }
 
+    [Fact]
+    public void CompiledPrivateExecutionSuppressesStreamsAndWithholdsDiagnosticParsers()
+    {
+        var steps = AgentSteps(File.ReadAllText(Path.Combine(RepoRoot.Path, ".github", "workflows", "auto-sec.lock.yml")));
+        var execution = Assert.Single(steps,
+            step => step.Children.TryGetValue(new YamlScalarNode("id"), out var id) && id.ToString() == "agentic_execution");
+        Assert.StartsWith("exec >/dev/null 2>&1\n", execution.Children[new YamlScalarNode("run")].ToString());
+        var gateway = Assert.Single(steps, step => step.Children[new YamlScalarNode("name")].ToString() == "Start MCP Gateway");
+        Assert.Contains("echo \"::add-mask::${MCP_GATEWAY_AGENT_ID}\"\nexec >/dev/null 2>&1\n",
+            gateway.Children[new YamlScalarNode("run")].ToString());
+        var collection = Assert.Single(steps, step => step.Children[new YamlScalarNode("name")].ToString() == "Collect alerts and Dependabot pull requests");
+        Assert.Contains("exec >/dev/null 2>&1", collection.Children[new YamlScalarNode("run")].ToString());
+        Assert.True(collection.Children[new YamlScalarNode("run")].ToString().IndexOf("exec >/dev/null 2>&1", StringComparison.Ordinal)
+            < collection.Children[new YamlScalarNode("run")].ToString().IndexOf("gh api", StringComparison.Ordinal));
+        foreach (var name in new[] { "Detect agent errors", "Redact secrets in logs" })
+        {
+            var diagnostic = Assert.Single(steps, step => step.Children[new YamlScalarNode("name")].ToString() == name);
+            Assert.Equal("echo \"Auto-sec withholds agent-writable telemetry.\"", diagnostic.Children[new YamlScalarNode("run")].ToString());
+            Assert.False(diagnostic.Children.ContainsKey(new YamlScalarNode("uses")));
+        }
+    }
+
     private static readonly string[] s_privateTelemetryStepNames =
     [
         "Append agent step summary",
@@ -2717,17 +2879,22 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     private static YamlMappingNode[] PublicationSteps(string workflow)
     {
-        var yaml = new YamlStream();
-        yaml.Load(new StringReader(workflow));
-        var root = Assert.IsType<YamlMappingNode>(Assert.Single(yaml.Documents).RootNode);
-        var jobs = Assert.IsType<YamlMappingNode>(root.Children[new YamlScalarNode("jobs")]);
-        var agent = Assert.IsType<YamlMappingNode>(jobs.Children[new YamlScalarNode("agent")]);
-        var steps = Assert.IsType<YamlSequenceNode>(agent.Children[new YamlScalarNode("steps")]).Children.Cast<YamlMappingNode>().ToArray();
+        var steps = AgentSteps(workflow);
         var scrub = Assert.Single(steps, step => step.Children.TryGetValue(new YamlScalarNode("id"), out var id) && id.ToString() == "auto_sec_scrub");
         Assert.Equal("always()", scrub.Children[new YamlScalarNode("if")].ToString());
         var publications = steps[(Array.IndexOf(steps, scrub) + 1)..];
         Assert.NotEmpty(publications);
         return publications;
+    }
+
+    private static YamlMappingNode[] AgentSteps(string workflow)
+    {
+        var yaml = new YamlStream();
+        yaml.Load(new StringReader(workflow));
+        var root = Assert.IsType<YamlMappingNode>(Assert.Single(yaml.Documents).RootNode);
+        var jobs = Assert.IsType<YamlMappingNode>(root.Children[new YamlScalarNode("jobs")]);
+        var agent = Assert.IsType<YamlMappingNode>(jobs.Children[new YamlScalarNode("agent")]);
+        return Assert.IsType<YamlSequenceNode>(agent.Children[new YamlScalarNode("steps")]).Children.Cast<YamlMappingNode>().ToArray();
     }
 
     [Theory]
