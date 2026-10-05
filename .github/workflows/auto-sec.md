@@ -203,7 +203,7 @@ secret-masking:
       env:
         GH_AW_SAFE_OUTPUTS: ${{ steps.set-runtime-paths.outputs.GH_AW_SAFE_OUTPUTS }}
       with:
-        script: await require(`${process.env.RUNNER_TEMP}/auto-sec-gate/auto-sec.js`).runAgentOutputScrub({ core });
+        script: await require(`${process.env.RUNNER_TEMP}/auto-sec-gate/auto-sec.js`).runAgentOutputScrub({ core, github, context });
 
 # The compiler has no post-agent publication condition hook. After compiling, run
 # node .github/workflows/auto-sec/publication-guard.js to gate every later agent step
@@ -320,7 +320,7 @@ safe-outputs:
       with:
         script: |
           const gate = require(`${process.env.GITHUB_WORKSPACE}/.github/workflows/auto-sec/auto-sec.js`);
-          await gate.runPublicTextGate({ core });
+          await gate.runPublicTextGate({ core, github, context });
   jobs:
     approve-dependabot-pr:
       name: "Approve Dependabot PR"
@@ -508,11 +508,15 @@ If no compliant version exists yet, use `blocked: no-version-past-cooldown`. If 
 command fails or the result does not resolve, revert that directory with
 `git checkout -- <dir>` and use `blocked: update-failed`.
 
-After the edits, review `git diff --stat` and `git diff` for each lockfile. JSON
-lockfile additions are restricted to pretty-printed dependency/version/artifact
+After the edits, review `git diff --stat` and `git diff` for each lockfile. All
+lockfile additions are restricted to recognized dependency/version/artifact
 data; new metadata such as descriptions, notes, funding, or license text is not
 supported. If regeneration requires unsupported metadata, revert that directory
 and mark it `blocked: update-failed`.
+
+Summary rows must match the exact manifest, package, old version, and new version
+in a fully reconstructed patch. Missing trusted bases or unsupported scalar encodings
+block publication; do not substitute package names mentioned elsewhere in the diff.
 
 Confirm
 only dependency manifests changed, no new registry host appears, and every version

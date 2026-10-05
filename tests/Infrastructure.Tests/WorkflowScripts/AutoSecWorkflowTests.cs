@@ -653,7 +653,9 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Equal(expectedReason.Length == 0 ? [] : [$"extension/package-lock.json {expectedReason}"], violations);
     }
 
-    private const string PublicTextPatch = """
+    private const string PublicTextBase = "{\n  \"packages\": {\n    \"node_modules/lodash\": {\n      \"version\": \"4.17.20\",\n      \"dev\": true\n    },\n\n\n    \"node_modules/@types/node\": {\n      \"version\": \"22.0.0\",\n      \"dev\": true\n    }\n  }\n}\n";
+
+    private static string PublicTextPatch => """
         From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001
         From: "github-actions[bot]" <github-actions[bot]@users.noreply.github.com>
         Date: Sat, 3 Oct 2026 09:00:00 +0000
@@ -669,20 +671,20 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         index 1111111..2222222 100644
         --- a/extension/package-lock.json
         +++ b/extension/package-lock.json
-        @@ -1,3 +1,3 @@
+        @@ -3,3 +3,3 @@
              "node_modules/lodash": {
         -      "version": "4.17.20",
         +      "version": "4.17.21",
-             },
+               "dev": true
         @@ -9,3 +9,3 @@
              "node_modules/@types/node": {
         -      "version": "22.0.0",
         +      "version": "22.1.0",
-             },
+               "dev": true
         -- 
         2.43.0
 
-        """;
+        """.Replace("index 1111111..", $"index {GitBlobId(PublicTextBase)[..7]}..", StringComparison.Ordinal);
 
     private const string PublicTextBody = """
         This is an automated pull request created by the auto-sec workflow.
@@ -698,6 +700,82 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         No package sources or feeds were changed. Please review the lockfile diffs and
         CI results before merging.
         """;
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("package-lock.json", true)]
+    [InlineData("extension/package-lock.json", true)]
+    [InlineData("caf\u00e9/package-lock.json", true)]
+    [InlineData("./extension/package-lock.json", false)]
+    [InlineData("note-42/../extension/package-lock.json", false)]
+    [InlineData("../extension/package-lock.json", false)]
+    [InlineData("/extension/package-lock.json", false)]
+    [InlineData("extension//package-lock.json", false)]
+    [InlineData("extension\\package-lock.json", false)]
+    [InlineData(".github/../extension/package-lock.json", false)]
+    public async Task ManifestAdmissionRequiresCanonicalRepositoryPaths(string path, bool expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "isAllowedManifest",
+            ["args"] = new JsonArray(path),
+        });
+
+        Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task PublicTextGateRejectsNormalizedWorkspacePathAliases()
+    {
+        const string alias = "note-42/../extension/package-lock.json";
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = PublicTextBody.Replace("extension/package-lock.json", alias, StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "public-text-gate",
+            ["useCheckedOutBases"] = true,
+            ["workspaceFiles"] = new JsonObject { ["extension/package-lock.json"] = PublicTextBase },
+            ["agentItems"] = new JsonArray(output),
+            ["patchFiles"] = new JsonObject
+            {
+                ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("extension/package-lock.json", alias, StringComparison.Ordinal),
+            },
+        });
+
+        Assert.Equal(
+            ["create_pull_request.body non-template-text", "aw-auto-sec-security-updates.patch commit-row-not-in-patch"],
+            result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task AgentOutputScrubRejectsPathAliasesBeforePublication()
+    {
+        const string alias = "note-42/../extension/package-lock.json";
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = PublicTextBody.Replace("extension/package-lock.json", alias, StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["patchFiles"] = new JsonObject
+            {
+                ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("extension/package-lock.json", alias, StringComparison.Ordinal),
+            },
+            ["baseFiles"] = new JsonObject { [alias] = PublicTextBase },
+        });
+
+        Assert.Equal(
+            ["create_pull_request.body non-template-text", "aw-auto-sec-security-updates.patch commit-row-not-in-patch", "aw-auto-sec-security-updates.patch unsupported-file-diff", "aw-auto-sec-security-updates.patch disallowed-patch-file"],
+            result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
 
     [Theory]
     [RequiresTools(["node"])]
@@ -894,7 +972,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     {
         var patch = PublicTextPatch.Replace("\r\n", "\n")
             .Replace("extension/package-lock.json", $"extension/{basename}", StringComparison.Ordinal)
-            .Replace("@@ -1,3 +1,3 @@", "@@ -1,3 +1,4 @@", StringComparison.Ordinal)
+            .Replace("@@ -3,3 +3,3 @@", "@@ -3,3 +3,4 @@", StringComparison.Ordinal)
             .Replace("+      \"version\": \"4.17.21\",\n", $"+      \"version\": \"4.17.21\",\n+      {addedLine}\n", StringComparison.Ordinal);
         var output = PublicOutputFixture("create_pull_request");
         output["body"] = PublicTextBody.Replace("\r\n", "\n").Replace("extension/package-lock.json", $"extension/{basename}", StringComparison.Ordinal);
@@ -906,8 +984,208 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
         });
 
-        Assert.Equal(["aw-auto-sec-security-updates.patch unsupported-lockfile-text"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
-        Assert.Equal(["auto-sec agent output scrub failed: aw-auto-sec-security-updates.patch unsupported-lockfile-text"], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
+        string[] reasons = addedLine.StartsWith("\"resolved\"", StringComparison.Ordinal)
+            ? ["unbound-lockfile-artifact", "new-package-source", "unsupported-lockfile-text"]
+            : ["unsupported-lockfile-text"];
+        var expected = reasons.Select(reason => $"aw-auto-sec-security-updates.patch {reason}").ToArray();
+        Assert.Equal(expected, result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Equal([$"auto-sec agent output scrub failed: {string.Join("; ", expected)}"], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public-npm/npm/registry/other/-/other-4.17.21.tgz", "unbound-lockfile-artifact")]
+    [InlineData("https://new.example/lodash/-/lodash-4.17.21.tgz", "new-package-source")]
+    public async Task AgentOutputScrubEnforcesReconstructedContentPolicyBeforeUpload(string url, string reason)
+    {
+        var patch = PublicTextPatch.Replace("\r\n", "\n")
+            .Replace("@@ -3,3 +3,3 @@", "@@ -3,3 +3,4 @@", StringComparison.Ordinal)
+            .Replace("+      \"version\": \"4.17.21\",\n", $"+      \"version\": \"4.17.21\",\n+      \"resolved\": \"{url}\",\n", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        Assert.Equal([$"aw-auto-sec-security-updates.patch {reason}"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("date")]
+    [InlineData("preamble")]
+    [InlineData("diffstat")]
+    [InlineData("between-hunks")]
+    [InlineData("hunk-heading")]
+    [InlineData("newline-marker")]
+    [InlineData("index-suffix")]
+    [InlineData("footer")]
+    [InlineData("incomplete-hunk")]
+    public async Task AgentOutputScrubRejectsOpaquePatchCarrierText(string scenario)
+    {
+        const string privateText = "alert 42: prototype pollution in private-package";
+        var patch = PublicTextPatch.Replace("\r\n", "\n");
+        patch = scenario switch
+        {
+            "date" => patch.Replace("Date: Sat, 3 Oct 2026 09:00:00 +0000", $"Date: {privateText}", StringComparison.Ordinal),
+            "preamble" => privateText + "\n" + patch,
+            "diffstat" => patch.Replace("\n---\n", $"\n---\n{privateText}\n", StringComparison.Ordinal),
+            "between-hunks" => patch.Replace("@@ -9,3 +9,3 @@", $"{privateText}\n@@ -9,3 +9,3 @@", StringComparison.Ordinal),
+            "hunk-heading" => patch.Replace("@@ -3,3 +3,3 @@", $"@@ -3,3 +3,3 @@ {privateText}", StringComparison.Ordinal),
+            "newline-marker" => patch.Replace("+      \"version\": \"4.17.21\",\n", $"+      \"version\": \"4.17.21\",\n\\ {privateText}\n", StringComparison.Ordinal),
+            "index-suffix" => patch.Replace(" 100644\n", $" 100644 {privateText}\n", StringComparison.Ordinal),
+            "footer" => patch.Replace("2.43.0", privateText, StringComparison.Ordinal),
+            "incomplete-hunk" => patch.Replace("@@ -3,3 +3,3 @@", "@@ -3,3 +3,4 @@", StringComparison.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        string[] expected = scenario switch
+        {
+            "date" => ["aw-auto-sec-security-updates.patch unexpected-commit-date"],
+            "preamble" or "diffstat" => ["aw-auto-sec-security-updates.patch unsupported-patch-text"],
+            "hunk-heading" => ["create_pull_request.body row-not-in-patch", "aw-auto-sec-security-updates.patch commit-row-not-in-patch", "aw-auto-sec-security-updates.patch unsupported-file-diff"],
+            _ => ["create_pull_request.body row-not-in-patch", "aw-auto-sec-security-updates.patch commit-row-not-in-patch", "aw-auto-sec-security-updates.patch unsupported-file-diff", "aw-auto-sec-security-updates.patch disallowed-patch-file"],
+        };
+        Assert.Equal(expected, result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+        Assert.Equal([$"auto-sec agent output scrub failed: {string.Join("; ", expected)}"], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task AgentOutputScrubAllowsHunkHeadingFromTrustedBase()
+    {
+        var patch = PublicTextPatch.Replace("\r\n", "\n").Replace("@@ -3,3 +3,3 @@", "@@ -3,3 +3,3 @@     \"node_modules/lodash\": {", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        Assert.Empty(result["value"]!["violations"]!.AsArray());
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("aw-alert-42-prototype-pollution.patch", true)]
+    [InlineData("aw-auto-sec-security-updates.bundle", false)]
+    public async Task AgentOutputScrubRejectsUnreviewedArtifactNamesAndBundles(string name, bool patch)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+            ["workFiles"] = new JsonObject { [name] = patch ? PublicTextPatch.Replace("\r\n", "\n") : "alert 42: prototype pollution" },
+        });
+
+        Assert.Equal(["patch-artifacts unsupported-artifact"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Equal(["auto-sec agent output scrub failed: patch-artifacts unsupported-artifact"], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("workflow", "header")]
+    [InlineData("workflow", "metadata")]
+    [InlineData("workflow", "both")]
+    [InlineData("branch", "header")]
+    [InlineData("branch", "metadata")]
+    [InlineData("branch", "both")]
+    [InlineData("unknown", "header")]
+    [InlineData("unknown", "metadata")]
+    [InlineData("unknown", "both")]
+    public async Task AgentOutputScrubBindsTransportBasesToTrustedRefs(string source, string carrier)
+    {
+        const string branchSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var sha = source switch
+        {
+            "workflow" => "0123456789abcdef0123456789abcdef01234567",
+            "branch" => branchSha,
+            "unknown" => "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            _ => throw new ArgumentOutOfRangeException(nameof(source)),
+        };
+        var output = PublicOutputFixture("create_pull_request");
+        var patch = PublicTextPatch.Replace("\r\n", "\n");
+        if (carrier is "metadata" or "both")
+        {
+            output["base_commit"] = sha;
+        }
+        if (carrier is "header" or "both")
+        {
+            patch = patch.Replace("From: ", $"X-GH-AW-Base-Commit: {sha}\nFrom: ", StringComparison.Ordinal);
+        }
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["branchSha"] = branchSha,
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        if (source == "unknown")
+        {
+            Assert.Equal(["patch-transport untrusted-base-commit"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+            Assert.Equal(["auto-sec agent output scrub failed: patch-transport untrusted-base-commit"], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
+            Assert.Empty(result["outputs"]!.AsArray());
+            Assert.Empty(result["remaining"]!.AsArray());
+            Assert.Null(result["stepOutputs"]!["publication_ready"]);
+            Assert.Empty(result["publications"]!.AsArray());
+        }
+        else
+        {
+            Assert.Empty(result["value"]!["violations"]!.AsArray());
+            Assert.Empty(result["failures"]!.AsArray());
+            Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+            Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
+        }
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task AgentOutputScrubRejectsFreeTextInFrameworkBaseHeader()
+    {
+        var patch = PublicTextPatch.Replace("\r\n", "\n").Replace("From: ", "X-GH-AW-Base-Commit: alert 42: prototype pollution\nFrom: ", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        Assert.Equal(["aw-auto-sec-security-updates.patch invalid-base-commit"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Equal(["auto-sec agent output scrub failed: aw-auto-sec-security-updates.patch invalid-base-commit"], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
         Assert.Empty(result["outputs"]!.AsArray());
         Assert.Empty(result["remaining"]!.AsArray());
         Assert.Null(result["stepOutputs"]!["publication_ready"]);
@@ -951,6 +1229,234 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         });
 
         Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("yarn.lock", "  version \"4.17.21\"", true)]
+    [InlineData("yarn.lock", "\"lodash@npm:^4\":", true)]
+    [InlineData("yarn.lock", "  resolution: \"lodash@npm:4.17.21\"", true)]
+    [InlineData("yarn.lock", "  resolved \"https://r.example/lodash/-/lodash-4.17.21.tgz#abc123\"", true)]
+    [InlineData("yarn.lock", "  note \"alert 42: prototype pollution\"", false)]
+    [InlineData("yarn.lock", "  note: 'alert 42'", false)]
+    [InlineData("yarn.lock", "  version: \"alert 42\"", false)]
+    [InlineData("pnpm-lock.yaml", "  '@scope/name@1.0.0':", true)]
+    [InlineData("pnpm-lock.yaml", "    resolution:", true)]
+    [InlineData("pnpm-lock.yaml", "      tarball: https://r.example/lodash/-/lodash-4.17.21.tgz", true)]
+    [InlineData("pnpm-lock.yaml", "    resolution: {integrity: sha512-YWJjZA==, tarball: https://r.example/a/-/a-1.0.0.tgz}", true)]
+    [InlineData("pnpm-lock.yaml", "    version: 1.0.0(foo@2.0.0(bar@3.0.0))", true)]
+    [InlineData("pnpm-lock.yaml", "    note: alert 42 prototype pollution", false)]
+    [InlineData("pnpm-lock.yaml", "    note: {version: 'alert 42'}", false)]
+    [InlineData("pnpm-lock.yaml", "    resolution: {integrity: sha512-YWJjZA==, note: 'alert 42'}", false)]
+    [InlineData("uv.lock", "[[package]]", true)]
+    [InlineData("uv.lock", "name = \"jinja2\"", true)]
+    [InlineData("uv.lock", "version = \"3.1.6\"", true)]
+    [InlineData("uv.lock", "source = { editable = \"../pkg\" }", true)]
+    [InlineData("uv.lock", "source = { registry = \"https://pypi.org/simple\" }", true)]
+    [InlineData("uv.lock", "{ name = \"jinja2\", version = \"3.1.6\" },", true)]
+    [InlineData("uv.lock", "{ url = \"https://f.example/jinja2-3.1.6.whl\", hash = \"sha256:abcd\", size = 123, upload-time = \"2026-01-01T01:02:03Z\" },", true)]
+    [InlineData("uv.lock", "note = \"alert 42: prototype pollution\"", false)]
+    [InlineData("uv.lock", "source = { registry = \"https://pypi.org/simple\", note = \"alert 42\" }", false)]
+    [InlineData("uv.lock", "version = '''alert 42'''", false)]
+    [InlineData("uv.lock", "note = [", false)]
+    public async Task YamlAndTomlLockfilesAcceptOnlyTypedPublicationLines(string path, string line, bool expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "isPublicLockfileLine",
+            ["args"] = new JsonArray(path, line),
+        });
+
+        Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("yarn.lock", "  note \"alert 42 prototype pollution\"")]
+    [InlineData("pnpm-lock.yaml", "    note: 'alert 42 prototype pollution'")]
+    [InlineData("uv.lock", "note = \"alert 42 prototype pollution\"")]
+    public async Task AgentOutputScrubBlocksUnknownYamlAndTomlMetadataBeforeUpload(string path, string line)
+    {
+        var baseText = path == "uv.lock" ? "version = 1\n" : "lockfileVersion: 9.0\n";
+        var patch = PublicTextPatch.Replace("\r\n", "\n").Replace("-- \n",
+            $"diff --git a/{path} b/{path}\nindex {GitBlobId(baseText)[..7]}..2222222 100644\n--- a/{path}\n+++ b/{path}\n@@ -1 +1,2 @@\n {baseText.TrimEnd()}\n+{line}\n-- \n", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["baseFiles"] = new JsonObject { ["extension/package-lock.json"] = PublicTextBase, [path] = baseText },
+        });
+
+        Assert.Equal(["aw-auto-sec-security-updates.patch unsupported-lockfile-text"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("wrong-manifest")]
+    [InlineData("unrelated-package")]
+    [InlineData("version-substring")]
+    [InlineData("wrong-base-version")]
+    public async Task PublicTextRowsRequireOneReconstructedUpdateTuple(string scenario)
+    {
+        var body = PublicTextBody.Replace("\r\n", "\n");
+        body = scenario switch
+        {
+            "wrong-manifest" => body.Replace("extension/package-lock.json", "other/package-lock.json", StringComparison.Ordinal),
+            "unrelated-package" => body.Replace("| lodash |", "| @types/node |", StringComparison.Ordinal),
+            "version-substring" => body.Replace("| 4.17.21 |", "| 4.17.2 |", StringComparison.Ordinal),
+            "wrong-base-version" => body.Replace("| 4.17.20 |", "| 4.17.19 |", StringComparison.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = body;
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        Assert.Equal(["create_pull_request.body row-not-in-patch"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AgentOutputScrubReadsWorkflowSnapshotAndFailsClosedWhenUnavailable(bool missing)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["missingGitSnapshot"] = missing,
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        Assert.Equal(missing ? ["filesystem io-error"] : [], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Equal(missing ? ["auto-sec agent output scrub failed: filesystem io-error"] : [], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
+        Assert.Equal(missing ? null : "true", result["stepOutputs"]!["publication_ready"]?.GetValue<string>());
+        Assert.Equal(missing ? 0 : CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
+    }
+
+    [Theory]
+    [RequiresTools(["node", "git"])]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public async Task AgentOutputScrubAcceptsActualGitFormatPatch(bool fullIndex, bool embedBaseCommit, bool repoScoped)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["generatedPatch"] = new JsonObject
+            {
+                ["headFiles"] = new JsonObject { ["extension/package-lock.json"] = PublicTextBase.Replace("4.17.20", "4.17.21", StringComparison.Ordinal).Replace("22.0.0", "22.1.0", StringComparison.Ordinal) },
+                ["message"] = "Update dependencies\n\nlodash 4.17.20 -> 4.17.21\n@types/node 22.0.0 -> 22.1.0\n",
+                ["fullIndex"] = fullIndex,
+                ["embedBaseCommit"] = embedBaseCommit,
+                ["repoScoped"] = repoScoped,
+            },
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        Assert.Empty(result["value"]!["violations"]!.AsArray());
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Single(result["outputs"]!.AsArray());
+        Assert.Equal([repoScoped ? "aw-microsoft-aspire-auto-sec-security-updates.patch" : "aw-auto-sec-security-updates.patch"], result["remaining"]!.AsArray().Select(v => v!.GetValue<string>()));
+        Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
+    }
+
+    [Fact]
+    [RequiresTools(["node", "git"])]
+    public async Task AgentOutputScrubReadsBotBranchBaseWhenWorkflowSnapshotIsUnavailable()
+    {
+        const string branchSha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var patch = PublicTextPatch.Replace("\r\n", "\n").Replace("From: ", $"X-GH-AW-Base-Commit: {branchSha}\nFrom: ", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["missingGitSnapshot"] = true,
+            ["branchFiles"] = new JsonObject { ["extension/package-lock.json"] = PublicTextBase },
+            ["branchSha"] = branchSha,
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        Assert.Empty(result["value"]!["violations"]!.AsArray());
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+        Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
+    }
+
+    [Fact]
+    [RequiresTools(["node", "git"])]
+    public async Task AgentWrittenGitBlobsCannotAuthorizePublicSummaryRows()
+    {
+        var forgedBase = PublicTextBase.Replace("4.17.20", "4.17.19", StringComparison.Ordinal);
+        var patch = PublicTextPatch.Replace("\r\n", "\n")
+            .Replace("4.17.20", "4.17.19", StringComparison.Ordinal)
+            .Replace(GitBlobId(PublicTextBase)[..7], GitBlobId(forgedBase)[..7], StringComparison.Ordinal);
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = PublicTextBody.Replace("\r\n", "\n").Replace("4.17.20", "4.17.19", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["useGitSnapshot"] = true,
+            ["extraBlobs"] = new JsonArray(forgedBase),
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+            ["publicationConditions"] = CompiledPublicationConditions(),
+        });
+
+        Assert.Equal(["create_pull_request.body row-not-in-patch", "aw-auto-sec-security-updates.patch commit-row-not-in-patch", "aw-auto-sec-security-updates.patch unreconstructable-file-diff"],
+            result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("workspace")]
+    [InlineData("auto-sec-branch")]
+    public async Task PublicTextGateReconstructsFromTheAuthorizedBaseCandidates(string source)
+    {
+        var request = new JsonObject
+        {
+            ["mode"] = "public-text-gate",
+            ["useCheckedOutBases"] = true,
+            ["agentItems"] = new JsonArray(PublicOutputFixture("create_pull_request")),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+        };
+        request[source == "workspace" ? "workspaceFiles" : "branchFiles"] = new JsonObject { ["extension/package-lock.json"] = PublicTextBase };
+        var result = await RunHarnessAsync(request);
+
+        Assert.Empty(result["value"]!["violations"]!.AsArray());
+        Assert.Empty(result["failures"]!.AsArray());
     }
 
     [Theory]
@@ -1113,7 +1619,13 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
         });
 
-        Assert.Equal([expected], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        string[] expectedViolations = scenario switch
+        {
+            "patch-advisory-context" => ["create_pull_request.body row-not-in-patch", "aw-auto-sec-security-updates.patch commit-row-not-in-patch", "aw-auto-sec-security-updates.patch unreconstructable-file-diff", expected],
+            "patch-alert-file" or "patch-lockfile-comment" => ["aw-auto-sec-security-updates.patch unreconstructable-file-diff", expected],
+            _ => [expected],
+        };
+        Assert.Equal(expectedViolations, result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
         Assert.Empty(result["outputs"]!.AsArray());
         Assert.Empty(result["remaining"]!.AsArray());
         Assert.Null(result["stepOutputs"]!["publication_ready"]);
@@ -1127,6 +1639,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("rmSync", "sandbox/agent/logs", false)]
     [InlineData("readFileSync", "outputs.jsonl", false)]
     [InlineData("readFileSync", "aw-auto-sec-security-updates.patch", false)]
+    [InlineData("lstatSync", "aw-auto-sec-security-updates.patch", false)]
     [InlineData("readdirSync", "", false)]
     [InlineData("writeFileSync", "outputs.jsonl", false)]
     [InlineData("writeFileSync", "outputs.jsonl", true)]
@@ -1311,6 +1824,49 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     [Theory]
     [RequiresTools(["node"])]
+    [InlineData("source = { registry = \"https://pypi.org/simple\" }", "source = { editable = \"../pkg\" }", "uv-local:editable:../pkg")]
+    [InlineData("source = { registry = \"https://pypi.org/simple\" }", "source = { directory = '../pkg' }", "uv-local:directory:../pkg")]
+    [InlineData("source = { registry = \"https://pypi.org/simple\" }", "source = { virtual = \"../pkg\" }", "uv-local:virtual:../pkg")]
+    [InlineData("", "[package.source]\neditable = \"../pkg\"\n", "uv-local:editable:../pkg")]
+    [InlineData("", "\"source\" = { \"editable\" = \"../pkg\" }", "uv-local:editable:../pkg")]
+    [InlineData("", "[package.'source']\n'directory' = '../pkg'\n", "uv-local:directory:../pkg")]
+    [InlineData("", "source = {\n  editable = \"..\\u002fpkg\"\n}", "uv-local:editable:../pkg")]
+    [InlineData("source = { editable = \"../pkg\" }", "source = { editable = \".././pkg\" }", "")]
+    [InlineData("source = { editable = \"../pkg\" }", "source = { virtual = \"../pkg\" }", "uv-local:virtual:../pkg")]
+    public async Task UvLocalSourceDescriptorsParticipateInSourceAuthorization(string baseText, string headText, string expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "findNewSources",
+            ["args"] = new JsonArray(baseText, headText, "uv.lock"),
+        });
+
+        Assert.Equal(expected, string.Join(",", result["value"]!.AsArray().Select(source => source!.GetValue<string>())));
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("editable")]
+    [InlineData("directory")]
+    [InlineData("virtual")]
+    public async Task PatchContentGateRejectsRegistryToLocalUvSources(string kind)
+    {
+        const string source = "source = { registry = \"https://pypi.org/simple\" }";
+        const string baseText = "[[package]]\nname = \"foo\"\nversion = \"1.0.0\"\n" + source + "\ndependencies = []\n";
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "patch-gate",
+            ["patchFiles"] = new JsonObject { ["aw-test.patch"] = ReplacementPatch("uv.lock", baseText, source, $"source = {{ {kind} = \"../pkg\" }}") },
+            ["workspaceFiles"] = new JsonObject { ["uv.lock"] = baseText },
+        });
+
+        Assert.Equal(["uv.lock new-package-source"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}"));
+        Assert.Single(result["failures"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
     [InlineData("1.0.0-alpha", "1.0.0-alpha.1", -1)]
     [InlineData("1.0.0-alpha.1", "1.0.0-alpha.beta", -1)]
     [InlineData("1.0.0-alpha.beta", "1.0.0-beta", -1)]
@@ -1386,6 +1942,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("extension/yarn.lock", "", "\"lodash@npm:^4\":\n  version: 4.17.21\n  resolution: \"evil@npm:1.0.0\"\n", 1)]
     [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  lodash@4.17.21:\n    resolution: {integrity: sha512-x, tarball: https://r.example/lodash/-/lodash-4.17.21.tgz}\n", 0)]
     [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  lodash@4.17.21:\n    resolution: {integrity: sha512-x, tarball: https://r.example/evil/-/evil-1.0.0.tgz}\n", 1)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  lodash@4.17.21:\n    resolution:\n      integrity: sha512-x\n      tarball: https://r.example/lodash/-/lodash-4.17.21.tgz\n", 0)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  lodash@4.17.21:\n    resolution:\n      tarball: 'https://r.example/evil/-/evil-1.0.0.tgz'\n", 1)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  '@scope/name@1.0.0':\n    resolution:\n      tarball: \"https://r.example/@scope/name/-/name-1.0.0.tgz\"\n", 0)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  lodash@4.17.21:\n    resolution:\n      tarball: https://r.example/lodash/-/lodash-4.17.20.tgz\n", 1)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  invalid-entry:\n    resolution:\n      tarball: https://r.example/lodash/-/lodash-4.17.21.tgz\n", 1)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  \"lodash@4.17.21\":\n    'resolution':\n      \"tarball\": https://r.example/lodash/-/lodash-4.17.21.tgz\n", 0)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  lodash@4.17.21:\n    \"resolution\": {\"tarball\": https://r.example/evil/-/evil-1.0.0.tgz}\n", 1)]
+    [InlineData("extension/pnpm-lock.yaml", "", "packages:\n  lodash@4.17.21:\n    \"tarball\": https://r.example/lodash/-/lodash-4.17.21.tgz\n", 1)]
     [InlineData("uv.lock", "", "[[package]]\nname = \"Jinja2\"\nversion = \"3.1.6\"\nsource = { registry = \"https://pypi.org/simple\" }\nsdist = { url = \"https://f.example/jinja2-3.1.6.tar.gz\", hash = \"sha256:x\" }\nwheels = [\n    { url = \"https://f.example/jinja2-3.1.6-py3-none-any.whl\", hash = \"sha256:y\" },\n]\n", 0)]
     [InlineData("uv.lock", "", "[[package]]\nname = \"python-dateutil\"\nversion = \"2.8.2\"\nsdist = { url = \"https://f.example/python-dateutil-2.8.2.tar.gz\" }\n", 0)]
     [InlineData("uv.lock", "", "[[package]]\nname = \"jinja2\"\nversion = \"3.1.6\"\nwheels = [\n    { url = \"https://f.example/evil-1.0-py3-none-any.whl\" },\n]\n", 1)]
@@ -1995,7 +2559,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Contains("contains(needs.agent.outputs.output_types, 'create_pull_request')", textGateSection, StringComparison.Ordinal);
         Assert.Contains("contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch')", textGateSection, StringComparison.Ordinal);
         Assert.Contains("GH_AW_AGENT_OUTPUT: ${{ steps.setup-agent-output-env.outputs.GH_AW_AGENT_OUTPUT }}", textGateSection, StringComparison.Ordinal);
-        Assert.Contains("await gate.runPublicTextGate({ core })", textGateSection, StringComparison.Ordinal);
+        Assert.Contains("await gate.runPublicTextGate({ core, github, context })", textGateSection, StringComparison.Ordinal);
         // The agent artifact and run summaries are public, so the transcript must be deleted and
         // the outputs reduced to template text before anything reads or uploads them. The gate
         // module is copied outside the writable checkout before the agent runs.
@@ -2008,7 +2572,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             var laterStep = compiled.IndexOf(later, StringComparison.Ordinal);
             Assert.True(laterStep > scrubStep, $"Agent output scrub must run before {later}.");
         }
-        Assert.Contains("runAgentOutputScrub({ core })", compiled, StringComparison.Ordinal);
+        Assert.Contains("runAgentOutputScrub({ core, github, context })", compiled, StringComparison.Ordinal);
         Assert.Contains("GH_AW_MISSING_TOOL_CREATE_ISSUE: \"false\"", compiled, StringComparison.Ordinal);
         Assert.Contains("GH_AW_REPORT_INCOMPLETE_CREATE_ISSUE: \"false\"", compiled, StringComparison.Ordinal);
         Assert.Contains("GH_AW_FAILURE_REPORT_AS_ISSUE: \"false\"", compiled, StringComparison.Ordinal);
@@ -2101,6 +2665,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     private async Task<JsonNode> RunHarnessAsync(JsonObject request)
     {
+        if (request["mode"]?.GetValue<string>() is "agent-scrub" or "public-text-gate")
+        {
+            request["baseFiles"] ??= new JsonObject
+            {
+                ["extension/package-lock.json"] = PublicTextBase,
+                ["extension/npm-shrinkwrap.json"] = PublicTextBase,
+            };
+        }
         using var workspace = TemporaryWorkspace.Create(testOutput);
         var requestPath = Path.Combine(workspace.Path, "request.json");
         var resultPath = Path.Combine(workspace.Path, "result.json");

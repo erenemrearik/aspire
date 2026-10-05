@@ -274,6 +274,17 @@ async function main() {
             const root = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-'));
             const patchDir = path.join(root, 'patches');
             const outputPath = path.join(root, 'agent_output.json');
+            const workspace = path.join(root, 'workspace');
+            for (const [name, text] of Object.entries(request.workspaceFiles ?? {})) {
+                fs.mkdirSync(path.dirname(path.join(workspace, name)), { recursive: true });
+                fs.writeFileSync(path.join(workspace, name), text);
+            }
+            const github = { rest: { repos: { getContent: async ({ path: file }) => {
+                if (!Object.hasOwn(request.branchFiles ?? {}, file)) {
+                    throw Object.assign(new Error('Not Found'), { status: 404 });
+                }
+                return { data: { content: Buffer.from(request.branchFiles[file], 'utf8').toString('base64') } };
+            } } } };
             fs.writeFileSync(outputPath, JSON.stringify({ items: request.agentItems ?? [] }));
             for (const [name, text] of Object.entries(request.patchFiles ?? {})) {
                 fs.mkdirSync(patchDir, { recursive: true });
@@ -282,8 +293,11 @@ async function main() {
             try {
                 const value = await gate.runPublicTextGate({
                     core: { info: message => info.push(message), setFailed: message => failures.push(message) },
-                    env: { GH_AW_AGENT_OUTPUT: outputPath },
+                    env: { GH_AW_AGENT_OUTPUT: outputPath, GITHUB_WORKSPACE: workspace },
                     patchDir,
+                    github,
+                    context: { repo: { owner: 'microsoft', repo: 'aspire' } },
+                    readBaseTexts: request.useCheckedOutBases ? null : file => [request.baseFiles?.[file]],
                 });
                 result = { value, info, failures };
             } finally {
@@ -297,12 +311,55 @@ async function main() {
             const stepOutputs = {};
             const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-'));
             const outputPath = path.join(workDir, 'outputs.jsonl');
+            const checkout = request.useGitSnapshot ? fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-checkout-')) : null;
+            let baseSha = '0123456789abcdef0123456789abcdef01234567';
             fs.writeFileSync(outputPath, (request.outputLines ?? []).join('\n'));
             for (const [name, text] of Object.entries({ ...(request.patchFiles ?? {}), ...(request.workFiles ?? {}) })) {
                 fs.mkdirSync(path.dirname(path.join(workDir, name)), { recursive: true });
                 fs.writeFileSync(path.join(workDir, name), text);
             }
             try {
+                if (checkout) {
+                    const exec = require('node:child_process').execFileSync;
+                    const options = { cwd: checkout, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] };
+                    exec('git', ['init', '--quiet'], options);
+                    const emptyConfig = path.join(checkout, '.git', 'fixture-empty-config');
+                    fs.writeFileSync(emptyConfig, '');
+                    options.env = { ...process.env, GIT_CONFIG_GLOBAL: emptyConfig, GIT_CONFIG_NOSYSTEM: '1' };
+                    if (!request.missingGitSnapshot) {
+                        for (const [file, text] of Object.entries(request.baseFiles ?? {})) {
+                            fs.mkdirSync(path.dirname(path.join(checkout, file)), { recursive: true });
+                            fs.writeFileSync(path.join(checkout, file), text);
+                        }
+                        exec('git', ['-c', 'core.autocrlf=false', 'add', '--all'], options);
+                        baseSha = exec('git', ['write-tree'], options).toString().trim();
+                        for (const text of request.extraBlobs ?? []) {
+                            exec('git', ['hash-object', '-w', '--stdin'], { ...options, input: text });
+                        }
+                        if (request.generatedPatch) {
+                            const commitOptions = { ...options, env: { ...options.env,
+                                GIT_AUTHOR_NAME: 'github-actions[bot]', GIT_COMMITTER_NAME: 'github-actions[bot]',
+                                GIT_AUTHOR_EMAIL: 'github-actions[bot]@users.noreply.github.com', GIT_COMMITTER_EMAIL: 'github-actions[bot]@users.noreply.github.com',
+                                GIT_AUTHOR_DATE: '2026-10-03T09:00:00+00:00', GIT_COMMITTER_DATE: '2026-10-03T09:00:00+00:00',
+                            } };
+                            baseSha = exec('git', ['commit-tree', baseSha, '-m', 'Fixture base'], commitOptions).toString().trim();
+                            for (const [file, text] of Object.entries(request.generatedPatch.headFiles)) {
+                                fs.writeFileSync(path.join(checkout, file), text);
+                            }
+                            exec('git', ['-c', 'core.autocrlf=false', 'add', '--all'], options);
+                            const headTree = exec('git', ['write-tree'], options).toString().trim();
+                            const head = exec('git', ['commit-tree', headTree, '-p', baseSha, '-F', '-'],
+                                { ...commitOptions, input: request.generatedPatch.message }).toString().trim();
+                            const format = ['format-patch', '--stdout', '-1', head, ...(request.generatedPatch.fullIndex ? ['--full-index'] : [])];
+                            let patch = exec('git', format, commitOptions).toString();
+                            if (request.generatedPatch.embedBaseCommit) {
+                                patch = patch.replace(/^(From [^\n]*\n)/, `$1X-GH-AW-Base-Commit: ${baseSha}\n`);
+                            }
+                            const name = request.generatedPatch.repoScoped ? 'aw-microsoft-aspire-auto-sec-security-updates.patch' : 'aw-auto-sec-security-updates.patch';
+                            fs.writeFileSync(path.join(workDir, name), patch);
+                        }
+                    }
+                }
                 const scrubFs = new Proxy(fs, {
                     get(target, property) {
                         if (property !== request.ioFailure?.operation) {
@@ -323,8 +380,30 @@ async function main() {
                         setOutput: (name, value) => { stepOutputs[name] = value; },
                     },
                     fs: scrubFs,
-                    env: { GH_AW_SAFE_OUTPUTS: outputPath },
+                    github: { rest: { repos: {
+                        getBranch: async ({ branch }) => {
+                            if (branch !== 'auto-sec/security-updates') {
+                                throw new Error('Unexpected branch');
+                            }
+                            if (!request.branchSha) {
+                                throw Object.assign(new Error('Not Found'), { status: 404 });
+                            }
+                            return { data: { commit: { sha: request.branchSha } } };
+                        },
+                        getContent: async ({ path: file, ref }) => {
+                            if (ref !== 'auto-sec/security-updates') {
+                                throw new Error('Unexpected branch');
+                            }
+                            if (!Object.hasOwn(request.branchFiles ?? {}, file)) {
+                                throw Object.assign(new Error('Not Found'), { status: 404 });
+                            }
+                            return { data: { content: Buffer.from(request.branchFiles[file], 'utf8').toString('base64') } };
+                        },
+                    } } },
+                    context: { repo: { owner: 'microsoft', repo: 'aspire' } },
+                    env: { GH_AW_SAFE_OUTPUTS: outputPath, GITHUB_WORKSPACE: checkout ?? undefined, GITHUB_SHA: baseSha },
                     workDir,
+                    readBaseTexts: request.useGitSnapshot ? null : file => [request.baseFiles?.[file]],
                 });
                 const remaining = fs.readdirSync(workDir, { recursive: true })
                     .map(name => String(name).replace(/\\/g, '/'))
@@ -342,6 +421,9 @@ async function main() {
                 result = { value, info, failures, remaining, outputs, stepOutputs, publications };
             } finally {
                 fs.rmSync(workDir, { recursive: true, force: true });
+                if (checkout) {
+                    fs.rmSync(checkout, { recursive: true, force: true });
+                }
             }
             break;
         }

@@ -109,9 +109,23 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   metadata are stripped rather than copied into public artifacts.
   Code-writing requests are mutually exclusive, and version policy is checked
   separately for each patch artifact so overlapping paths cannot hide an update.
-  JSON lockfile additions accept only recognized dependency-data syntax, not new
+  All lockfile additions accept only recognized dependency-data syntax, not new
   free-text metadata. New override/resolution entries and unsupported lockfile
   metadata require human intervention and are reported as `update-failed`.
+  Public summary rows are bound to reconstructed manifest/package/version changes.
+  Manifest paths must be canonical repository-relative paths; dot-segment aliases,
+  rooted paths, backslashes, and empty path segments cannot authorize publication.
+  Reconstruction, version-only manifest edits, source authorization, and artifact
+  binding are checked before public artifact upload, not just before application.
+  Patch transport also rejects opaque preambles, dates, diffstat text, metadata,
+  and newline markers; hunk context labels must originate in the trusted base.
+  Only the canonical patch filenames are accepted; opaque bundles and symlinks
+  are rejected. Framework base-commit headers are supported as typed SHAs bound,
+  like output transport metadata, to the workflow snapshot or live auto-sec ref.
+  The pre-upload scrub reads bases from the immutable workflow checkout and the
+  bot-owned branch, not arbitrary agent-written blobs; unavailable bases block
+  publication. uv local-source descriptors count as delivery sources,
+  and pnpm tarball binding covers both inline and block-style resolution tables.
 
 Prerequisites:
 - The `auto-sec` label must exist.

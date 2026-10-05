@@ -268,8 +268,15 @@ function basenameOf(path) {
     return index < 0 ? path : path.slice(index + 1);
 }
 
+function isCanonicalRepoPath(path) {
+    // APIs and path.resolve normalize aliases such as note-42/../package-lock.json.
+    // Such aliases must not authorize a different public manifest path.
+    return typeof path === 'string' && !path.startsWith('/') && !path.includes('\\')
+        && path.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..');
+}
+
 function isAllowedManifest(path) {
-    if (String(path).startsWith('.github/')) {
+    if (!isCanonicalRepoPath(path) || path.startsWith('.github/')) {
         return false;
     }
     return ALLOWED_MANIFEST_BASENAMES.has(basenameOf(path).toLowerCase());
@@ -342,6 +349,21 @@ function extractSources(text) {
     }
     for (const match of decoded.matchAll(/(?<![A-Za-z0-9+.-])(file|link|portal):([^\s"'<>,;)]*)/gi)) {
         sources.add(`${match[1].toLowerCase()}:${match[2]}`);
+    }
+    // uv uses TOML descriptors, not file: URLs:
+    //   source = { editable = "../pkg" }  or  [package.source]\ndirectory = "../pkg"
+    // Keep the descriptor kind in the identity: an editable source is not interchangeable
+    // with a registry, directory, or virtual source at the same path.
+    // https://docs.astral.sh/uv/concepts/projects/dependencies/#path
+    const tables = [
+        ...decoded.matchAll(/^\s*(?:source|["']source["'])\s*=\s*\{([^{}]*)\}/gm),
+        ...decoded.matchAll(/^\[package\.(?:source|["']source["'])\]\s*\n([^[]*)/gm),
+    ];
+    for (const table of tables) {
+        for (const match of table[1].matchAll(/(?:^|,|\n)\s*["']?(editable|directory|virtual)["']?\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')/g)) {
+            const local = match[2].slice(1, -1).replace(/\\\\/g, '\\').replace(/\\/g, '/');
+            sources.add(`uv-local:${match[1]}:${require('node:path').posix.normalize(local)}`);
+        }
     }
     return sources;
 }
@@ -785,15 +807,34 @@ function lockfileArtifacts(path, text) {
         }
     } else if (basename === 'pnpm-lock.yaml') {
         let entry = null;
+        let resolution = false;
         for (const line of String(text ?? '').split(/\r?\n/)) {
             let match;
-            if ((match = /^ {2}(\S.*?):\s*$/.exec(line))) {
-                const key = match[1].replace(/^'|'$/g, '').replace(/\(.*$/, '').replace(/^\//, '');
+            if (/^\S/.test(line)) {
+                entry = null;
+                resolution = false;
+            } else if ((match = /^ {2}(\S.*?):\s*$/.exec(line))) {
+                const key = match[1].replace(/^["']|["']$/g, '').replace(/\(.*$/, '').replace(/^\//, '');
                 const spec = splitNpmSpec(key);
                 const slash = key.lastIndexOf('/');
                 entry = spec.range ? spec : slash > 0 ? { name: key.slice(0, slash), range: key.slice(slash + 1) } : null;
-            } else if (entry && (match = /^ {4}resolution:.*\btarball:\s*'?([^,'}\s]+)/.exec(line))) {
-                add(`${entry.name}@${entry.range}`, '', match[1], isNpmTarballFor(match[1], [entry.name], entry.range));
+                resolution = false;
+            } else {
+                // pnpm emits either `resolution: {tarball: <url>}` or a block:
+                //   resolution:
+                //     tarball: <url>
+                // https://github.com/pnpm/spec/blob/master/lockfile/9.0.md
+                if (/^ {4}(?:resolution|["']resolution["']):/.test(line)) {
+                    resolution = true;
+                } else if (/^ {0,4}\S/.test(line)) {
+                    resolution = false;
+                }
+                if (/(?:\btarball|["']tarball["'])\s*:/.test(line)) {
+                    match = /(?:\btarball|["']tarball["']):\s*(?:"([^"]+)"|'([^']+)'|([^,'}\s]+))/.exec(line);
+                    const url = match?.[1] ?? match?.[2] ?? match?.[3] ?? line;
+                    add(entry ? `${entry.name}@${entry.range}` : '(unparsed)', '', url,
+                        Boolean(resolution && entry && match && isNpmTarballFor(url, [entry.name], entry.range)));
+                }
             }
         }
     } else if (basename === 'uv.lock') {
@@ -1930,34 +1971,51 @@ function parsePatchFileDiffs(patchText) {
     const lines = String(patchText ?? '').split('\n').map(line => line.replace(/\r$/, ''));
     for (let index = 0; index < lines.length; index++) {
         const line = lines[index];
+        if (/^From [0-9a-f]{40} Mon Sep 17 00:00:00 2001$/.test(line)) {
+            current = null;
+            continue;
+        }
         if (line.startsWith('diff --git ')) {
             const paths = /^diff --git a\/(\S+) b\/(\S+)$/.exec(line);
-            current = { oldPath: paths?.[1] ?? null, newPath: paths?.[2] ?? null, parseable: Boolean(paths), metadata: [], oldBlob: null, hunks: [], blocks: [] };
+            current = { oldPath: paths?.[1] ?? null, newPath: paths?.[2] ?? null, parseable: Boolean(paths), metadata: [], oldBlob: null, headers: new Set(), hunks: [], blocks: [] };
             diffs.push(current);
             continue;
         }
         if (!current) {
             continue;
         }
-        const hunk = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
+        const hunk = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@(?: (.*))?$/.exec(line);
         if (!hunk) {
-            const blobs = /^index ([0-9a-f]+)\.\.([0-9a-f]+)/.exec(line);
-            if (blobs) {
-                current.oldBlob = blobs[1];
-            } else if (/^(?:new file mode|deleted file mode|old mode|new mode|rename from|rename to|copy from|copy to|Binary files|GIT binary patch)/.test(line)) {
+            const blobs = /^index ([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})(?: (?:100644|100755))?$/.exec(line);
+            const header = blobs ? 'index' : line === `--- a/${current.oldPath}` ? 'old' : line === `+++ b/${current.newPath}` ? 'new' : null;
+            if (header && (current.headers.has(header) || current.hunks.length > 0)) {
                 current.metadata.push(line);
+            } else if (blobs) {
+                current.oldBlob = blobs[1];
+            } else if (!header && line !== '' && line !== '-- ' && line !== '\\ No newline at end of file'
+                && !/^\d+\.\d+\.\d+(?:\.windows\.\d+| \(Apple Git-\d+\))?$/.test(line)) {
+                // Reject opaque text between hunks and in diff metadata, not just known
+                // advisory words: format-patch transport is itself a public carrier.
+                current.metadata.push(line);
+            }
+            if (header) {
+                current.headers.add(header);
             }
             continue;
         }
         let oldRemaining = hunk[2] === undefined ? 1 : Number(hunk[2]);
         let newRemaining = hunk[3] === undefined ? 1 : Number(hunk[3]);
-        const parsedHunk = { oldStart: Number(hunk[1]), oldCount: oldRemaining, lines: [] };
+        const parsedHunk = { oldStart: Number(hunk[1]), oldCount: oldRemaining, heading: hunk[4] ?? '', lines: [] };
         current.hunks.push(parsedHunk);
         let block = null;
         while ((oldRemaining > 0 || newRemaining > 0) && index + 1 < lines.length) {
             const body = lines[index + 1];
             const marker = body[0];
             if (marker === '\\') {
+                if (body !== '\\ No newline at end of file') {
+                    current.parseable = false;
+                    break;
+                }
                 index++;
                 continue;
             }
@@ -1979,6 +2037,12 @@ function parsePatchFileDiffs(patchText) {
             }
             index++;
         }
+        if (oldRemaining !== 0 || newRemaining !== 0) {
+            current.parseable = false;
+        }
+    }
+    for (const diff of diffs) {
+        diff.parseable &&= diff.headers.size === 3 && diff.hunks.length > 0;
     }
     return diffs;
 }
@@ -2044,7 +2108,7 @@ function checkPatchContents(patchText, readBaseTexts = () => [], rebuiltFiles = 
     const rebuilt = new Map();
     for (const diff of parsePatchFileDiffs(patchText)) {
         const path = diff.newPath ?? diff.oldPath ?? '(unknown)';
-        if (!diff.parseable || diff.oldPath !== diff.newPath) {
+        if (!diff.parseable || diff.oldPath !== diff.newPath || !isCanonicalRepoPath(path)) {
             violations.push({ path, reason: 'unsupported-file-diff' });
             continue;
         }
@@ -2052,11 +2116,17 @@ function checkPatchContents(patchText, readBaseTexts = () => [], rebuiltFiles = 
             violations.push({ path, reason: 'unsupported-file-diff' });
             continue;
         }
-        const candidates = [...(rebuilt.get(path) ?? []), ...(readBaseTexts(path) ?? [])].filter(text => typeof text === 'string');
+        const candidates = [...(rebuilt.get(path) ?? []), ...(readBaseTexts(path, diff.oldBlob) ?? [])].filter(text => typeof text === 'string');
         // Only the exact file the diff was generated from (its `index` blob ID) may authorize
         // anything: a stale auto-sec branch copy must not vouch for a patch based on main.
         const base = diff.oldBlob ? candidates.find(text => gitBlobId(text).startsWith(diff.oldBlob)) : undefined;
         const normalizedBase = base?.replace(/\r\n/g, '\n');
+        // Git may append a function/context label after `@@`. It must come from the
+        // trusted base, not arbitrary prose that never appears in the hunk body.
+        if (diff.hunks.some(hunk => hunk.heading && !normalizedBase?.split('\n').some(line => line.includes(hunk.heading)))) {
+            violations.push({ path, reason: 'unsupported-file-diff' });
+            continue;
+        }
         const head = normalizedBase === undefined ? null : applyHunks(normalizedBase, diff.hunks);
         if (VERSION_ONLY_MANIFEST_BASENAMES.has(basenameOf(path).toLowerCase())
             && (head === null || !isVersionOnlyEdit(path, normalizedBase, head))) {
@@ -2090,9 +2160,10 @@ function checkPatchContents(patchText, readBaseTexts = () => [], rebuiltFiles = 
         if (COMMENT_LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase()) && addedLines.some(hasLockfileComment)) {
             violations.push({ path, reason: 'lockfile-comment' });
         }
-        if (METADATA_LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase())
+        if (isLockfile(path)
             && !addedLines.some(line => PUBLIC_FORBIDDEN_TOKEN.test(line))
-            && addedLines.some(line => !isPublicJsonLockfileLine(line))) {
+            && !addedLines.some(hasLockfileComment)
+            && addedLines.some(line => !isPublicLockfileLine(path, line))) {
             violations.push({ path, reason: 'unsupported-lockfile-text' });
         }
     }
@@ -2102,6 +2173,128 @@ function checkPatchContents(patchText, readBaseTexts = () => [], rebuiltFiles = 
 // Lockfiles whose formats allow `#` comments: yarn.lock (https://classic.yarnpkg.com/lang/en/docs/yarn-lock/),
 // pnpm-lock.yaml (YAML), and uv.lock (TOML). JSON lockfiles have no comment syntax.
 const COMMENT_LOCKFILE_BASENAMES = new Set(['yarn.lock', 'pnpm-lock.yaml', 'uv.lock']);
+
+function isLockfile(path) {
+    const name = basenameOf(path).toLowerCase();
+    return METADATA_LOCKFILE_BASENAMES.has(name) || COMMENT_LOCKFILE_BASENAMES.has(name);
+}
+
+function isPublicLockfileVersion(value) {
+    if (typeof value !== 'string' || value.length > 4096) {
+        return false;
+    }
+    const alias = value.startsWith('npm:') ? splitNpmSpec(value.slice(4)) : null;
+    const range = alias?.range && PUBLIC_PACKAGE_NAME.test(alias.name) ? alias.range : value.replace(/^npm:/, '');
+    return range.split(/\s*\|\|\s*|\s+-\s+|\s+/).every(part => part === '*'
+        || /^(?:[~^=]|[<>]=?)?v?\d+(?:\.(?:\d+|[xX*])){0,2}(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(part));
+}
+
+function publicLockfileUrl(value) {
+    try {
+        const url = new URL(value);
+        return url.protocol === 'https:' && !url.username && !url.password && !url.search
+            && (!url.hash || /^#[0-9a-f]+$/i.test(url.hash))
+            && !/\s/.test(decodeURIComponent(url.pathname));
+    } catch {
+        return false;
+    }
+}
+
+function publicLockfileScalar(key, raw) {
+    let value = raw.trim();
+    if (value.startsWith('"')) {
+        try {
+            value = JSON.parse(value);
+        } catch {
+            return false;
+        }
+    } else if (/^'[^']*'$/.test(value)) {
+        value = value.slice(1, -1);
+    }
+    if (typeof value !== 'string') {
+        return false;
+    }
+    switch (key) {
+        case 'name': return PUBLIC_PACKAGE_NAME.test(value);
+        case 'url': case 'resolved': case 'tarball': case 'registry': return publicLockfileUrl(value);
+        case 'hash': return /^sha(?:256|384|512):[0-9a-f]+$/.test(value);
+        case 'integrity': return /^(?:sha(?:1|256|384|512)-[A-Za-z0-9+/]+={0,2})(?: sha(?:1|256|384|512)-[A-Za-z0-9+/]+={0,2})*$/.test(value);
+        case 'checksum': return /^(?:\d+\/)?[0-9a-f]{16,}$/.test(value);
+        case 'size': case 'revision': case 'cacheKey': return /^\d{1,16}$/.test(value);
+        case 'upload-time': return /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(value);
+        case 'editable': case 'directory': case 'virtual': return value === '.' || /^(?:\.{1,2}\/)*[\w.@+-]+(?:\/[\w.@+-]+)*$/.test(value);
+        case 'linkType': return value === 'hard' || value === 'soft';
+        case 'languageName': return value === 'node';
+        case 'resolution': {
+            const spec = splitNpmSpec(value);
+            return PUBLIC_PACKAGE_NAME.test(spec.name) && isPublicLockfileVersion(spec.range);
+        }
+        case 'version': case 'specifier': case 'requires-python': {
+            // pnpm appends nested peer identities, e.g. 4.0.0(foo@1.0.0(bar@2.0.0)).
+            const parts = value.split(/[()]/).filter(Boolean);
+            return parts.length > 0 && parts.every(part => {
+                const spec = splitNpmSpec(part);
+                return spec.range ? PUBLIC_PACKAGE_NAME.test(spec.name) && isPublicLockfileVersion(spec.range) : isPublicLockfileVersion(part);
+            });
+        }
+        default: return false;
+    }
+}
+
+// Typed YAML/TOML additions only. For example:
+//   resolution: {integrity: sha512-...}  or  tarball: https://.../foo-1.0.0.tgz
+//   { url = "https://.../foo.whl", hash = "sha256:...", size = 123 },
+// Unknown keys, multiline strings, markers, and alternate scalar encodings fail closed;
+// expanding this subset requires an explicit validator, not a generic word deny-list.
+function isPublicLockfileLine(path, line) {
+    const name = basenameOf(path).toLowerCase();
+    if (METADATA_LOCKFILE_BASENAMES.has(name)) {
+        return isPublicJsonLockfileLine(line);
+    }
+    const text = line.trim();
+    if (/^[\]},]*$/.test(text)) {
+        return true;
+    }
+    const toml = name === 'uv.lock';
+    if (toml && /^\[\[package\]\]$|^\[package\.(?:metadata|optional-dependencies|dev-dependencies|source)\]$/.test(text)) {
+        return true;
+    }
+    const containers = toml ? ['dependencies', 'wheels', 'requires-dist']
+        : ['dependencies', 'optionalDependencies', 'peerDependencies', 'packages', 'snapshots', 'importers', 'settings', 'overrides', '__metadata', 'resolution', 'engines'];
+    if (containers.some(key => text === `${key}:` || text === `${key} = [`)) {
+        return true;
+    }
+    const inline = /^(?:(\w+)\s*[:=]\s*)?\{(.*)\},?$/.exec(text);
+    if (inline) {
+        const allowed = toml ? new Set(['name', 'version', 'url', 'hash', 'size', 'upload-time', 'registry', 'editable', 'directory', 'virtual'])
+            : new Set(['integrity', 'tarball', 'node']);
+        if (inline[1] && !(toml ? ['source', 'sdist'] : ['resolution', 'engines']).includes(inline[1])) {
+            return false;
+        }
+        return inline[2].split(',').every(field => {
+            const pair = /^([\w-]+)\s*[:=]\s*(.+)$/.exec(field.trim());
+            return Boolean(pair && allowed.has(pair[1]) && publicLockfileScalar(pair[1] === 'node' ? 'version' : pair[1], pair[2]));
+        });
+    }
+    const scalar = toml ? /^([\w-]+)\s*=\s*(.+)$/.exec(text) : /^(["']?[\w.@/+-]+["']?)\s*:?\s+(.+)$/.exec(text);
+    if (scalar) {
+        const key = scalar[1].replace(/^["']|["']$/g, '').replace(/:$/, '');
+        if (publicLockfileScalar(key, scalar[2])) {
+            return true;
+        }
+        return !toml && PUBLIC_PACKAGE_NAME.test(key)
+            && isPublicLockfileVersion(scalar[2].replace(/^["']|["']$/g, ''));
+    }
+    if (!toml && text.endsWith(':')) {
+        const selectors = text.slice(0, -1).split(',').map(value => value.trim().replace(/^["']|["']$/g, ''));
+        return selectors.every(value => {
+            const spec = splitNpmSpec(value.replace(/^\//, '').replace(/\(.*$/, ''));
+            return spec.range ? PUBLIC_PACKAGE_NAME.test(spec.name) && isPublicLockfileVersion(spec.range)
+                : PUBLIC_PACKAGE_NAME.test(value) || value === '.';
+        });
+    }
+    return false;
+}
 
 // npm's pretty-printed lockfiles contain structural lines and typed dependency data:
 //   "node_modules/lodash": {    "version": "4.17.21",    "integrity": "sha512-<base64>"
@@ -2158,11 +2351,7 @@ function isPublicJsonLockfileLine(line) {
     }
     // Dependency maps contain package-name keys and version selectors; words, nested
     // metadata, arrays, and unrecognized numeric/boolean fields cannot carry prose.
-    const alias = value.startsWith('npm:') ? splitNpmSpec(value.slice(4)) : null;
-    const range = alias?.range && PUBLIC_PACKAGE_NAME.test(alias.name) ? alias.range : value;
-    return PUBLIC_PACKAGE_NAME.test(key)
-        && range.split(/\s*\|\|\s*|\s+-\s+|\s+/).every(part => part === '*'
-            || /^(?:[~^=]|[<>]=?)?v?\d+(?:\.(?:\d+|[xX*])){0,2}(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(part));
+    return PUBLIC_PACKAGE_NAME.test(key) && isPublicLockfileVersion(value);
 }
 
 // True when the line has a `#` comment outside quoted strings, for example
@@ -2235,28 +2424,7 @@ async function runPatchContentGate({ core, github = null, context = null, fs = r
     const path = require('node:path');
     const names = fs.existsSync(patchDir) ? fs.readdirSync(patchDir).filter(name => /^aw-.*\.(?:patch|bundle)$/.test(name)).sort() : [];
     const patches = new Map(names.filter(name => name.endsWith('.patch')).map(name => [name, fs.readFileSync(path.join(patchDir, name), 'utf8')]));
-    const branchTexts = new Map();
-    if (github && context) {
-        const changed = new Set([...patches.values()].flatMap(text => parsePatchFileDiffs(text).map(diff => diff.oldPath).filter(Boolean)));
-        for (const file of changed) {
-            try {
-                const { data } = await github.rest.repos.getContent({ ...context.repo, path: file, ref: AUTO_SEC_BRANCH });
-                if (typeof data?.content === 'string') {
-                    branchTexts.set(file, Buffer.from(data.content, 'base64').toString('utf8'));
-                }
-            } catch (error) {
-                // No auto-sec branch yet, or the file is not on it.
-                if (error?.status !== 404) {
-                    throw error;
-                }
-            }
-        }
-    }
-    const readBaseTexts = file => {
-        const full = workspace ? path.resolve(workspace, file) : null;
-        const local = full && full.startsWith(path.resolve(workspace) + path.sep) && fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : undefined;
-        return [local, branchTexts.get(file)];
-    };
+    const readBaseTexts = await createPatchBaseReader({ patches, github, context, fs, workspace });
     const violations = [];
     const rebuiltPatches = [];
     for (const name of names) {
@@ -2286,6 +2454,36 @@ async function runPatchContentGate({ core, github = null, context = null, fs = r
         core.info(`Patch content gate passed for ${names.length} patch file(s).`);
     }
     return { patches: names.length, violations };
+}
+
+async function createPatchBaseReader({ patches, github, context, fs, workspace }) {
+    const path = require('node:path');
+    const branchTexts = new Map();
+    if (github && context) {
+        const changed = new Set([...patches.values()].flatMap(text => parsePatchFileDiffs(text).map(diff => diff.oldPath)
+            .filter(file => isAllowedManifest(file) && PUBLIC_MANIFEST_PATH.test(file))));
+        for (const file of changed) {
+            try {
+                const { data } = await github.rest.repos.getContent({ ...context.repo, path: file, ref: AUTO_SEC_BRANCH });
+                if (typeof data?.content === 'string') {
+                    branchTexts.set(file, Buffer.from(data.content, 'base64').toString('utf8'));
+                }
+            } catch (error) {
+                // No auto-sec branch yet, or the file is not on it.
+                if (error?.status !== 404) {
+                    throw error;
+                }
+            }
+        }
+    }
+    return file => {
+        if (!isAllowedManifest(file) || !PUBLIC_MANIFEST_PATH.test(file)) {
+            return [];
+        }
+        const full = workspace ? path.resolve(workspace, file) : null;
+        const local = full && full.startsWith(path.resolve(workspace) + path.sep) && fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : undefined;
+        return [local, branchTexts.get(file)];
+    };
 }
 
 // The agent sees malware flags, advisory ranges, and alert numbers, but everything it
@@ -2335,14 +2533,14 @@ function parsePublicUpdate(text, kind) {
             return null;
         }
         const [, name, from, to] = match;
-        return PUBLIC_PACKAGE_NAME.test(name) && PUBLIC_VERSION.test(from) && PUBLIC_VERSION.test(to) && !PUBLIC_FORBIDDEN_TOKEN.test(text) ? { name, to } : null;
+        return PUBLIC_PACKAGE_NAME.test(name) && PUBLIC_VERSION.test(from) && PUBLIC_VERSION.test(to) && !PUBLIC_FORBIDDEN_TOKEN.test(text) ? { name, from, to } : null;
     }
     const match = /^\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|$/.exec(text);
     if (!match) {
         return null;
     }
     const [name, manifest, from, to] = match.slice(1).map(publicCell);
-    return PUBLIC_PACKAGE_NAME.test(name) && PUBLIC_MANIFEST_PATH.test(manifest) && PUBLIC_VERSION.test(from) && PUBLIC_VERSION.test(to) && !PUBLIC_FORBIDDEN_TOKEN.test(text) ? { name, to } : null;
+    return PUBLIC_PACKAGE_NAME.test(name) && PUBLIC_MANIFEST_PATH.test(manifest) && isCanonicalRepoPath(manifest) && PUBLIC_VERSION.test(from) && PUBLIC_VERSION.test(to) && !PUBLIC_FORBIDDEN_TOKEN.test(text) ? { name, manifest, from, to } : null;
 }
 
 function publicLines(text) {
@@ -2397,12 +2595,20 @@ function parsePatchCommits(patchText) {
     let inHeaders = false;
     for (const line of String(patchText ?? '').split('\n').map(text => text.replace(/\r$/, ''))) {
         if (/^From [0-9a-f]{40} Mon Sep 17 00:00:00 2001$/.test(line)) {
-            current = { headers: [], message: [], closed: false };
+            current = { headers: [], message: [], diffstat: [], closed: false, inDiff: false };
             commits.push(current);
             inHeaders = true;
             continue;
         }
-        if (!current || current.closed) {
+        if (!current) {
+            continue;
+        }
+        if (current.closed) {
+            if (line.startsWith('diff --git ')) {
+                current.inDiff = true;
+            } else if (!current.inDiff) {
+                current.diffstat.push(line);
+            }
             continue;
         }
         if (inHeaders) {
@@ -2424,11 +2630,33 @@ function parsePatchCommits(patchText) {
     return commits;
 }
 
-function checkPatchCommits(patchText) {
+function matchesPublicUpdate(row, updates) {
+    return updates.some(update => (!row.manifest || row.manifest === update.manifest)
+        && normalizePackageName(update.ecosystem, row.name) === normalizePackageName(update.ecosystem, update.name)
+        && sameVersion(row.to.replace(/^[~^=<>v]+/, ''), update.to)
+        && update.from.some(from => sameVersion(row.from.replace(/^[~^=<>v]+/, ''), from)));
+}
+
+function checkPatchCommits(patchText, updates = null) {
     const reasons = [];
     const commits = parsePatchCommits(patchText);
     if (commits.length === 0) {
         reasons.push('missing-commit-headers');
+    }
+    const paths = new Set(parsePatchFileDiffs(patchText).map(diff => diff.newPath).filter(Boolean));
+    // Only structural diffstat text and actual changed paths may sit between the commit
+    // message separator and first diff. Git can shorten long paths to `.../package.json`.
+    const publicDiffstat = line => {
+        const text = line.trim();
+        if (text === '' || /^\d+ files? changed(?:, \d+ insertions?\(\+\))?(?:, \d+ deletions?\(-\))?$/.test(text)) {
+            return true;
+        }
+        const stat = /^(.+?)\s+\|\s+\d+(?:\s+[+-]+)?$/.exec(text);
+        return Boolean(stat && (paths.has(stat[1]) || (stat[1].startsWith('.../') && [...paths].some(path => path.endsWith(stat[1].slice(3))))));
+    };
+    if (commits.length > 0 && (!/^From [0-9a-f]{40} Mon Sep 17 00:00:00 2001(?:\r?\n|$)/.test(String(patchText))
+        || commits.some(commit => commit.diffstat.some(line => !publicDiffstat(line))))) {
+        reasons.push('unsupported-patch-text');
     }
     for (const commit of commits) {
         const headers = new Map();
@@ -2443,18 +2671,35 @@ function checkPatchCommits(patchText) {
         }
         // `git format-patch` writes only these headers for an ASCII commit; MIME headers mean
         // non-ASCII text, which the templates never contain.
-        if (unknownHeader || [...headers.keys()].some(name => !['from', 'date', 'subject'].includes(name))) {
+        if (unknownHeader || [...headers.keys()].some(name => !['from', 'date', 'subject', 'x-gh-aw-base-commit'].includes(name))) {
             reasons.push('unexpected-commit-header');
             continue;
+        }
+        // gh-aw v0.89.17 embeds this transport annotation after the mbox separator.
+        // Its value is a SHA only, never a free-text extension header.
+        // https://github.com/github/gh-aw/blob/v0.89.17/actions/setup/js/generate_git_patch.cjs
+        if (headers.has('x-gh-aw-base-commit') && !/^[0-9a-f]{40}$/.test(headers.get('x-gh-aw-base-commit'))) {
+            reasons.push('invalid-base-commit');
         }
         const identity = String(headers.get('from') ?? '').replace(/^"([^"]*)"/, '$1');
         if (identity !== PUBLIC_COMMIT_IDENTITY) {
             reasons.push('unexpected-commit-author');
         }
+        const date = headers.get('date') ?? '';
+        // git format-patch uses RFC 2822 dates, e.g. Sat, 3 Oct 2026 09:00:00 +0000.
+        // A recognized Date header must not become a free-text field.
+        // https://www.rfc-editor.org/rfc/rfc2822#section-3.3
+        if (!/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (?:0?[1-9]|[12]\d|3[01]) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d\d:\d\d:\d\d [+-]\d{4}$/.test(date)
+            || !Number.isFinite(Date.parse(date))) {
+            reasons.push('unexpected-commit-date');
+        }
         const subject = String(headers.get('subject') ?? '').replace(/^\[PATCH(?: \d+\/\d+)?\] /, '');
         // The blank line between subject and body is the header terminator, so restore it.
-        if (!checkPublicCommitMessage([subject, '', ...commit.message].join('\n'))) {
+        const message = [subject, '', ...commit.message].join('\n');
+        if (!checkPublicCommitMessage(message)) {
             reasons.push('non-template-commit-message');
+        } else if (updates && !publicLines(message).slice(2).every(line => matchesPublicUpdate(parsePublicUpdate(line, 'commit'), updates))) {
+            reasons.push('commit-row-not-in-patch');
         }
     }
     return reasons;
@@ -2467,13 +2712,19 @@ function checkPatchCommits(patchText) {
  * table cannot carry anything but the upgrade it describes. Returns `{ source, reason }`
  * violations.
  */
-function checkPublicText(items, patches) {
+function checkPublicText(items, patches, readBaseTexts = () => []) {
     const violations = [];
-    // A lockfile hunk often names the package only in a context line (for example
-    // `"node_modules/lodash": {`), so the name may appear anywhere in the patch; the target
-    // version must be on an added line.
-    const patchText = [...patches.values()].join('\n').toLowerCase();
-    const addedText = [...patches.values()].flatMap(text => parsePatchFileDiffs(text).flatMap(diff => diff.blocks.flatMap(block => block.added))).join('\n');
+    const updates = [];
+    for (const [artifact, text] of patches) {
+        const rebuiltFiles = new Map();
+        checkPatchContents(text, readBaseTexts, rebuiltFiles);
+        for (const [manifest, { base, head }] of rebuiltFiles) {
+            const ecosystem = PATH_ECOSYSTEMS.get(basenameOf(manifest).toLowerCase());
+            if (ecosystem) {
+                updates.push(...manifestVersionChanges(manifest, base, head, ecosystem).map(change => ({ artifact, manifest, ecosystem, ...change })));
+            }
+        }
+    }
     for (const item of items) {
         if (item?.type === 'create_pull_request') {
             const title = String(item.title ?? '').trim();
@@ -2483,15 +2734,19 @@ function checkPublicText(items, patches) {
             const rows = parsePublicPrBody(item.body);
             if (rows === null) {
                 violations.push({ source: 'create_pull_request.body', reason: 'non-template-text' });
-            } else if (!rows.every(row => patchText.includes(row.name.toLowerCase()) && addedText.includes(row.to.replace(/^(?:[~^=]|[<>]=?)?v?/, '')))) {
+            } else if (!rows.every(row => matchesPublicUpdate(row, updates))) {
                 violations.push({ source: 'create_pull_request.body', reason: 'row-not-in-patch' });
             }
-        } else if (item?.type === 'push_to_pull_request_branch' && !checkPublicCommitMessage(item.message)) {
-            violations.push({ source: 'push_to_pull_request_branch.message', reason: 'non-template-text' });
+        } else if (item?.type === 'push_to_pull_request_branch') {
+            if (!checkPublicCommitMessage(item.message)) {
+                violations.push({ source: 'push_to_pull_request_branch.message', reason: 'non-template-text' });
+            } else if (!publicLines(item.message).slice(2).every(line => matchesPublicUpdate(parsePublicUpdate(line, 'commit'), updates))) {
+                violations.push({ source: 'push_to_pull_request_branch.message', reason: 'row-not-in-patch' });
+            }
         }
     }
     for (const [name, text] of patches) {
-        violations.push(...checkPatchCommits(text).map(reason => ({ source: name, reason })));
+        violations.push(...checkPatchCommits(text, updates.filter(update => update.artifact === name)).map(reason => ({ source: name, reason })));
     }
     return violations;
 }
@@ -2501,14 +2756,15 @@ function checkPublicText(items, patches) {
  * any published string does not match its fixed template (see `checkPublicText`). The
  * failure message names only the field and reason, never the rejected text.
  */
-async function runPublicTextGate({ core, fs = require('node:fs'), env = process.env, patchDir = '/tmp/gh-aw' }) {
+async function runPublicTextGate({ core, github = null, context = null, fs = require('node:fs'), env = process.env, patchDir = '/tmp/gh-aw', workspace = env.GITHUB_WORKSPACE, readBaseTexts = null }) {
     const path = require('node:path');
     const outputPath = env.GH_AW_AGENT_OUTPUT;
     const agentOutput = outputPath && fs.existsSync(outputPath) ? JSON.parse(fs.readFileSync(outputPath, 'utf8')) : {};
     const items = (Array.isArray(agentOutput?.items) ? agentOutput.items : []).filter(item => ['create_pull_request', 'push_to_pull_request_branch'].includes(item?.type));
     const names = fs.existsSync(patchDir) ? fs.readdirSync(patchDir).filter(name => /^aw-.*\.patch$/.test(name)).sort() : [];
     const patches = new Map(names.map(name => [name, fs.readFileSync(path.join(patchDir, name), 'utf8')]));
-    const violations = checkPublicText(items, patches);
+    const bases = readBaseTexts ?? await createPatchBaseReader({ patches, github, context, fs, workspace });
+    const violations = checkPublicText(items, patches, bases);
     if (violations.length > 0) {
         core.setFailed(`auto-sec public text gate failed: ${violations.map(v => `${v.source} ${v.reason}`).join('; ')}`);
     } else {
@@ -2609,11 +2865,12 @@ const AGENT_TRANSCRIPT_PATHS = [
  * template-checked type, retained fields must be validated primitives, a `noop` must be
  * counts only, and PR text and patches must pass `checkPublicText`. Unknown properties
  * are dropped from every retained type before publication.
- * Patch contents must also pass `checkPatchUploadSafety`, since the patches are uploaded
- * before the safe_outputs job's content gate runs. Returns the items to keep and
+ * Patch contents must also pass reconstruction and content policy plus
+ * `checkPatchUploadSafety`, since patches are uploaded before the safe_outputs job's
+ * content gate runs. Returns the items to keep and
  * `{ source, reason }` violations.
  */
-function checkAgentOutputs(lines, patches) {
+function checkAgentOutputs(lines, patches, readBaseTexts = () => []) {
     const violations = [];
     const kept = [];
     for (const [index, line] of lines.entries()) {
@@ -2638,12 +2895,18 @@ function checkAgentOutputs(lines, patches) {
         }
         kept.push(item);
     }
-    violations.push(...checkPublicText(kept, patches));
+    violations.push(...checkPublicText(kept, patches, readBaseTexts));
     if (kept.filter(item => ['create_pull_request', 'push_to_pull_request_branch'].includes(item.type)).length > 1) {
         violations.push({ source: 'code-writing-outputs', reason: 'conflicting-requests' });
     }
     for (const [name, text] of patches) {
-        violations.push(...checkPatchUploadSafety(text).map(reason => ({ source: name, reason })));
+        // Handler-time rejection is too late: the agent artifact is already public then.
+        // Enforce reconstruction, manifest, source, and artifact policy before upload too.
+        const reasons = new Set([
+            ...checkPatchContents(text, readBaseTexts).map(violation => violation.reason),
+            ...checkPatchUploadSafety(text),
+        ]);
+        violations.push(...[...reasons].map(reason => ({ source: name, reason })));
     }
     return { kept, violations };
 }
@@ -2674,6 +2937,7 @@ function checkPatchUploadSafety(patchText) {
     for (const diff of parsePatchFileDiffs(patchText)) {
         if (!diff.parseable || diff.oldPath !== diff.newPath || diff.metadata.length > 0
             || String(diff.newPath).startsWith('.github/')
+            || !isCanonicalRepoPath(diff.newPath)
             || !UPLOADABLE_PATCH_BASENAMES.has(basenameOf(diff.newPath ?? ''))) {
             reasons.add('disallowed-patch-file');
         }
@@ -2681,9 +2945,10 @@ function checkPatchUploadSafety(patchText) {
             && diff.blocks.some(block => block.added.some(hasLockfileComment))) {
             reasons.add('lockfile-comment');
         }
-        if (METADATA_LOCKFILE_BASENAMES.has(basenameOf(diff.newPath ?? '').toLowerCase())
+        if (isLockfile(diff.newPath ?? '')
             && !diff.blocks.some(block => block.added.some(line => PUBLIC_FORBIDDEN_TOKEN.test(line)))
-            && diff.blocks.some(block => block.added.some(line => !isPublicJsonLockfileLine(line)))) {
+            && !diff.blocks.some(block => block.added.some(hasLockfileComment))
+            && diff.blocks.some(block => block.added.some(line => !isPublicLockfileLine(diff.newPath, line)))) {
             reasons.add('unsupported-lockfile-text');
         }
     }
@@ -2704,11 +2969,11 @@ function checkPatchUploadSafety(patchText) {
  * and reason. Publication is authorized only after every filesystem operation succeeds;
  * generated downstream steps must check both this step's outcome and publication_ready.
  */
-async function runAgentOutputScrub({ core, fs = require('node:fs'), env = process.env, workDir = '/tmp/gh-aw' }) {
+async function runAgentOutputScrub({ core, github = null, context = null, fs = require('node:fs'), env = process.env, workDir = '/tmp/gh-aw', readBaseTexts = null }) {
     try {
-        return scrubAgentOutputs({ core, fs, env, workDir });
+        return await scrubAgentOutputs({ core, github, context, fs, env, workDir, readBaseTexts });
     } catch {
-        // Filesystem errors can include private paths or data. Report only a fixed reason;
+        // File, Git, and API errors can include private paths or data. Report a fixed reason;
         // do not authorize publication even if some earlier cleanup operations succeeded.
         const violations = [{ source: 'filesystem', reason: 'io-error' }];
         core.setFailed('auto-sec agent output scrub failed: filesystem io-error');
@@ -2716,7 +2981,7 @@ async function runAgentOutputScrub({ core, fs = require('node:fs'), env = proces
     }
 }
 
-function scrubAgentOutputs({ core, fs, env, workDir }) {
+async function scrubAgentOutputs({ core, github, context, fs, env, workDir, readBaseTexts }) {
     const path = require('node:path');
     for (const relative of AGENT_TRANSCRIPT_PATHS) {
         fs.rmSync(path.join(workDir, relative), { recursive: true, force: true });
@@ -2726,10 +2991,7 @@ function scrubAgentOutputs({ core, fs, env, workDir }) {
         ? fs.readFileSync(outputPath, 'utf8').split('\n').filter(line => line.trim() !== '')
         : [];
     const artifactNames = fs.existsSync(workDir) ? fs.readdirSync(workDir).filter(name => /^aw-.*\.(?:patch|bundle)$/.test(name)).sort() : [];
-    const patchNames = artifactNames.filter(name => name.endsWith('.patch'));
-    const patches = new Map(patchNames.map(name => [name, fs.readFileSync(path.join(workDir, name), 'utf8')]));
-    const { kept, violations } = checkAgentOutputs(lines, patches);
-    if (violations.length > 0) {
+    const reject = violations => {
         if (outputPath && fs.existsSync(outputPath)) {
             fs.writeFileSync(outputPath, '');
         }
@@ -2738,6 +3000,71 @@ function scrubAgentOutputs({ core, fs, env, workDir }) {
         }
         core.setFailed(`auto-sec agent output scrub failed: ${violations.map(v => `${v.source} ${v.reason}`).join('; ')}`);
         return { kept: 0, dropped: lines.length, violations };
+    };
+    // am transport has two canonical names (default and repo-scoped). Neither opaque
+    // bundles nor agent-chosen filenames may become public artifact carriers.
+    // https://github.com/github/gh-aw/blob/v0.89.17/actions/setup/js/git_patch_utils.cjs
+    const allowedArtifacts = new Set(['aw-auto-sec-security-updates.patch', 'aw-microsoft-aspire-auto-sec-security-updates.patch']);
+    if (artifactNames.some(name => !allowedArtifacts.has(name) || !fs.lstatSync(path.join(workDir, name)).isFile())) {
+        return reject([{ source: 'patch-artifacts', reason: 'unsupported-artifact' }]);
+    }
+    const patchNames = artifactNames.filter(name => name.endsWith('.patch'));
+    const patches = new Map(patchNames.map(name => [name, fs.readFileSync(path.join(workDir, name), 'utf8')]));
+    // An agent can write arbitrary git blobs, so the patch's index alone is not authority.
+    // Bind bases to the immutable workflow checkout or the bot-owned branch obtained with
+    // the read-only GitHub client, never the agent's working tree or an arbitrary blob.
+    const branchBases = readBaseTexts ? null : await createPatchBaseReader({ patches, github, context, fs, workspace: null });
+    const snapshots = new Map();
+    const bases = readBaseTexts ?? ((file, blob) => {
+        if (!isAllowedManifest(file) || !PUBLIC_MANIFEST_PATH.test(file) || !/^[0-9a-f]{7,40}$/.test(blob ?? '')) {
+            return [];
+        }
+        const branch = branchBases(file);
+        if (branch.some(text => typeof text === 'string' && gitBlobId(text).startsWith(blob))) {
+            return branch;
+        }
+        if (!/^[0-9a-f]{40}$/.test(env.GITHUB_SHA ?? '')) {
+            throw new Error('Missing trusted base commit');
+        }
+        if (!snapshots.has(file)) {
+            snapshots.set(file, require('node:child_process').execFileSync('git', ['--no-pager', '--no-replace-objects', 'show', '--no-textconv', `${env.GITHUB_SHA}:${file}`], {
+                cwd: env.GITHUB_WORKSPACE,
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'pipe'],
+                windowsHide: true,
+                timeout: 10000,
+                maxBuffer: 32 * 1024 * 1024,
+            }));
+        }
+        return [...branch, snapshots.get(file)];
+    });
+    const { kept, violations } = checkAgentOutputs(lines, patches, bases);
+    if (violations.length > 0) {
+        return reject(violations);
+    }
+    // The handler can use the embedded base SHA for its checkout/fallback, not just
+    // for display. Bind both transport fields to trusted refs before publication;
+    // never fetch a commit selected by the agent to establish its own authority.
+    const requestedBases = new Set([
+        ...kept.map(item => item.base_commit).filter(Boolean),
+        ...[...patches.values()].flatMap(text => parsePatchCommits(text).flatMap(commit => commit.headers
+            .map(header => /^X-GH-AW-Base-Commit: ([0-9a-f]{40})$/i.exec(header)?.[1]).filter(Boolean))),
+    ]);
+    const trustedBases = new Set(/^[0-9a-f]{40}$/.test(env.GITHUB_SHA ?? '') ? [env.GITHUB_SHA] : []);
+    if ([...requestedBases].some(sha => !trustedBases.has(sha)) && github && context) {
+        try {
+            const { data } = await github.rest.repos.getBranch({ ...context.repo, branch: AUTO_SEC_BRANCH });
+            if (/^[0-9a-f]{40}$/.test(data?.commit?.sha ?? '')) {
+                trustedBases.add(data.commit.sha);
+            }
+        } catch (error) {
+            if (error?.status !== 404) {
+                throw error;
+            }
+        }
+    }
+    if ([...requestedBases].some(sha => !trustedBases.has(sha))) {
+        return reject([{ source: 'patch-transport', reason: 'untrusted-base-commit' }]);
     }
     if (outputPath && fs.existsSync(outputPath)) {
         fs.writeFileSync(outputPath, kept.map(item => JSON.stringify(item)).join('\n') + (kept.length > 0 ? '\n' : ''));
@@ -2784,6 +3111,7 @@ module.exports = {
     isAllowedManifest,
     isVersionOnlyEdit,
     isPublicJsonLockfileLine,
+    isPublicLockfileLine,
     unboundLockfileArtifacts,
     isBreakingChange,
     isCooldownSatisfied,
