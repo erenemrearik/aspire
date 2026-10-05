@@ -299,7 +299,9 @@ safe-outputs:
     # unless every changed manifest is a dependency-version-only edit of its full
     # base file and no file adds an unapproved package source. Because the patch
     # is public, no added line may contain advisory text and comment-capable
-    # lockfiles may not gain comments. It covers both code-writing outputs.
+    # lockfiles may not gain comments. JSON lockfile additions must use recognized
+    # dependency-data syntax, not free-text metadata. Each patch artifact is checked
+    # independently even when another artifact changes the same path.
     - name: Validate auto-sec patch contents
       if: (!cancelled()) && (contains(needs.agent.outputs.output_types, 'create_pull_request') || contains(needs.agent.outputs.output_types, 'push_to_pull_request_branch'))
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -468,15 +470,19 @@ Skip alerts the existing auto-sec PR already fixes.
   `npm install <name>@<version> --package-lock-only --ignore-scripts` for direct
   dependencies. For transitive dependencies, prefer
   `npm update <name> --package-lock-only --ignore-scripts`; if the parent pins an
-  old range, add an `overrides` entry in `package.json` with the patched version.
+  old range, update an existing `overrides` version in `package.json`. Do not add
+  new entries: the manifest gate permits only version-token replacements. If a
+  fix requires a new override, mark the alert `blocked: update-failed`.
   Keep the registry the lockfile already uses.
 - **yarn** (`yarn.lock`): use `yarn up <name>@<version> --mode=update-lockfile`
   (Berry) or `yarn upgrade <name>@<version> --ignore-scripts` (classic), whichever
-  matches the directory, or a `resolutions` entry for transitive dependencies.
+  matches the directory, or update an existing `resolutions` version for transitive
+  dependencies. If a new entry is required, mark it `blocked: update-failed`.
 - **pnpm** (`pnpm-lock.yaml`): in the manifest directory run
   `corepack pnpm update <name>@<version> --lockfile-only` for direct dependencies.
-  For transitive dependencies, add a `pnpm.overrides` entry in `package.json` with
-  the patched version, then run `corepack pnpm install --lockfile-only`. Never run
+  For transitive dependencies, update an existing `pnpm.overrides` version in
+  `package.json`, then run `corepack pnpm install --lockfile-only`. If a new entry
+  is required, mark it `blocked: update-failed`. Never run
   `npm` or `yarn` in a pnpm directory; they would write a second lockfile.
 - **pip** (`uv.lock`): in the project directory run
   `uv lock --no-build --upgrade-package <name>==<version>`. `--no-build` stops uv
@@ -502,7 +508,13 @@ If no compliant version exists yet, use `blocked: no-version-past-cooldown`. If 
 command fails or the result does not resolve, revert that directory with
 `git checkout -- <dir>` and use `blocked: update-failed`.
 
-After the edits, review `git diff --stat` and `git diff` for each lockfile. Confirm
+After the edits, review `git diff --stat` and `git diff` for each lockfile. JSON
+lockfile additions are restricted to pretty-printed dependency/version/artifact
+data; new metadata such as descriptions, notes, funding, or license text is not
+supported. If regeneration requires unsupported metadata, revert that directory
+and mark it `blocked: update-failed`.
+
+Confirm
 only dependency manifests changed, no new registry host appears, and every version
 change is within the same major. Commit once with exactly this message: the subject
 `Update dependencies`, a blank line, then one line per package
@@ -511,6 +523,9 @@ git identity; never pass `--author` or change `user.name`/`user.email`. The
 safe-output job rejects any other commit message, author, title, or body.
 
 **Emit the safe output.**
+
+Emit at most one code-writing output: create or push, never both. Duplicate
+code-writing requests are rejected before publication.
 
 - Existing auto-sec PR: emit `push_to_pull_request_branch` with that PR's number and
   the same commit message as `message`.

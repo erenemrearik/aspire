@@ -455,6 +455,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("app/yarn.lock", YarnLockBase, YarnVersion20, "  version \"4.17.21\"\n  resolved \"" + NpmRegistry + "lodash/-/lodash-4.17.21.tgz#abc\" # alert 42", "workspace", "lockfile-comment")]
     [InlineData("app/yarn.lock", YarnLockBase, YarnVersion20, "  # fixes 42\n" + YarnVersion21, "workspace", "lockfile-comment")]
     [InlineData("extension/package-lock.json", PackageLockBase, LockVersion20, "      \"version\": \"4.17.21\",\n      \"note\": \"GHSA-xxxx\",\n      \"resolved\": \"" + NpmRegistry + "lodash/-/lodash-4.17.21.tgz\"", "workspace", "forbidden-public-text")]
+    [InlineData("extension/package-lock.json", PackageLockBase, LockVersion20, "      \"version\": \"4.17.21\",\n      \"note\": \"alert 42: prototype pollution in lodash\",\n      \"resolved\": \"" + NpmRegistry + "lodash/-/lodash-4.17.21.tgz\"", "workspace", "unsupported-lockfile-text")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"lodash\": \"^4.17.20\"", "    \"lodash\": \"^4.17.21\"", "stale", "non-version-manifest-edit")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"preinstall\": \"1.0.0\"", "    \"preinstall\": \"1.0.1\"", "workspace", "non-version-manifest-edit")]
     [InlineData("extension/package.json", PackageJsonBase, "    \"build\": \"vite --mode=1\",", "    \"build\": \"vite --mode=2\",", "workspace", "non-version-manifest-edit")]
@@ -472,16 +473,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("Directory.Packages.props", PackagesPropsBase, "    <PackageVersion Include=\"X\" Version=\"9.0.4\" />", "    <PackageVersion Include=\"X\" Version=\"9.0.6\" />", "workspace", "nuget-not-on-approved-feed")]
     public async Task PatchContentGateChecksEveryChangedLine(string path, string baseText, string oldLine, string newLine, string baseLocation, string expectedReason)
     {
-        // Replacement hunk with a context line on each side, applied at the real position in
-        // baseText and labeled with baseText's git blob ID.
-        var baseLines = baseText.Split('\n');
-        var removed = oldLine.Split('\n');
-        var at = Array.IndexOf(baseLines, removed[0]);
-        Assert.True(at > 0 && at + removed.Length < baseLines.Length);
-        Assert.Equal(removed, baseLines[at..(at + removed.Length)]);
-        var added = newLine.Split('\n');
-        var hunk = string.Join('\n', [$" {baseLines[at - 1]}", .. removed.Select(line => $"-{line}"), .. added.Select(line => $"+{line}"), $" {baseLines[at + removed.Length]}"]);
-        var patch = $"From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] update\n\n---\ndiff --git a/{path} b/{path}\nindex {GitBlobId(baseText)[..7]}..2222222 100644\n--- a/{path}\n+++ b/{path}\n@@ -{at},{removed.Length + 2} +{at},{added.Length + 2} @@\n{hunk}\n-- \n2.43.0\n";
+        var patch = ReplacementPatch(path, baseText, oldLine, newLine);
 
         const string flat = "https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/flat2/";
         var workspaceFiles = new JsonObject
@@ -527,7 +519,6 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         }
 
         var result = await RunHarnessAsync(request);
-
         var violations = result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}").ToArray();
         if (expectedReason.Length == 0)
         {
@@ -540,6 +531,69 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             Assert.Single(result["failures"]!.AsArray());
         }
     }
+
+        private static string ReplacementPatch(string path, string baseText, string oldLine, string newLine)
+        {
+            // Replacement hunk with a context line on each side, applied at the real position
+            // in baseText and labeled with the exact base's git blob ID.
+            var baseLines = baseText.Split('\n');
+            var removed = oldLine.Split('\n');
+            var at = Array.IndexOf(baseLines, removed[0]);
+            Assert.True(at > 0 && at + removed.Length < baseLines.Length);
+            Assert.Equal(removed, baseLines[at..(at + removed.Length)]);
+            var added = newLine.Split('\n');
+            var hunk = string.Join('\n', [$" {baseLines[at - 1]}", .. removed.Select(line => $"-{line}"), .. added.Select(line => $"+{line}"), $" {baseLines[at + removed.Length]}"]);
+            return $"From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] update\n\n---\ndiff --git a/{path} b/{path}\nindex {GitBlobId(baseText)[..7]}..2222222 100644\n--- a/{path}\n+++ b/{path}\n@@ -{at},{removed.Length + 2} +{at},{added.Length + 2} @@\n{hunk}\n-- \n2.43.0\n";
+        }
+
+        [Theory]
+        [RequiresTools(["node"])]
+        [InlineData("cooldown-not-satisfied", true)]
+        [InlineData("cooldown-not-satisfied", false)]
+        [InlineData("breaking-change", true)]
+        [InlineData("breaking-change", false)]
+        [InlineData("nuget-not-on-approved-feed", true)]
+        [InlineData("nuget-not-on-approved-feed", false)]
+        public async Task PatchContentGateValidatesOverlappingArtifactsIndependently(string reason, bool invalidFirst)
+        {
+            var nuget = reason == "nuget-not-on-approved-feed";
+            var path = nuget ? "Directory.Packages.props" : "extension/package.json";
+            var baseText = nuget ? PackagesPropsBase : PackageJsonBase;
+            var oldLine = nuget ? "    <PackageVersion Include=\"X\" Version=\"9.0.4\" />" : "    \"lodash\": \"^4.17.20\"";
+            var safeLine = nuget ? oldLine.Replace("9.0.4", "9.0.5") : oldLine.Replace("4.17.20", "4.17.21");
+            var invalidLine = nuget ? oldLine.Replace("9.0.4", "9.0.6")
+                : oldLine.Replace("4.17.20", reason == "breaking-change" ? "5.0.0" : "4.17.22");
+            const string flat = "https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/flat2/";
+            var result = await RunHarnessAsync(new JsonObject
+            {
+                ["mode"] = "patch-gate",
+                ["patchFiles"] = new JsonObject
+                {
+                    ["aw-a.patch"] = ReplacementPatch(path, baseText, oldLine, invalidFirst ? invalidLine : safeLine),
+                    ["aw-z.patch"] = ReplacementPatch(path, baseText, oldLine, invalidFirst ? safeLine : invalidLine),
+                },
+                ["workspaceFiles"] = new JsonObject
+                {
+                    [path] = baseText,
+                    ["NuGet.config"] = "<configuration><packageSources><add key=\"public\" value=\"https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json\" /></packageSources></configuration>",
+                },
+                ["now"] = "2026-09-01T00:00:00Z",
+                ["responses"] = new JsonObject
+                {
+                    ["https://registry.npmjs.org/lodash"] = Response(new JsonObject
+                    {
+                        ["time"] = new JsonObject { ["4.17.21"] = "2026-08-01T00:00:00Z", ["4.17.22"] = "2026-08-30T00:00:00Z", ["5.0.0"] = "2026-08-01T00:00:00Z" },
+                    }),
+                    ["https://api.nuget.org/v3/registration5-gz-semver2/x/9.0.5.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
+                    ["https://api.nuget.org/v3/registration5-gz-semver2/x/9.0.6.json"] = Response(new JsonObject { ["published"] = "2026-08-01T00:00:00Z" }),
+                    ["https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json"] = ServiceIndex(flat),
+                    [$"{flat}x/index.json"] = Response(new JsonObject { ["versions"] = new JsonArray("9.0.4", "9.0.5") }),
+                },
+            });
+
+            Assert.Equal([$"{path} {reason}"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["path"]} {v["reason"]}"));
+            Assert.Single(result["failures"]!.AsArray());
+        }
 
     [Fact]
     [RequiresTools(["node"])]
@@ -590,11 +644,11 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
         var result = await RunHarnessAsync(request);
 
-        // These hunks only exercise the source check, so they never rebuild a full file; the
-        // gate's separate reconstruction requirement always reports them and is not under test.
+        // These fragments isolate delivery-source authorization; full reconstruction and
+        // the independently tested publication grammar reject them for other reasons.
         var violations = result["value"]!["violations"]!.AsArray()
             .Select(v => $"{v!["path"]} {v["reason"]}")
-            .Where(v => v != "extension/package-lock.json unreconstructable-file-diff")
+            .Where(v => v != "extension/package-lock.json unreconstructable-file-diff" && v != "extension/package-lock.json unsupported-lockfile-text")
             .ToArray();
         Assert.Equal(expectedReason.Length == 0 ? [] : [$"extension/package-lock.json {expectedReason}"], violations);
     }
@@ -800,6 +854,103 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             item => Assert.Equal("create_pull_request", item["type"]!.GetValue<string>()),
             item => Assert.Equal(new JsonObject { ["type"] = "approve_dependabot_pr", ["pr_number"] = 101, ["head_sha"] = headSha }.ToJsonString(), item.ToJsonString()),
             item => Assert.Equal("noop", item["type"]!.GetValue<string>()));
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("create_pull_request", "push_to_pull_request_branch")]
+    [InlineData("create_pull_request", "create_pull_request")]
+    [InlineData("push_to_pull_request_branch", "push_to_pull_request_branch")]
+    public async Task AgentOutputScrubRejectsConflictingCodeWritingRequests(string first, string second)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(PublicOutputFixture(first).ToJsonString(), PublicOutputFixture(second).ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+        });
+
+        Assert.Equal(["code-writing-outputs conflicting-requests"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("package-lock.json", "\"note\": \"alert 42: prototype pollution in lodash\",")]
+    [InlineData("package-lock.json", "\"note\": { \"text\": \"alert 42\" },")]
+    [InlineData("package-lock.json", "\"note\": [\"alert 42\"],")]
+    [InlineData("package-lock.json", "\"\\u006eote\": \"alert 42\",")]
+    [InlineData("package-lock.json", "\"alert 42 prototype pollution\": true,")]
+    [InlineData("package-lock.json", "\"funding\": { \"url\": \"https://example.com/alert-42\" },")]
+    [InlineData("package-lock.json", "\"integrity\": \"alert 42\",")]
+    [InlineData("package-lock.json", "\"resolved\": \"https://example.com/pkg.tgz?note=alert42\",")]
+    [InlineData("npm-shrinkwrap.json", "\"note\": \"alert 42: prototype pollution in lodash\",")]
+    [InlineData("npm-shrinkwrap.json", "\"note\": { \"text\": \"alert 42\" },")]
+    public async Task AgentOutputScrubRejectsUnrecognizedJsonLockfileText(string basename, string addedLine)
+    {
+        var patch = PublicTextPatch.Replace("\r\n", "\n")
+            .Replace("extension/package-lock.json", $"extension/{basename}", StringComparison.Ordinal)
+            .Replace("@@ -1,3 +1,3 @@", "@@ -1,3 +1,4 @@", StringComparison.Ordinal)
+            .Replace("+      \"version\": \"4.17.21\",\n", $"+      \"version\": \"4.17.21\",\n+      {addedLine}\n", StringComparison.Ordinal);
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = PublicTextBody.Replace("\r\n", "\n").Replace("extension/package-lock.json", $"extension/{basename}", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = patch },
+        });
+
+        Assert.Equal(["aw-auto-sec-security-updates.patch unsupported-lockfile-text"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Equal(["auto-sec agent output scrub failed: aw-auto-sec-security-updates.patch unsupported-lockfile-text"], result["failures"]!.AsArray().Select(v => v!.GetValue<string>()));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["remaining"]!.AsArray());
+        Assert.Null(result["stepOutputs"]!["publication_ready"]);
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("\"node_modules/@scope/name\": {", true)]
+    [InlineData("\"node_modules/a/node_modules/b\": {", true)]
+    [InlineData("\"dependencies\": {", true)]
+    [InlineData("\"note\": {", false)]
+    [InlineData("\"note\": [", false)]
+    [InlineData("\"note\": true,", false)]
+    [InlineData("\"note\": 42,", false)]
+    [InlineData("\"note\": \"alert 42\",", false)]
+    [InlineData("\"version\": \"4.17.21\",", true)]
+    [InlineData("\"lodash\": \"^4.17.21 || >=5.0.0\",", true)]
+    [InlineData("\"alias\": \"npm:lodash@^4.17.21\",", true)]
+    [InlineData("\"node\": \"*\",", true)]
+    [InlineData("\"dev\": true,", true)]
+    [InlineData("\"lockfileVersion\": 3,", true)]
+    [InlineData("\"integrity\": \"sha512-YWJjZA==\",", true)]
+    [InlineData("\"integrity\": \"alert 42\",", false)]
+    [InlineData("\"resolved\": \"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz\",", true)]
+    [InlineData("\"resolved\": \"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz#abc123\",", true)]
+    [InlineData("\"resolved\": \"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz?note=alert42\",", false)]
+    [InlineData("\"resolved\": \"https://alert42@example.com/a.tgz\",", false)]
+    [InlineData("\"version\": \"4.17.21\", \"note\": \"alert 42\"", false)]
+    [InlineData("\"version\": { \"note\": \"alert 42\" },", false)]
+    [InlineData("\"version\": \"alert 42\",", false)]
+    [InlineData("\"version\": \"1alert42\",", false)]
+    [InlineData("\"license\": \"MIT\",", false)]
+    public async Task JsonLockfilePublicationAcceptsOnlyTypedDependencyLines(string line, bool expected)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "call",
+            ["fn"] = "isPublicJsonLockfileLine",
+            ["args"] = new JsonArray(line),
+        });
+
+        Assert.Equal(expected, result["value"]!.GetValue<bool>());
     }
 
     [Theory]

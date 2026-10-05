@@ -107,6 +107,11 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   summaries, never advisory details. Before publication, safe-output objects are
   rebuilt from validated primitive fields; extra properties and unused transport
   metadata are stripped rather than copied into public artifacts.
+  Code-writing requests are mutually exclusive, and version policy is checked
+  separately for each patch artifact so overlapping paths cannot hide an update.
+  JSON lockfile additions accept only recognized dependency-data syntax, not new
+  free-text metadata. New override/resolution entries and unsupported lockfile
+  metadata require human intervention and are reported as `update-failed`.
 
 Prerequisites:
 - The `auto-sec` label must exist.

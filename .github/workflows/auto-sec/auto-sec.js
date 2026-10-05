@@ -2090,6 +2090,11 @@ function checkPatchContents(patchText, readBaseTexts = () => [], rebuiltFiles = 
         if (COMMENT_LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase()) && addedLines.some(hasLockfileComment)) {
             violations.push({ path, reason: 'lockfile-comment' });
         }
+        if (METADATA_LOCKFILE_BASENAMES.has(basenameOf(path).toLowerCase())
+            && !addedLines.some(line => PUBLIC_FORBIDDEN_TOKEN.test(line))
+            && addedLines.some(line => !isPublicJsonLockfileLine(line))) {
+            violations.push({ path, reason: 'unsupported-lockfile-text' });
+        }
     }
     return violations;
 }
@@ -2097,6 +2102,68 @@ function checkPatchContents(patchText, readBaseTexts = () => [], rebuiltFiles = 
 // Lockfiles whose formats allow `#` comments: yarn.lock (https://classic.yarnpkg.com/lang/en/docs/yarn-lock/),
 // pnpm-lock.yaml (YAML), and uv.lock (TOML). JSON lockfiles have no comment syntax.
 const COMMENT_LOCKFILE_BASENAMES = new Set(['yarn.lock', 'pnpm-lock.yaml', 'uv.lock']);
+
+// npm's pretty-printed lockfiles contain structural lines and typed dependency data:
+//   "node_modules/lodash": {    "version": "4.17.21",    "integrity": "sha512-<base64>"
+// Do not accept arbitrary metadata ("note": "alert 42: prototype pollution") merely
+// because it avoids the advisory token deny-list. Compact/multiline scalar encodings
+// and new free-text metadata are intentionally unsupported rather than guessed.
+// https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json
+function isPublicJsonLockfileLine(line) {
+    const text = line.trim();
+    if (/^[{}\[\],]*$/.test(text)) {
+        return true;
+    }
+    const container = /^"([^"\\]+)":\s*\{$/.exec(text);
+    if (container) {
+        return ['packages', 'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'requires', 'engines', 'peerDependenciesMeta'].includes(container[1])
+            || /^(?:node_modules\/(?:@[A-Za-z0-9][\w.-]*\/)?[A-Za-z0-9][\w.+-]*\/?)+$/.test(container[1])
+            || container[1] === '';
+    }
+    let entry;
+    try {
+        entry = JSON.parse(`{${text.replace(/,$/, '')}}`);
+    } catch {
+        return false;
+    }
+    const entries = Object.entries(entry);
+    if (entries.length !== 1) {
+        return false;
+    }
+    const [key, value] = entries[0];
+    if (typeof value === 'boolean') {
+        return ['requires', 'dev', 'optional', 'devOptional', 'peer', 'hasInstallScript', 'hasShrinkwrap', 'inBundle', 'link', 'bundled'].includes(key);
+    }
+    if (typeof value === 'number') {
+        return key === 'lockfileVersion' && [1, 2, 3].includes(value);
+    }
+    if (typeof value !== 'string') {
+        return false;
+    }
+    if (key === 'name') {
+        return PUBLIC_PACKAGE_NAME.test(value);
+    }
+    if (key === 'integrity') {
+        return /^(?:sha(?:1|256|384|512)-[A-Za-z0-9+/]+={0,2})(?: sha(?:1|256|384|512)-[A-Za-z0-9+/]+={0,2})*$/.test(value);
+    }
+    if (key === 'resolved') {
+        try {
+            const url = new URL(value);
+            return url.protocol === 'https:' && !url.username && !url.password && !url.search
+                && (!url.hash || /^#[0-9a-f]+$/i.test(url.hash))
+                && !/\s/.test(decodeURIComponent(url.pathname));
+        } catch {
+            return false;
+        }
+    }
+    // Dependency maps contain package-name keys and version selectors; words, nested
+    // metadata, arrays, and unrecognized numeric/boolean fields cannot carry prose.
+    const alias = value.startsWith('npm:') ? splitNpmSpec(value.slice(4)) : null;
+    const range = alias?.range && PUBLIC_PACKAGE_NAME.test(alias.name) ? alias.range : value;
+    return PUBLIC_PACKAGE_NAME.test(key)
+        && range.split(/\s*\|\|\s*|\s+-\s+|\s+/).every(part => part === '*'
+            || /^(?:[~^=]|[<>]=?)?v?\d+(?:\.(?:\d+|[xX*])){0,2}(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(part));
+}
 
 // True when the line has a `#` comment outside quoted strings, for example
 //   # note        or   version = "1.0.0" # note
@@ -2191,13 +2258,17 @@ async function runPatchContentGate({ core, github = null, context = null, fs = r
         return [local, branchTexts.get(file)];
     };
     const violations = [];
-    const rebuiltFiles = new Map();
+    const rebuiltPatches = [];
     for (const name of names) {
         if (name.endsWith('.bundle')) {
             violations.push({ path: name, reason: 'bundle-transport' });
             continue;
         }
+        // Independent artifacts may start from different blobs of the same path. Never
+        // let the later artifact overwrite an earlier one's version-policy evidence.
+        const rebuiltFiles = new Map();
         violations.push(...checkPatchContents(patches.get(name), readBaseTexts, rebuiltFiles));
+        rebuiltPatches.push(rebuiltFiles);
     }
     // The handlers push before any human review and same-repository PR CI installs the
     // result, so the version policy the prompt states is re-checked here from the rebuilt
@@ -2205,7 +2276,9 @@ async function runPatchContentGate({ core, github = null, context = null, fs = r
     if (violations.length === 0) {
         const nugetConfig = workspace ? path.resolve(workspace, 'NuGet.config') : null;
         const nugetConfigText = nugetConfig && fs.existsSync(nugetConfig) ? fs.readFileSync(nugetConfig, 'utf8') : null;
-        violations.push(...await checkPatchVersionPolicy(rebuiltFiles, { fetchImpl, now, nugetConfigText }));
+        for (const rebuiltFiles of rebuiltPatches) {
+            violations.push(...await checkPatchVersionPolicy(rebuiltFiles, { fetchImpl, now, nugetConfigText }));
+        }
     }
     if (violations.length > 0) {
         core.setFailed(`auto-sec patch content gate failed: ${violations.map(v => `${v.path} ${v.reason}`).join('; ')}`);
@@ -2566,6 +2639,9 @@ function checkAgentOutputs(lines, patches) {
         kept.push(item);
     }
     violations.push(...checkPublicText(kept, patches));
+    if (kept.filter(item => ['create_pull_request', 'push_to_pull_request_branch'].includes(item.type)).length > 1) {
+        violations.push({ source: 'code-writing-outputs', reason: 'conflicting-requests' });
+    }
     for (const [name, text] of patches) {
         violations.push(...checkPatchUploadSafety(text).map(reason => ({ source: name, reason })));
     }
@@ -2604,6 +2680,11 @@ function checkPatchUploadSafety(patchText) {
         if (COMMENT_LOCKFILE_BASENAMES.has(basenameOf(diff.newPath ?? '').toLowerCase())
             && diff.blocks.some(block => block.added.some(hasLockfileComment))) {
             reasons.add('lockfile-comment');
+        }
+        if (METADATA_LOCKFILE_BASENAMES.has(basenameOf(diff.newPath ?? '').toLowerCase())
+            && !diff.blocks.some(block => block.added.some(line => PUBLIC_FORBIDDEN_TOKEN.test(line)))
+            && diff.blocks.some(block => block.added.some(line => !isPublicJsonLockfileLine(line)))) {
+            reasons.add('unsupported-lockfile-text');
         }
     }
     // Context lines, diffstat lines, and any text between hunks are uploaded too, so the
@@ -2702,6 +2783,7 @@ module.exports = {
     inVulnerableRanges,
     isAllowedManifest,
     isVersionOnlyEdit,
+    isPublicJsonLockfileLine,
     unboundLockfileArtifacts,
     isBreakingChange,
     isCooldownSatisfied,
