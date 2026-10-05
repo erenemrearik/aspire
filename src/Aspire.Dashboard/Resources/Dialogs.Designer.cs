@@ -795,6 +795,15 @@ namespace Aspire.Dashboard.Resources {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Go to Terminals.
+        /// </summary>
+        public static string HelpDialogGoToTerminals {
+            get {
+                return ResourceManager.GetString("HelpDialogGoToTerminals", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   Looks up a localized string similar to Go to Traces.
         /// </summary>
         public static string HelpDialogGoToTraces {
