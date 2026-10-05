@@ -38,6 +38,19 @@ public sealed class ProcessExecutionFactoryEnvironmentTests(ITestOutputHelper ou
     }
 
     [Fact]
+    public void SetCommand_WindowsBatchShim_RepresentsEmptyArgumentsDirectly()
+    {
+        var startInfo = new ProcessStartInfo();
+
+        ProcessStartInfoHelper.SetCommand(startInfo, @"C:\tools\npm.cmd", ["before", "", "after"], isWindows: true);
+
+        Assert.Equal(
+            "/D /V:OFF /S /C \"\"%ASPIRE_COMMAND_SHIM_PATH%\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_0%\" \"\" \"%ASPIRE_COMMAND_SHIM_ARGUMENT_2%\"\"",
+            startInfo.Arguments);
+        Assert.Empty(startInfo.ArgumentList);
+    }
+
+    [Fact]
     [RequiresTools(["node"])]
     public async Task CreateExecution_WindowsBatchShim_PreservesLiteralArgumentText()
     {

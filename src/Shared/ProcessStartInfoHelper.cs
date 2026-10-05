@@ -31,9 +31,18 @@ internal static class ProcessStartInfoHelper
             var index = 0;
             foreach (var arg in args)
             {
-                var variable = ArgumentEnvironmentVariablePrefix + index.ToString(CultureInfo.InvariantCulture);
-                SetEnvironmentVariable(startInfo, variable, arg);
-                commandLine.Append(" \"%").Append(variable).Append("%\"");
+                if (arg.Length == 0)
+                {
+                    // Windows omits empty environment values. An undefined %VARIABLE% remains
+                    // literal in cmd's command line, so represent empty arguments directly.
+                    commandLine.Append(" \"\"");
+                }
+                else
+                {
+                    var variable = ArgumentEnvironmentVariablePrefix + index.ToString(CultureInfo.InvariantCulture);
+                    SetEnvironmentVariable(startInfo, variable, arg);
+                    commandLine.Append(" \"%").Append(variable).Append("%\"");
+                }
                 index++;
             }
 

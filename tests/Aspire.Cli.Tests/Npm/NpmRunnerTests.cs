@@ -55,7 +55,7 @@ public class NpmRunnerTests
             ["view", "@playwright/cli@0.1.1", "version", "--registry", "https://registry.npmjs.org/"],
             @"C:\temp\workdir", new TestEnvironment(), stdin);
 
-        Assert.Equal("cmd.exe", startInfo.FileName);
+        Assert.Equal(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", startInfo.FileName);
         Assert.Empty(startInfo.ArgumentList);
         Assert.Equal(@"C:\Program Files\nodejs\npm.cmd", startInfo.Environment["ASPIRE_COMMAND_SHIM_PATH"]);
         Assert.Equal(
@@ -151,7 +151,7 @@ public class NpmRunnerTests
         using var stdin = File.OpenNullHandle();
         var startInfo = NpmRunner.CreateNpmProcessStartInfo(@"C:\Program Files\nodejs\npm.cmd", [], @"C:\temp", new TestEnvironment(), stdin);
 
-        Assert.Equal("cmd.exe", startInfo.FileName);
+        Assert.Equal(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", startInfo.FileName);
         Assert.Equal(@"C:\Program Files\nodejs\npm.cmd", startInfo.Environment["ASPIRE_COMMAND_SHIM_PATH"]);
         Assert.Equal("/D /V:OFF /S /C \"\"%ASPIRE_COMMAND_SHIM_PATH%\"\"", startInfo.Arguments);
         Assert.Equal(@"C:\temp", startInfo.WorkingDirectory);
