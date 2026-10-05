@@ -229,6 +229,8 @@ Health checks also reconcile tunnel ports and access settings with the dev tunne
 
 Starting a tunnel checks its remote configuration and reuses matching tunnels and ports. Unchanged access policies are left intact; changed policies are reconciled before hosting. Ports are recreated only when their protocol, description, or labels differ from the application model. Remote drift is checked on each start rather than relying on a cached successful setup.
 
+For ports configured with `allowAnonymous: false`, an existing anonymous connection deny is retained even if additional access rules are present. If the deny is missing, it is added without first clearing the other rules. This avoids temporarily removing an existing restriction during in-place reconciliation.
+
 If tunnel status is incorrect after such a warning, include the output of `devtunnel --version` and the relevant tunnel console logs in an Aspire issue, after removing sensitive information. A service response indicating an active host will not override a disconnect reported by the local CLI, because that connection may belong to another host.
 
 ### Port forwarding logs

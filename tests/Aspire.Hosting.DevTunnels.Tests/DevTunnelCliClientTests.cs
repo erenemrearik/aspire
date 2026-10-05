@@ -371,15 +371,109 @@ public class DevTunnelCliClientTests
             Labels = ["label"],
             AllowAnonymous = anonymous
         });
-        Assert.Equal(anonymous.HasValue
-            ? [nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.ResetAccessAsync), nameof(DevTunnelCli.CreateAccessAsync)]
-            : new[] { nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.ResetAccessAsync) },
+        Assert.Equal(anonymous switch
+            {
+                false => [nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.CreateAccessAsync)],
+                true => [nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.ResetAccessAsync), nameof(DevTunnelCli.CreateAccessAsync)],
+                null => new[] { nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.ResetAccessAsync) }
+            },
             cli.Calls.Select(c => c.Method));
         Assert.All(cli.Calls, c => Assert.Equal("mytunnel.usw2", c.TunnelId));
         if (anonymous.HasValue)
         {
             Assert.Equal(!anonymous.Value, cli.Calls.Last().Arguments.Contains("--deny"));
         }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task RestrictivePortPolicyIsNotReplacedForExtraEntries(bool cancelReplacement, bool additionalScopes)
+    {
+        using var cts = new CancellationTokenSource();
+        var cli = new TestDevTunnelCli();
+        var deny = AnonymousAccess(deny: true) with { Scopes = additionalScopes ? ["connect", "manage"] : ["connect"] };
+        cli.EnqueueShowPortResult(0, PortJson(access: [
+            AnonymousAccess(deny: false) with { IsInherited = true },
+            deny,
+            new("Users", false, false, ["test-user"], ["connect"])
+        ]));
+        // Replacing this policy would remove its working deny. Neither a failed replacement
+        // nor cancellation after a reset would protect a port hosted by another process.
+        cli.EnqueueResetAccessResult(0, """{"accessControlEntries":[]}""");
+        cli.EnqueueCreateAccessResult(1, error: "Replacement deny failed.");
+        cli.OnCall = call =>
+        {
+            if (cancelReplacement && call.Method == nameof(DevTunnelCli.CreateAccessAsync))
+            {
+                cts.Cancel();
+            }
+        };
+        var port = await CreateClient(cli).CreatePortAsync("mytunnel.usw2", 3000,
+            new() { Protocol = "http", Labels = ["label"], AllowAnonymous = false }, cancellationToken: cts.Token);
+
+        Assert.Equal(nameof(DevTunnelCli.ShowPortAsync), Assert.Single(cli.Calls).Method);
+        var preservedDeny = Assert.Single(port.AccessControl!, e => !e.IsInherited && e.IsDeny);
+        Assert.Equal(deny.Type, preservedDeny.Type);
+        Assert.Equal(deny.Scopes, preservedDeny.Scopes);
+        Assert.False(cts.IsCancellationRequested);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddingMissingDenyNeverResetsExistingPolicyOnFailure(bool cancel)
+    {
+        using var cts = new CancellationTokenSource();
+        var cli = new TestDevTunnelCli();
+        cli.EnqueueShowPortResult(0, PortJson(access: [
+            AnonymousAccess(deny: false) with { IsInherited = true },
+            new("Users", false, false, ["test-user"], ["connect"])
+        ]));
+        cli.EnqueueCreateAccessResult(1, error: "Deny creation failed.");
+        cli.OnCall = call =>
+        {
+            if (cancel && call.Method == nameof(DevTunnelCli.CreateAccessAsync))
+            {
+                cts.Cancel();
+            }
+        };
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ASPIRE_DEVTUNNEL_CLI_MAX_ATTEMPTS"] = "1"
+        }).Build();
+        var client = new DevTunnelCliClient(configuration, cli);
+        Func<Task> provision = () => client.CreatePortAsync("mytunnel.usw2", 3000,
+            new() { Protocol = "http", Labels = ["label"], AllowAnonymous = false }, cancellationToken: cts.Token);
+        if (cancel)
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(provision);
+        }
+        else
+        {
+            await Assert.ThrowsAnyAsync<DistributedApplicationException>(provision);
+        }
+
+        Assert.Equal([nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.CreateAccessAsync)], cli.Calls.Select(c => c.Method));
+        Assert.Contains("--deny", cli.Calls.Last().Arguments);
+    }
+
+    [Fact]
+    public async Task FailedDenyResponseIsReconciledWithoutRemovingPreviouslyAppliedDeny()
+    {
+        var cli = new TestDevTunnelCli();
+        var userRule = new DevTunnelAccessStatus.AccessControlEntry("Users", false, false, ["test-user"], ["connect"]);
+        cli.EnqueueShowPortResult(0, PortJson(access: [userRule]));
+        cli.EnqueueCreateAccessResult(1, error: "Response lost after the deny was applied.");
+        cli.EnqueueShowPortResult(0, PortJson(access: [userRule, AnonymousAccess(deny: true)]));
+        var port = await CreateClient(cli).CreatePortAsync("mytunnel.usw2", 3000,
+            new() { Protocol = "http", Labels = ["label"], AllowAnonymous = false });
+
+        Assert.Equal([nameof(DevTunnelCli.ShowPortAsync), nameof(DevTunnelCli.CreateAccessAsync), nameof(DevTunnelCli.ShowPortAsync)],
+            cli.Calls.Select(c => c.Method));
+        Assert.Single(port.AccessControl!, e => e.IsDeny);
     }
 
     [Theory]

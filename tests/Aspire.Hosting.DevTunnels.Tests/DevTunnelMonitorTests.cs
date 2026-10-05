@@ -251,6 +251,40 @@ public class DevTunnelMonitorTests
         Assert.Equal(HealthStatus.Healthy, test.Snapshot(test.Port).HealthStatus);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IncompleteMessageCannotHideHostTakeover(bool wrappedDisconnect)
+    {
+        using var test = new TestDevTunnelMonitor();
+        await test.StartAsync();
+        await test.ReadyAsync();
+        await test.App.ResourceNotifications.PublishUpdateAsync(test.Port, s => s with
+        {
+            Urls = [new("tunnel", "https://original-3000.usw2.devtunnels.ms/", false)]
+        });
+        await test.LogAsync("Inspect network activity:");
+        if (wrappedDisconnect)
+        {
+            await test.LogAsync("Connection");
+            await test.LogAsync("to host tunnel relay");
+            await test.LogAsync("closed. Another host for the tunnel has connected.");
+        }
+        else
+        {
+            await test.LogAsync("Connection to host tunnel relay closed. Another host for the tunnel has connected.");
+        }
+        Assert.Equal(HealthStatus.Unhealthy, test.Snapshot(test.Port).HealthStatus);
+        Assert.True(Assert.Single(test.Snapshot(test.Port).Urls).IsInactive);
+
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Equal(HealthStatus.Unhealthy, test.Snapshot(test.Port).HealthStatus);
+        Assert.True(Assert.Single(test.Snapshot(test.Port).Urls).IsInactive);
+        await test.LogAsync("Connection to host tunnel relay restored.");
+        Assert.Equal(HealthStatus.Healthy, test.Snapshot(test.Port).HealthStatus);
+        Assert.False(Assert.Single(test.Snapshot(test.Port).Urls).IsInactive);
+    }
+
     [Fact]
     public async Task OlderReconciliationCannotUndoNewerLogObservations()
     {

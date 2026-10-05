@@ -392,6 +392,27 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         // Inherited entries belong to the parent tunnel. A port with no explicit policy must
         // inherit them, whereas AllowAnonymous=false requires an explicit anonymous deny.
         var explicitEntries = access.Where(e => !e.IsInherited).ToArray();
+        if (allowAnonymous is false)
+        {
+            // Never reset a restrictive policy while reconciling other entries. Removing a
+            // working deny could expose a port through an anonymously accessible parent until
+            // replacement succeeds; cancellation cannot restore that access restriction.
+            // An anonymous connect deny is sufficient even with additional entries/scopes:
+            // deny rules take precedence over allows. Preserve those entries and add a deny
+            // if needed, rather than weakening the policy to obtain an exact ACL shape.
+            // https://github.com/microsoft/dev-tunnels/blob/main/cs/src/Contracts/TunnelAccessControl.cs
+            if (explicitEntries.Any(e => e.IsDeny
+                && string.Equals(e.Type, "Anonymous", StringComparison.OrdinalIgnoreCase)
+                && e.Subjects.Count == 0
+                && e.Scopes.Any(s => string.Equals(s, "connect", StringComparison.OrdinalIgnoreCase))))
+            {
+                return;
+            }
+
+            await CreateAnonymousAccessAsync(tunnelId, portNumber, allow: false, logger, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         var matches = allowAnonymous is null
             ? explicitEntries.Length == 0
             : explicitEntries is [var entry]
@@ -417,13 +438,18 @@ internal sealed class DevTunnelCliClient : IDevTunnelClient
         }
         if (allowAnonymous is { } allow)
         {
-            var (created, createExitCode, createError) = await CallCliAsJsonAsync<DevTunnelAccessStatus>(
-                (stdout, stderr, log, ct) => _cli.CreateAccessAsync(tunnelId, portNumber, anonymous: true, deny: !allow, stdout, stderr, log, ct),
-                logger, cancellationToken).ConfigureAwait(false);
-            if (created is null)
-            {
-                throw new RetryableProvisioningException($"Failed to set access for dev tunnel '{tunnelId}', port '{portNumber}'. Exit code {createExitCode}: {createError}");
-            }
+            await CreateAnonymousAccessAsync(tunnelId, portNumber, allow, logger, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task CreateAnonymousAccessAsync(string tunnelId, int? portNumber, bool allow, ILogger? logger, CancellationToken cancellationToken)
+    {
+        var (created, exitCode, error) = await CallCliAsJsonAsync<DevTunnelAccessStatus>(
+            (stdout, stderr, log, ct) => _cli.CreateAccessAsync(tunnelId, portNumber, anonymous: true, deny: !allow, stdout, stderr, log, ct),
+            logger, cancellationToken).ConfigureAwait(false);
+        if (created is null)
+        {
+            throw new RetryableProvisioningException($"Failed to set access for dev tunnel '{tunnelId}', port '{portNumber}'. Exit code {exitCode}: {error}");
         }
     }
 

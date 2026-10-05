@@ -25,6 +25,8 @@ internal sealed class TestDevTunnelCli : DevTunnelCli
 
     public ConcurrentQueue<TestDevTunnelCliCall> Calls { get; } = new();
 
+    public Action<TestDevTunnelCliCall>? OnCall { get; set; }
+
     public void EnqueueCreateResult(int exitCode, string? output = null, string? error = null)
         => _createResults.Enqueue(new(exitCode, output, error));
 
@@ -73,7 +75,9 @@ internal sealed class TestDevTunnelCli : DevTunnelCli
             _ => throw new InvalidOperationException($"Unexpected test devtunnel command: {string.Join(" ", args)}")
         };
 
-        Calls.Enqueue(new(method, tunnelId, args));
+        var call = new TestDevTunnelCliCall(method, tunnelId, args);
+        Calls.Enqueue(call);
+        OnCall?.Invoke(call);
         return CompleteAsync(results, outputWriter, errorWriter, cancellationToken);
     }
 

@@ -57,6 +57,41 @@ public class DevTunnelOutputParserTests
         Assert.Equal(new(DevTunnelOutputParser.OutputKind.Ready), parser.Parse("mytunnel.usw2"));
     }
 
+    [Theory]
+    [InlineData("Inspect network activity:")]
+    [InlineData("Connect via browser:")]
+    [InlineData("Hosting port:")]
+    [InlineData("Ready to accept connections for tunnel:")]
+    [InlineData("Connection to host tunnel relay")]
+    public void DisconnectSupersedesUnfinishedMessage(string prefix)
+    {
+        var parser = new DevTunnelOutputParser("mytunnel");
+        Assert.Equal(default, parser.Parse(prefix));
+        Assert.Equal(new(DevTunnelOutputParser.OutputKind.Disconnected),
+            parser.Parse("Connection to host tunnel relay closed."));
+    }
+
+    [Fact]
+    public void WrappedDisconnectSupersedesUnfinishedMessage()
+    {
+        var parser = new DevTunnelOutputParser("mytunnel");
+        Assert.Equal(default, parser.Parse("Inspect network activity:"));
+        Assert.Equal(default, parser.Parse("Connection"));
+        Assert.Equal(default, parser.Parse("to host tunnel relay"));
+        Assert.Equal(new(DevTunnelOutputParser.OutputKind.Disconnected), parser.Parse("closed."));
+    }
+
+    [Fact]
+    public void NewPortSupersedesUnfinishedInspectMessage()
+    {
+        var parser = new DevTunnelOutputParser("mytunnel");
+        Assert.Equal(default, parser.Parse("Inspect network activity:"));
+        Assert.Equal(new(DevTunnelOutputParser.OutputKind.Port, 3000, new("https://abc-3000.usw2.devtunnels.ms/")),
+            parser.Parse("Hosting port 3000 at https://abc-3000.usw2.devtunnels.ms/"));
+        Assert.Equal(default, parser.Parse("Ready to accept connections for tunnel:"));
+        Assert.Equal(new(DevTunnelOutputParser.OutputKind.Ready), parser.Parse("mytunnel.usw2"));
+    }
+
     [Fact]
     public void RecognizesWrappedSingleLineFormatAndReadySuffix()
     {

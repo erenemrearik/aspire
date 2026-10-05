@@ -34,13 +34,24 @@ internal sealed partial class DevTunnelOutputParser(string tunnelId)
             return default;
         }
 
+        var words = WordsRegex().Replace(text, " ").Trim().ToLowerInvariant();
+        if (_pending is not null && StartsMessage(words))
+        {
+            // For example, "Inspect network activity:" may be abandoned before
+            // "Connection to host tunnel relay closed." arrives. New messages must supersede
+            // unfinished fields, especially disconnects; only actual continuations are joined.
+            _pending = null;
+            _port = null;
+            _inspectUrl = false;
+            _readyWithoutId = false;
+        }
         if (_pending is { } pending)
         {
             text = pending + " " + text;
+            words = WordsRegex().Replace(text, " ").Trim().ToLowerInvariant();
             _pending = null;
         }
 
-        var words = WordsRegex().Replace(text, " ").Trim().ToLowerInvariant();
         if (_readyWithoutId && words.StartsWith("for tunnel", StringComparison.Ordinal))
         {
             text = "Ready to accept connections " + text;
@@ -169,6 +180,13 @@ internal sealed partial class DevTunnelOutputParser(string tunnelId)
 
     private static bool IsPrefix(string text, string phrase) =>
         phrase.Equals(text, StringComparison.Ordinal) || phrase.StartsWith(text + " ", StringComparison.Ordinal);
+
+    private static bool StartsMessage(string words)
+    {
+        var separator = words.IndexOf(' ');
+        var firstWord = separator < 0 ? words : words[..separator];
+        return firstWord is "hosting" or "connect" or "inspect" or "ready" or "connection";
+    }
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
