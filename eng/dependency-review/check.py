@@ -75,8 +75,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     args = parser.parse_args()
-    policy = json.loads((Path(__file__).parent / "constraints.json").read_text())
     try:
+        policy = json.loads((Path(__file__).parent / "constraints.json").read_text())
         failures = check_repository(args.root, policy)
     except (OSError, ET.ParseError, ValueError) as error:
         print(f"Dependency constraint check could not complete: {error}", file=sys.stderr)

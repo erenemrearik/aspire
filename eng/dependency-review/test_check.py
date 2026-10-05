@@ -12,7 +12,6 @@ import unittest
 import check
 
 
-ROOT = Path(__file__).resolve().parents[2]
 POLICY = json.loads((Path(__file__).parent / "constraints.json").read_text())
 PACKAGES = (
     "<Project><PropertyGroup>"
@@ -92,6 +91,24 @@ class ConstraintTests(unittest.TestCase):
                                     capture_output=True, text=True, check=False)
         self.assertEqual(2, result.returncode)
         self.assertIn("could not complete", result.stderr)
+
+    def test_cli_reports_violations_and_malformed_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "extension").mkdir()
+            (root / "NuGet.config").write_text("<configuration><packageSources/></configuration>")
+            (root / "extension/yarn.lock").write_text("")
+            for text, exit_code in (
+                (PACKAGES.replace("<Npgsql8Version>8.0.9", "<Npgsql8Version>10.0.0"), 1),
+                ("<Project>", 2),
+            ):
+                with self.subTest(exit_code=exit_code):
+                    (root / "Directory.Packages.props").write_text(text)
+                    result = subprocess.run([sys.executable, str(Path(check.__file__)), "--root", directory],
+                                            capture_output=True, text=True, check=False)
+                    self.assertEqual(exit_code, result.returncode)
+                    self.assertEqual("", result.stdout)
+                    self.assertTrue(result.stderr)
 
 
 if __name__ == "__main__":
