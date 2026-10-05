@@ -1,0 +1,16 @@
+{
+  "id": "aspire-cli-tests-startcommandtests-multipleprojectfiles-timeout",
+  "type": "flaky-test",
+  "title": "Flaky: StartCommandTests multi-project-file scenarios time out after 30s on macOS",
+  "test_name": "Aspire.Cli.Tests.Commands.StartCommandTests.StartCommand_WhenMultipleProjectFilesFound_JsonFormat_ReturnsNonZeroExitCode",
+  "error_pattern": "System.TimeoutException : The operation at StartCommandTests.cs:318 timed out after reaching the limit of 30000ms.\n   at Microsoft.AspNetCore.InternalTesting.AsyncTestHelpers.TimeoutAfter[T](Task`1 task, TimeSpan timeout, String filePath, Int32 lineNumber) in AsyncTestHelpers.cs:line 160\n   at Aspire.Cli.Tests.Commands.StartCommandTests.StartCommand_WhenMultipleProjectFilesFound_JsonFormat_ReturnsNonZeroExitCode()",
+  "occurrences": [
+    {
+      "run_id": 37302773955,
+      "run_url": "https://github.com/microsoft/aspire/actions/runs/37302773955",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (macos-latest)",
+      "pr_number": 0,
+      "observed_at": "2026-10-05T13:18:05Z"
+    }
+  ]
+}

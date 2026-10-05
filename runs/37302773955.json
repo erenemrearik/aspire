@@ -1,0 +1,131 @@
+{
+  "run_id": 37302773955,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/37302773955",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-05T13:18:05Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20720,
+    "title": "Keep connected terminal clipboard and selection errors console-only",
+    "author": "mitchdenny",
+    "state": "closed",
+    "head_branch": "mitchdenny-clipboard-banner-fix",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20720",
+    "merged_at": "2026-10-05T11:24:50Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "62f2a13ef282411e4cc5bfc5457e71abc1e2a3f6",
+    "failed_sha": "4968b68c17142cee794eef0f80ed51c3435c7bab",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "0a42e2c6ae37033a14c62b2e265e9bf950ce68b8",
+        "message": "Preserve multiline quoted values in Docker Compose env files (#20620) ## Description Publishing Docker Compose output into a directory containing a multiline quoted `.env` value currently drops continuation lines and the closing quote. The resulting file can no longer be parsed by Docker Compose. This preserves the complete raw quoted value, including its original line endings, escaped quotes, blank lines, and embedded `#`/`=` characters. Unterminated quoted values now fail during loading, befor",
+        "html_url": "https://github.com/microsoft/aspire/commit/0a42e2c6ae37033a14c62b2e265e9bf950ce68b8",
+        "pull_request": {
+          "number": 20620,
+          "title": "Preserve multiline quoted values in Docker Compose env files",
+          "url": "https://github.com/microsoft/aspire/pull/20620",
+          "merged_at": "2026-10-05T01:09:44Z"
+        }
+      },
+      {
+        "sha": "a8db3d91badb1de1303e54725643035470905e57",
+        "message": "Skip Blazor WASM client discovery on unsupported SDKs instead of crashing (#20575) ## Description `ResolveWebAssemblyProjectReferences` is an MSBuild target provided by the .NET 11 Static Web Assets SDK. When the hosted Blazor browser-debugging discovery in `BlazorHostedExtensions.cs` runs this target against a project built with the .NET 10 SDK, it fails with `MSB4057`, which surfaces as a `DistributedApplicationException` and crashes the entire AppHost — even for apps that never opted into bro",
+        "html_url": "https://github.com/microsoft/aspire/commit/a8db3d91badb1de1303e54725643035470905e57",
+        "pull_request": {
+          "number": 20575,
+          "title": "Skip Blazor WASM client discovery on unsupported SDKs instead of crashing",
+          "url": "https://github.com/microsoft/aspire/pull/20575",
+          "merged_at": "2026-10-05T11:16:13Z"
+        }
+      },
+      {
+        "sha": "0f8b7d1405048f86f5f246ba867d464460baf8eb",
+        "message": "Prefer Terminal shortcuts for terminal-enabled resources (#20719) ## Description Terminal-enabled resources currently require navigating away from the resource list to reach their interactive output. Resource rows now use **Terminal** as their default output shortcut when a live terminal is defined; ordinary resources, disconnected dashboards, and historical/read-only runs retain **Console logs**. Both output views remain available from terminal-enabled resource menus, including on mobile. Resou",
+        "html_url": "https://github.com/microsoft/aspire/commit/0f8b7d1405048f86f5f246ba867d464460baf8eb",
+        "pull_request": {
+          "number": 20719,
+          "title": "Prefer Terminal shortcuts for terminal-enabled resources",
+          "url": "https://github.com/microsoft/aspire/pull/20719",
+          "merged_at": "2026-10-05T11:23:59Z"
+        }
+      },
+      {
+        "sha": "4968b68c17142cee794eef0f80ed51c3435c7bab",
+        "message": "Keep connected terminal clipboard and selection errors console-only (#20720) ## Description A local terminal UI error can show a misleading clipboard-permission banner even though the terminal is still connected. Log these status errors to the console instead, preserving existing sizing/palette errors. Fatal disconnections still show the connection-failure banner and retry. Fixes # (issue) ## Checklist - Is this feature complete?   - [x] Yes. Ready to ship.   - [ ] No. Follow-up changes expected",
+        "html_url": "https://github.com/microsoft/aspire/commit/4968b68c17142cee794eef0f80ed51c3435c7bab",
+        "pull_request": {
+          "number": 20720,
+          "title": "Keep connected terminal clipboard and selection errors console-only",
+          "url": "https://github.com/microsoft/aspire/pull/20720",
+          "merged_at": "2026-10-05T11:24:50Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "id": 111756508564,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37302773955/job/111756508564",
+      "classification": "flaky-test",
+      "reason": "Single test TrayWatchStreamTests.StalledResourceWatchDoesNotBlockReconciliationOrQuit(removeFirst: True, brokenPipe: False) failed an assertion unrelated to any candidate merge's changed code; matches a previously tracked flaky cause (issue #20707).",
+      "failed_steps": [
+        "Run tests (Linux/macOS)"
+      ]
+    },
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (macos-latest)",
+      "id": 111756513306,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37302773955/job/111756513306",
+      "classification": "flaky-test",
+      "reason": "Two StartCommandTests cases timed out after 30s waiting on multi-project-file detection, unrelated to the terminal-clipboard changes in the candidate merges; the test host subsequently failed to exit gracefully (SIGKILL 137), a pattern previously seen on this macOS job (issue #20543).",
+      "failed_steps": [
+        "Run tests (Linux/macOS)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.StalledResourceWatchDoesNotBlockReconciliationOrQuit(removeFirst: True, brokenPipe: False)",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "error": "Assert.Equal() Failure: Values differ\nExpected: 0\nActual:   7",
+      "stack_trace": "at Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.StalledResourceWatchDoesNotBlockReconciliationOrQuit(Boolean removeFirst, Boolean brokenPipe) in /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Backchannel/TrayWatchStreamTests.cs:line 925\n   at Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.StalledResourceWatchDoesNotBlockReconciliationOrQuit(Boolean removeFirst, Boolean brokenPipe) in /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Backchannel/TrayWatchStreamTests.cs:line 940\n--- End of stack trace from previous location ---",
+      "standard_output": "",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Matches previously tracked flaky cause (issue #20707); assertion count mismatch from a stalled-watch reconciliation race, unrelated to the candidate merges' changed files."
+    },
+    {
+      "name": "Aspire.Cli.Tests.Commands.StartCommandTests.StartCommand_WhenMultipleProjectFilesFound_JsonFormat_ReturnsNonZeroExitCode",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (macos-latest)",
+      "error": "System.TimeoutException : The operation at /Users/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Commands/StartCommandTests.cs:318 timed out after reaching the limit of 30000ms.",
+      "stack_trace": "at Microsoft.AspNetCore.InternalTesting.AsyncTestHelpers.TimeoutAfter[T](Task`1 task, TimeSpan timeout, String filePath, Int32 lineNumber) in /Users/runner/work/aspire/aspire/tests/Shared/AsyncTestHelpers.cs:line 160\n   at Aspire.Cli.Tests.Commands.StartCommandTests.StartCommand_WhenMultipleProjectFilesFound_JsonFormat_ReturnsNonZeroExitCode() in /Users/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Commands/StartCommandTests.cs:line 318\n--- End of stack trace from previous location ---",
+      "standard_output": "Temporary workspace created at: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/Aspire.Cli.Tests/Workspace/3czq1nro.svf\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: stagingChannelEnabled, ConfigKey: features:stagingChannelEnabled, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature stagingChannelEnabled using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: showAllTemplates, ConfigKey: features:showAllTemplates, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature showAllTemplates using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotPython, ConfigKey: features:experimentalPolyglotPython, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotPython using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotGo, ConfigKey: features:experimentalPolyglotGo, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotGo using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotJava, ConfigKey: features:experimentalPolyglotJava, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotJava using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotRust, ConfigKey: features:experimentalPolyglotRust, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotRust using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotPython, ConfigKey: features:experimentalPolyglotPython, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotPython using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotJava, ConfigKey: features:experimentalPolyglotJava, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotJava using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotGo, ConfigKey: features:experimentalPolyglotGo, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotGo using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotRust, ConfigKey: features:experimentalPolyglotRust, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotRust using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotGo, ConfigKey: features:experimentalPolyglotGo, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotGo using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotJava, ConfigKey: features:experimentalPolyglotJava, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotJava using default value: False\n| [2026-10-05T12:20:28] Aspire.Cli.Configuration.Features Trace: Feature check: stagingChannelEnabled, ConfigKey: features:stagingChannelEnabled, Valu",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Timing-related 30s timeout on a macOS runner under load, unrelated to the PR-free candidate merges; Docker was reported unavailable on this runner at the same time, consistent with environmental contention rather than a code regression."
+    },
+    {
+      "name": "Aspire.Cli.Tests.Commands.StartCommandTests.StartCommand_WhenMultipleProjectFilesFound_NonInteractive_ReturnsNonZeroExitCode",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (macos-latest)",
+      "error": "System.TimeoutException : The operation at /Users/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Commands/StartCommandTests.cs:288 timed out after reaching the limit of 30000ms.",
+      "stack_trace": "at Microsoft.AspNetCore.InternalTesting.AsyncTestHelpers.TimeoutAfter[T](Task`1 task, TimeSpan timeout, String filePath, Int32 lineNumber) in /Users/runner/work/aspire/aspire/tests/Shared/AsyncTestHelpers.cs:line 160\n   at Aspire.Cli.Tests.Commands.StartCommandTests.StartCommand_WhenMultipleProjectFilesFound_NonInteractive_ReturnsNonZeroExitCode() in /Users/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Commands/StartCommandTests.cs:line 288\n--- End of stack trace from previous location ---",
+      "standard_output": "Temporary workspace created at: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/Aspire.Cli.Tests/Workspace/tn4kz2v2.bcp\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: stagingChannelEnabled, ConfigKey: features:stagingChannelEnabled, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature stagingChannelEnabled using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: showAllTemplates, ConfigKey: features:showAllTemplates, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature showAllTemplates using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotPython, ConfigKey: features:experimentalPolyglotPython, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotPython using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotGo, ConfigKey: features:experimentalPolyglotGo, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotGo using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotJava, ConfigKey: features:experimentalPolyglotJava, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotJava using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotRust, ConfigKey: features:experimentalPolyglotRust, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotRust using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotPython, ConfigKey: features:experimentalPolyglotPython, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotPython using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotJava, ConfigKey: features:experimentalPolyglotJava, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotJava using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotGo, ConfigKey: features:experimentalPolyglotGo, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotGo using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotRust, ConfigKey: features:experimentalPolyglotRust, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotRust using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotGo, ConfigKey: features:experimentalPolyglotGo, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotGo using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: experimentalPolyglotJava, ConfigKey: features:experimentalPolyglotJava, Value: '(null)', DefaultValue: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature experimentalPolyglotJava using default value: False\n| [2026-10-05T12:21:01] Aspire.Cli.Configuration.Features Trace: Feature check: stagingChannelEnabled, ConfigKey: features:stagingChannelEnabled, Valu",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Second 30s timeout in the same job for a sibling multi-project-file scenario, occurring directly after the first timeout; consistent with macOS runner resource contention rather than a code regression."
+    }
+  ],
+  "causes": [
+    "aspire-cli-tests-backchannel-traywatchstream-stalled-flaky",
+    "aspire-cli-tests-startcommandtests-multipleprojectfiles-timeout",
+    "aspire-cli-tests-startcommandtests-multipleprojectfiles-noninteractive-timeout"
+  ]
+}

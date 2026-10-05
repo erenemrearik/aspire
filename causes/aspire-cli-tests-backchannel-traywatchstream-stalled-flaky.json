@@ -11,6 +11,13 @@
       "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
       "pr_number": 0,
       "observed_at": "2026-10-03T06:34:54Z"
+    },
+    {
+      "run_id": 37302773955,
+      "run_url": "https://github.com/microsoft/aspire/actions/runs/37302773955",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "pr_number": 0,
+      "observed_at": "2026-10-05T13:18:05Z"
     }
   ],
   "issue_url": "https://github.com/microsoft/aspire/issues/20707"
