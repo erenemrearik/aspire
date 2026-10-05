@@ -878,6 +878,11 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("alerts=12 dependabot-pr=3 auto-sec-pr=6 blocked=3 (nuget-not-mirrored=1, breaking-upgrade-required=2) code-findings-out-of-scope=344", true)]
     [InlineData("alerts=0 dependabot-pr=0 auto-sec-pr=0 blocked=0 code-findings-out-of-scope=0", true)]
     [InlineData("alerts=1 dependabot-pr=0 auto-sec-pr=0 blocked=1 (no-safe-version=1) code-findings-out-of-scope=0", true)]
+    [InlineData("alerts=3 dependabot-pr=0 auto-sec-pr=0 blocked=3 (update-failed=1) code-findings-out-of-scope=0", false)]
+    [InlineData("alerts=2 dependabot-pr=0 auto-sec-pr=0 blocked=2 code-findings-out-of-scope=0", false)]
+    [InlineData("alerts=0 dependabot-pr=0 auto-sec-pr=0 blocked=0 (update-failed=0) code-findings-out-of-scope=0", false)]
+    [InlineData("alerts=1 dependabot-pr=0 auto-sec-pr=0 blocked=1 (update-failed=2) code-findings-out-of-scope=0", false)]
+    [InlineData("alerts=1 dependabot-pr=0 auto-sec-pr=0 blocked=1 (update-failed=0, no-safe-version=1) code-findings-out-of-scope=0", false)]
     [InlineData("alerts=1 dependabot-pr=0 auto-sec-pr=0 blocked=1 (lodash=1) code-findings-out-of-scope=0", false)]
     [InlineData("alerts=2 dependabot-pr=0 auto-sec-pr=0 blocked=2 (update-failed=1, update-failed=1) code-findings-out-of-scope=0", false)]
     [InlineData("alerts=1 dependabot-pr=0 auto-sec-pr=1 blocked=0 code-findings-out-of-scope=0 lodash 4.17.21", false)]
@@ -892,6 +897,102 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         });
 
         Assert.Equal(expected, result["value"]!.GetValue<bool>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    [InlineData("normalized-duplicate")]
+    public async Task PublicTextGateRequiresEveryUpdateExactlyOnce(string scenario)
+    {
+        var body = PublicTextBody.Replace("\r\n", "\n");
+        const string row = "| lodash | extension/package-lock.json | 4.17.20 | 4.17.21 |";
+        body = scenario == "missing"
+            ? string.Join('\n', body.Split('\n').Where(line => !line.StartsWith("| `@types", StringComparison.Ordinal)))
+            : body.Replace(row, $"{row}\n{(scenario == "normalized-duplicate" ? row.Replace("lodash", "LODASH", StringComparison.Ordinal) : row)}", StringComparison.Ordinal);
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = body;
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+        });
+
+        Assert.Equal(["create_pull_request.body incomplete-or-duplicate-summary"],
+            result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
+        Assert.Empty(result["outputs"]!.AsArray());
+        Assert.Empty(result["publications"]!.AsArray());
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task PublicTextGateAcceptsCompleteReorderedNormalizedRows()
+    {
+        const string lodash = "| lodash | extension/package-lock.json | 4.17.20 | 4.17.21 |";
+        const string node = "| `@types/node` | extension/package-lock.json | 22.0.0 | 22.1.0 |";
+        var output = PublicOutputFixture("create_pull_request");
+        output["body"] = PublicTextBody.Replace($"{lodash}\r\n{node}", $"{node}\r\n{lodash}", StringComparison.Ordinal)
+            .Replace($"{lodash}\n{node}", $"{node}\n{lodash}", StringComparison.Ordinal)
+            .Replace("| lodash |", "| LODASH |", StringComparison.Ordinal);
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["outputLines"] = new JsonArray(output.ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+        });
+
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [RequiresTools(["node"])]
+    [InlineData("aw-prompts/prompt.txt")]
+    [InlineData("agent_execution.json")]
+    [InlineData("pre-agent-audit.txt")]
+    [InlineData("github_rate_limits.jsonl")]
+    [InlineData("agent_usage.json")]
+    [InlineData("aw_info.json")]
+    [InlineData("sandbox/firewall/logs/private.jsonl")]
+    [InlineData("new-framework-input/private.txt")]
+    [InlineData("safeoutputs.jsonl")]
+    [InlineData("agent_output.json")]
+    public async Task AgentOutputScrubWithholdsEveryUnvalidatedWorkFile(string filename)
+    {
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["publicationConditions"] = CompiledPublicationConditions(),
+            ["outputLines"] = new JsonArray(PublicOutputFixture("create_pull_request").ToJsonString()),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+            ["workFiles"] = new JsonObject { [filename] = "private advisory detail" },
+        });
+
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Equal(["aw-auto-sec-security-updates.patch"], result["remaining"]!.AsArray().Select(v => v!.GetValue<string>()));
+        Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
+    }
+
+    [Fact]
+    [RequiresTools(["node"])]
+    public async Task AgentOutputScrubRecreatesNestedOutputsAfterRemovingUnvalidatedSiblings()
+    {
+        var output = PublicOutputFixture("create_pull_request").ToJsonString();
+        var result = await RunHarnessAsync(new JsonObject
+        {
+            ["mode"] = "agent-scrub",
+            ["outputRelativePath"] = "safeoutputs/raw/outputs.jsonl",
+            ["outputLines"] = new JsonArray(output),
+            ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
+            ["workFiles"] = new JsonObject { ["safeoutputs/private.txt"] = "private advisory detail" },
+        });
+
+        Assert.Empty(result["failures"]!.AsArray());
+        Assert.Equal([output], result["outputs"]!.AsArray().Select(v => JsonNode.Parse(v!.GetValue<string>())!.ToJsonString()));
+        Assert.Equal(["aw-auto-sec-security-updates.patch"], result["remaining"]!.AsArray().Select(v => v!.GetValue<string>()));
     }
 
     [Fact]
@@ -925,7 +1026,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         Assert.Empty(result["failures"]!.AsArray());
         Assert.Equal("true", result["stepOutputs"]!["publication_ready"]!.GetValue<string>());
         Assert.Equal(CompiledPublicationConditions().Count, result["publications"]!.AsArray().Count);
-        Assert.Equal(["agent_execution.json", "aw-auto-sec-security-updates.patch"], result["remaining"]!.AsArray().Select(name => name!.GetValue<string>()));
+        Assert.Equal(["aw-auto-sec-security-updates.patch"], result["remaining"]!.AsArray().Select(name => name!.GetValue<string>()));
         var outputs = result["outputs"]!.AsArray().Select(line => JsonNode.Parse(line!.GetValue<string>())!).ToArray();
         Assert.Collection(
             outputs,
@@ -1636,7 +1737,8 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
 
     [Theory]
     [RequiresTools(["node"])]
-    [InlineData("rmSync", "sandbox/agent/logs", false)]
+    [InlineData("rmSync", "sandbox", false)]
+    [InlineData("rmSync", "agent_execution.json", false)]
     [InlineData("readFileSync", "outputs.jsonl", false)]
     [InlineData("readFileSync", "aw-auto-sec-security-updates.patch", false)]
     [InlineData("lstatSync", "aw-auto-sec-security-updates.patch", false)]
@@ -1654,10 +1756,14 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             ["outputLines"] = new JsonArray(new JsonObject
             {
                 ["type"] = "noop",
-                ["message"] = invalidOutput ? "synthetic private output" : "alerts=1 dependabot-pr=0 auto-sec-pr=0 blocked=1 code-findings-out-of-scope=0",
+                ["message"] = invalidOutput ? "synthetic private output" : "alerts=1 dependabot-pr=0 auto-sec-pr=0 blocked=1 (update-failed=1) code-findings-out-of-scope=0",
             }.ToJsonString()),
             ["patchFiles"] = new JsonObject { ["aw-auto-sec-security-updates.patch"] = PublicTextPatch.Replace("\r\n", "\n") },
-            ["workFiles"] = new JsonObject { ["sandbox/agent/logs/session.jsonl"] = "synthetic private transcript" },
+            ["workFiles"] = new JsonObject
+            {
+                ["sandbox/agent/logs/session.jsonl"] = "synthetic private transcript",
+                ["agent_execution.json"] = "synthetic private telemetry",
+            },
         });
 
         Assert.Equal(["filesystem io-error"], result["value"]!["violations"]!.AsArray().Select(v => $"{v!["source"]} {v["reason"]}"));
@@ -1700,6 +1806,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
         var guarded = result["value"]!.GetValue<string>();
         Assert.Equal(guarded, result["repeated"]!.GetValue<string>());
         AssertPublicationGuards(guarded);
+        AssertSafeUploadPaths(guarded);
         Assert.Equal(
             workflow[..workflow.IndexOf("  agent:", StringComparison.Ordinal)],
             guarded[..guarded.IndexOf("  agent:", StringComparison.Ordinal)]);
@@ -1715,6 +1822,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
     [InlineData("duplicate-scrub")]
     [InlineData("publication-before-scrub")]
     [InlineData("missing-upload")]
+    [InlineData("missing-upload-path")]
     public async Task PublicationGuardRejectsUnexpectedCompilerLayout(string scenario)
     {
         var workflow = PublicationGuardFixture.ReplaceLineEndings("\n");
@@ -1726,6 +1834,7 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             "publication-before-scrub" => workflow.Replace("name: Before scrub", "name: Append agent step summary", StringComparison.Ordinal)
                 .Replace("name: Append agent step summary\n        if: always()", "name: Renamed summary\n        if: always()", StringComparison.Ordinal),
             "missing-upload" => workflow.Replace("name: Upload agent artifacts", "name: Renamed upload", StringComparison.Ordinal),
+            "missing-upload-path" => workflow.Replace("          path: |", "          renamed-path: |", StringComparison.Ordinal),
             _ => throw new InvalidOperationException(),
         };
         var result = await RunHarnessAsync(new JsonObject { ["mode"] = "publication-guard", ["workflow"] = workflow });
@@ -1760,9 +1869,17 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
               - name: Upload agent output fallback artifact
                 if: always()
                 uses: actions/upload-artifact@example
+                with:
+                  path: |
+                    /tmp/gh-aw/agent_output.json
+                    /tmp/gh-aw/agent_execution.json
               - name: Upload agent artifacts
                 if: always()
                 uses: actions/upload-artifact@example
+                with:
+                  path: |
+                    /tmp/gh-aw/agent_output.json
+                    /tmp/gh-aw/aw-prompts/prompt.txt
           other_job:
             steps:
               - run: echo unchanged
@@ -1776,6 +1893,51 @@ public sealed class AutoSecWorkflowTests(ITestOutputHelper testOutput)
             var condition = step.Children[new YamlScalarNode("if")].ToString();
             Assert.EndsWith(" && steps.auto_sec_scrub.outcome == 'success' && steps.auto_sec_scrub.outputs.publication_ready == 'true'", condition);
         });
+    }
+
+    [Fact]
+    public void CompiledUploadsPublishOnlyValidatedOutputsAndCanonicalPatches()
+        => AssertSafeUploadPaths(File.ReadAllText(Path.Combine(RepoRoot.Path, ".github", "workflows", "auto-sec.lock.yml")));
+
+    [Fact]
+    public void CompiledTelemetryConsumersReportWithholdingWithoutReadingFiles()
+    {
+        string[] names =
+        [
+            "Append agent step summary",
+            "Parse agent logs for step summary",
+            "Parse MCP Gateway logs for step summary",
+            "Print firewall logs",
+            "Parse token usage for step summary",
+            "Print AWF reflect summary",
+            "Generate observability summary",
+        ];
+        var steps = PublicationSteps(File.ReadAllText(Path.Combine(RepoRoot.Path, ".github", "workflows", "auto-sec.lock.yml")));
+        foreach (var name in names)
+        {
+            var step = Assert.Single(steps, step => step.Children[new YamlScalarNode("name")].ToString() == name);
+            Assert.Equal("echo \"Auto-sec withholds agent-writable telemetry.\"", step.Children[new YamlScalarNode("run")].ToString());
+            Assert.False(step.Children.ContainsKey(new YamlScalarNode("uses")));
+            Assert.False(step.Children.ContainsKey(new YamlScalarNode("env")));
+            Assert.False(step.Children.ContainsKey(new YamlScalarNode("with")));
+        }
+    }
+
+    private static void AssertSafeUploadPaths(string workflow)
+    {
+        var uploads = PublicationSteps(workflow).Where(step =>
+            step.Children.TryGetValue(new YamlScalarNode("uses"), out var action)
+            && action.ToString().StartsWith("actions/upload-artifact@", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, uploads.Length);
+        foreach (var upload in uploads)
+        {
+            var config = Assert.IsType<YamlMappingNode>(upload.Children[new YamlScalarNode("with")]);
+            var paths = config.Children[new YamlScalarNode("path")].ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            string[] expected = upload.Children[new YamlScalarNode("name")].ToString() == "Upload agent artifacts"
+                ? ["/tmp/gh-aw/agent_output.json", "/tmp/gh-aw/safeoutputs.jsonl", "/tmp/gh-aw/aw-auto-sec-security-updates.patch", "/tmp/gh-aw/aw-microsoft-aspire-auto-sec-security-updates.patch"]
+                : ["/tmp/gh-aw/agent_output.json", "/tmp/gh-aw/safeoutputs.jsonl"];
+            Assert.Equal(expected, paths);
+        }
     }
 
     private static JsonArray CompiledPublicationConditions()

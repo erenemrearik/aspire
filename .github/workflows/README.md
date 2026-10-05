@@ -112,7 +112,10 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   All lockfile additions accept only recognized dependency-data syntax, not new
   free-text metadata. New override/resolution entries and unsupported lockfile
   metadata require human intervention and are reported as `update-failed`.
-  Public summary rows are bound to reconstructed manifest/package/version changes.
+  Public summary rows are bound to reconstructed manifest/package/version changes,
+  covering every update exactly once per manifest/package/target. Counts-only reports
+  require unique, positive blocked-reason counts whose sum equals the blocked total;
+  the breakdown is omitted only when that total is zero.
   Manifest paths must be canonical repository-relative paths; dot-segment aliases,
   rooted paths, backslashes, and empty path segments cannot authorize publication.
   Reconstruction, version-only manifest edits, source authorization, and artifact
@@ -126,6 +129,10 @@ Gradle, Go, Cargo, or `requirements.txt`, are reported as blocked.
   bot-owned branch, not arbitrary agent-written blobs; unavailable bases block
   publication. uv local-source descriptors count as delivery sources,
   and pnpm tarball binding covers both inline and block-style resolution tables.
+  The writable framework directory retains only validated safe outputs and patches:
+  all other entries, including prompts and telemetry, are removed before summaries
+  can consume them. Telemetry-dependent framework steps report that telemetry is
+  withheld rather than parsing agent-written files or fabricating zero metrics.
 
 Prerequisites:
 - The `auto-sec` label must exist.
@@ -140,7 +147,9 @@ After compiling `auto-sec`, run
 `always()` on post-agent publication steps without a custom scrub-success hook.
 This deterministic compilation pass gates every step after the scrub on both its
 successful outcome and explicit `publication_ready` output. CI applies the same
-pass before checking generated-file drift. Failed or skipped scrubbing blocks
+pass before checking generated-file drift. It also restricts both uploads to
+validated safe-output files and the two canonical patch filenames; no framework
+logs, prompts, telemetry, or opaque bundles are uploaded. Failed or skipped scrubbing blocks
 summaries, output ingestion, and both artifact uploads even when filesystem errors
 leave private files on disk. Do not replace this gate with best-effort deletion.
 

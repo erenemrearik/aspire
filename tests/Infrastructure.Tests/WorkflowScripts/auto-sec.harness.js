@@ -310,9 +310,10 @@ async function main() {
             const failures = [];
             const stepOutputs = {};
             const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-'));
-            const outputPath = path.join(workDir, 'outputs.jsonl');
+            const outputPath = path.join(workDir, request.outputRelativePath ?? 'outputs.jsonl');
             const checkout = request.useGitSnapshot ? fs.mkdtempSync(path.join(os.tmpdir(), 'auto-sec-checkout-')) : null;
             let baseSha = '0123456789abcdef0123456789abcdef01234567';
+            fs.mkdirSync(path.dirname(outputPath), { recursive: true });
             fs.writeFileSync(outputPath, (request.outputLines ?? []).join('\n'));
             for (const [name, text] of Object.entries({ ...(request.patchFiles ?? {}), ...(request.workFiles ?? {}) })) {
                 fs.mkdirSync(path.dirname(path.join(workDir, name)), { recursive: true });
@@ -407,7 +408,7 @@ async function main() {
                 });
                 const remaining = fs.readdirSync(workDir, { recursive: true })
                     .map(name => String(name).replace(/\\/g, '/'))
-                    .filter(name => name !== 'outputs.jsonl' && fs.statSync(path.join(workDir, name)).isFile())
+                    .filter(name => name !== path.relative(workDir, outputPath).replace(/\\/g, '/') && fs.statSync(path.join(workDir, name)).isFile())
                     .sort();
                 const outputs = fs.readFileSync(outputPath, 'utf8').split('\n').filter(line => line !== '');
                 // Evaluate the actual generated conditions with Actions' always() behavior,

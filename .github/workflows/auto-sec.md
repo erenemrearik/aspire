@@ -207,7 +207,9 @@ secret-masking:
 
 # The compiler has no post-agent publication condition hook. After compiling, run
 # node .github/workflows/auto-sec/publication-guard.js to gate every later agent step
-# on this scrub's successful outcome and explicit publication_ready output.
+# on this scrub's successful outcome and explicit publication_ready output, and
+# restrict uploads to validated outputs and the two canonical patch filenames.
+# Telemetry-dependent summaries report withholding instead of parsing writable files.
 
 safe-outputs:
   github-app:
@@ -515,7 +517,8 @@ supported. If regeneration requires unsupported metadata, revert that directory
 and mark it `blocked: update-failed`.
 
 Summary rows must match the exact manifest, package, old version, and new version
-in a fully reconstructed patch. Missing trusted bases or unsupported scalar encodings
+in a fully reconstructed patch, with exactly one row per manifest/package/target
+and no omitted updates. Missing trusted bases or unsupported scalar encodings
 block publication; do not substitute package names mentioned elsewhere in the diff.
 
 Confirm
@@ -560,7 +563,8 @@ code-writing requests are rejected before publication.
 
 Finish with a single `noop` message containing counts only, in exactly this form:
 `alerts=12 dependabot-pr=3 auto-sec-pr=6 blocked=3 (nuget-not-mirrored=1, breaking-upgrade-required=2) code-findings-out-of-scope=344`.
-Omit the parenthesized breakdown when `blocked=0`, and use only the reason codes
+Omit the parenthesized breakdown only when `blocked=0`. Otherwise include unique
+reason codes with positive counts summing exactly to `blocked`, using only the codes
 defined above. Do not list package names, alert numbers, or advisory ids in this
 message; any other text fails the run. Do not emit `missing_tool`, `missing_data`,
 or `report_incomplete`; they are dropped.

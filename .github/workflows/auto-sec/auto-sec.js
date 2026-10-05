@@ -2736,6 +2736,16 @@ function checkPublicText(items, patches, readBaseTexts = () => []) {
                 violations.push({ source: 'create_pull_request.body', reason: 'non-template-text' });
             } else if (!rows.every(row => matchesPublicUpdate(row, updates))) {
                 violations.push({ source: 'create_pull_request.body', reason: 'row-not-in-patch' });
+            } else if (updates.some(update => !rows.some(row => matchesPublicUpdate(row, [update])))
+                || rows.some((row, index) => rows.slice(0, index).some(other => {
+                    const ecosystem = PATH_ECOSYSTEMS.get(basenameOf(row.manifest).toLowerCase());
+                    // One row per manifest/package/target, even if a lockfile replaces
+                    // several installed versions or repeats the package in multiple hunks.
+                    return row.manifest === other.manifest
+                        && normalizePackageName(ecosystem, row.name) === normalizePackageName(ecosystem, other.name)
+                        && sameVersion(row.to.replace(/^[~^=<>v]+/, ''), other.to.replace(/^[~^=<>v]+/, ''));
+                }))) {
+                violations.push({ source: 'create_pull_request.body', reason: 'incomplete-or-duplicate-summary' });
             }
         } else if (item?.type === 'push_to_pull_request_branch') {
             if (!checkPublicCommitMessage(item.message)) {
@@ -2792,12 +2802,16 @@ const PUBLIC_BLOCKED_REASONS = new Set([
 //   alerts=12 dependabot-pr=3 auto-sec-pr=6 blocked=3 (nuget-not-mirrored=1, breaking-upgrade-required=2) code-findings-out-of-scope=344
 // The parenthesized breakdown is omitted when nothing is blocked.
 function checkPublicNoopMessage(text) {
-    const match = /^alerts=\d{1,6} dependabot-pr=\d{1,6} auto-sec-pr=\d{1,6} blocked=\d{1,6}(?: \(([a-z-]+=\d{1,6}(?:, [a-z-]+=\d{1,6})*)\))? code-findings-out-of-scope=\d{1,6}$/.exec(String(text ?? '').trim());
+    const match = /^alerts=\d{1,6} dependabot-pr=\d{1,6} auto-sec-pr=\d{1,6} blocked=(\d{1,6})(?: \(([a-z-]+=\d{1,6}(?:, [a-z-]+=\d{1,6})*)\))? code-findings-out-of-scope=\d{1,6}$/.exec(String(text ?? '').trim());
     if (!match) {
         return false;
     }
-    const codes = match[1] ? match[1].split(', ').map(pair => pair.split('=')[0]) : [];
-    return codes.every(code => PUBLIC_BLOCKED_REASONS.has(code)) && new Set(codes).size === codes.length;
+    const blocked = Number(match[1]);
+    const reasons = match[2] ? match[2].split(', ').map(pair => pair.split('=')) : [];
+    return (blocked > 0) === (reasons.length > 0)
+        && reasons.every(([code, count]) => PUBLIC_BLOCKED_REASONS.has(code) && Number(count) > 0)
+        && new Set(reasons.map(([code]) => code)).size === reasons.length
+        && reasons.reduce((total, [, count]) => total + Number(count), 0) === blocked;
 }
 
 // Safe-output types whose agent-authored text the conclusion job would publish in issues
@@ -2844,21 +2858,6 @@ function projectPublicOutput(item) {
     }
     return { output, valid };
 }
-
-// Files under /tmp/gh-aw that hold the agent transcript (prompt responses, tool calls, and
-// tool output such as the private alert inputs) or agent-written summaries. The agent job
-// uploads /tmp/gh-aw as the public `agent` artifact and renders these logs into the public
-// run summary, so they are removed before either happens.
-const AGENT_TRANSCRIPT_PATHS = [
-    'sandbox/agent/logs',
-    'mcp-logs',
-    'proxy-logs',
-    'agent-stdio.log',
-    'agent-step-summary.md',
-    'redacted-urls.log',
-    'otel.jsonl',
-    'otlp-export-errors.jsonl',
-];
 
 /**
  * Checks the raw safe-output items before they leave the agent job: every item must be a
@@ -2983,16 +2982,25 @@ async function runAgentOutputScrub({ core, github = null, context = null, fs = r
 
 async function scrubAgentOutputs({ core, github, context, fs, env, workDir, readBaseTexts }) {
     const path = require('node:path');
-    for (const relative of AGENT_TRANSCRIPT_PATHS) {
-        fs.rmSync(path.join(workDir, relative), { recursive: true, force: true });
-    }
     const outputPath = env.GH_AW_SAFE_OUTPUTS;
-    const lines = outputPath && fs.existsSync(outputPath)
+    const hasOutput = outputPath && fs.existsSync(outputPath);
+    const lines = hasOutput
         ? fs.readFileSync(outputPath, 'utf8').split('\n').filter(line => line.trim() !== '')
         : [];
-    const artifactNames = fs.existsSync(workDir) ? fs.readdirSync(workDir).filter(name => /^aw-.*\.(?:patch|bundle)$/.test(name)).sort() : [];
+    const entries = fs.existsSync(workDir) ? fs.readdirSync(workDir) : [];
+    const artifactNames = entries.filter(name => /^aw-.*\.(?:patch|bundle)$/.test(name)).sort();
+    // The agent can overwrite every framework file in this directory, including
+    // telemetry consumed by later summaries. Retain only patch candidates and the
+    // raw output being validated, rather than maintaining a transcript denylist.
+    for (const name of entries) {
+        const filename = path.join(workDir, name);
+        if (!artifactNames.includes(name) && (!outputPath || path.resolve(filename) !== path.resolve(outputPath))) {
+            fs.rmSync(filename, { recursive: true, force: true });
+        }
+    }
     const reject = violations => {
-        if (outputPath && fs.existsSync(outputPath)) {
+        if (hasOutput) {
+            fs.mkdirSync(path.dirname(outputPath), { recursive: true });
             fs.writeFileSync(outputPath, '');
         }
         for (const name of artifactNames) {
@@ -3066,9 +3074,11 @@ async function scrubAgentOutputs({ core, github, context, fs, env, workDir, read
     if ([...requestedBases].some(sha => !trustedBases.has(sha))) {
         return reject([{ source: 'patch-transport', reason: 'untrusted-base-commit' }]);
     }
-    if (outputPath && fs.existsSync(outputPath)) {
+    if (hasOutput) {
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
         fs.writeFileSync(outputPath, kept.map(item => JSON.stringify(item)).join('\n') + (kept.length > 0 ? '\n' : ''));
     }
+    core.info('Agent-written telemetry and framework files withheld; only validated outputs and patches remain.');
     core.info(`Agent output scrub kept ${kept.length} of ${lines.length} output(s).`);
     core.setOutput('publication_ready', 'true');
     return { kept: kept.length, dropped: lines.length - kept.length, violations };
