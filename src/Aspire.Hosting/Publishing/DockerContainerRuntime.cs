@@ -6,6 +6,7 @@
 
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Dcp.Process;
+using Aspire.Hosting.Utils;
 using Aspire.Shared;
 using Microsoft.Extensions.Logging;
 
@@ -25,6 +26,110 @@ internal sealed class DockerContainerRuntime : ContainerRuntimeBase<DockerContai
 
     protected override string RuntimeExecutable => KnownContainerRuntimes.Docker;
     public override string Name => "Docker";
+
+    public override async Task<string> ResolveRemoteImageAsync(string imageName, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var source = ContainerImageName.ParseSource(imageName);
+        var repository = $"{source.Registry}/{source.Image}";
+        // A tag-plus-digest reference such as tools:v1@sha256:<hex> selects the digest.
+        // Discard the tag before invoking Buildx so a moving tag cannot affect preparation.
+        var reference = source.Digest is { } expectedDigest
+            ? $"{repository}@{expectedDigest}"
+            : $"{repository}:{source.Tag}";
+        await EnsureRemoteImageCopySupportedAsync(cancellationToken).ConfigureAwait(false);
+        var digest = await ReadRemoteImageDigestAsync(reference, cancellationToken).ConfigureAwait(false);
+        if (source.Digest is not null && !StringComparer.Ordinal.Equals(source.Digest, digest))
+        {
+            throw new DistributedApplicationException($"Docker reported a different content digest for pinned source image '{reference}'.");
+        }
+
+        return $"{repository}@{digest}";
+    }
+
+    public override async Task<string> CopyRemoteImageAsync(string sourceImageName, string destinationImageName, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var source = ContainerImageName.ParseSource(sourceImageName);
+        if (source.Digest is null)
+        {
+            throw new ArgumentException("Resolve the source to an immutable digest before copying it.", nameof(sourceImageName));
+        }
+        var destination = ContainerImageName.ParseSource(destinationImageName);
+        if (!ContainerReferenceParser.TryParse(destinationImageName, out var destinationInput) ||
+            destinationInput.Registry is null || destinationInput.Tag is null || destinationInput.Digest is not null)
+        {
+            throw new ArgumentException("The destination must specify a registry, repository, and publication tag, without a digest.", nameof(destinationImageName));
+        }
+
+        var sourceReference = $"{source.Registry}/{source.Image}@{source.Digest}";
+        var destinationRepository = $"{destination.Registry}/{destination.Image}";
+        var destinationReference = $"{destinationRepository}:{destination.Tag}";
+        await EnsureRemoteImageCopySupportedAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        // --prefer-index=false carbon-copies a single source without wrapping a single-platform
+        // manifest in a new index. Index children (including attestations) are copied together.
+        // https://docs.docker.com/reference/cli/docker/buildx/imagetools/create/
+        await ExecuteContainerCommandForOutputAsync(
+            ["buildx", "imagetools", "create", "--prefer-index=false", "--tag", destinationReference, sourceReference],
+            "copy remote image",
+            destinationReference,
+            cancellationToken).ConfigureAwait(false);
+
+        var digest = await ReadRemoteImageDigestAsync(destinationReference, cancellationToken).ConfigureAwait(false);
+        if (!StringComparer.Ordinal.Equals(source.Digest, digest))
+        {
+            throw new DistributedApplicationException(
+                $"Destination image '{destinationReference}' does not have the source content digest. Remote image publication could not be verified.");
+        }
+        _logger.LogInformation("Verified remote image publication to {ImageName}.", $"{destinationRepository}@{digest}");
+
+        return $"{destinationRepository}@{digest}";
+    }
+
+    private async Task EnsureRemoteImageCopySupportedAsync(CancellationToken cancellationToken)
+    {
+        var help = await ExecuteContainerCommandForOutputAsync(
+            ["buildx", "imagetools", "create", "--help"],
+            "check lossless remote image copy support",
+            "Docker Buildx",
+            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        // Cobra help exposes the flag as a whitespace-delimited token:
+        //   --prefer-index             When only a single source is specified, ...
+        // Probe the flag rather than guessing compatibility from a Buildx version string.
+        if (!help.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Contains("--prefer-index", StringComparer.Ordinal))
+        {
+            throw new DistributedApplicationException(
+                "Docker Buildx cannot preserve remote image manifests without --prefer-index=false. " +
+                "Install a Buildx version supporting that flag: https://docs.docker.com/build/install-buildx/.");
+        }
+    }
+
+    private async Task<string> ReadRemoteImageDigestAsync(string reference, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var output = await ExecuteContainerCommandForOutputAsync(
+            ["buildx", "imagetools", "inspect", reference, "--format", "{{.Manifest.Digest}}"],
+            "resolve remote image digest",
+            reference,
+            cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        // The format emits exactly the root digest, for example sha256:<64 lowercase hex
+        // characters>, not a platform child's digest. Some versions include a trailing newline.
+        var digest = output.Trim();
+        try
+        {
+            ContainerImageName.ValidateDigest(digest, nameof(output));
+        }
+        catch (ArgumentException ex)
+        {
+            throw new DistributedApplicationException($"Docker returned an invalid root manifest digest for '{reference}'.", ex);
+        }
+
+        return digest;
+    }
+
     private async Task RunDockerBuildAsync(string contextPath, string dockerfilePath, ContainerImageBuildOptions? options, Dictionary<string, string?> buildArguments, Dictionary<string, BuildImageSecretValue> buildSecrets, string? stage, CancellationToken cancellationToken)
     {
         var imageName = !string.IsNullOrEmpty(options?.Tag)
