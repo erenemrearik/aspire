@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Aspire.Cli.Agents;
 using Aspire.Cli.Agents.Hooks;
 using Aspire.Cli.Resources;
@@ -326,6 +328,53 @@ public class AgentFileWriterTests(ITestOutputHelper outputHelper)
 
         Assert.Equal(mode, File.GetUnixFileMode(path));
         Assert.Equal("replacement", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task WriteAsync_Replacement_PreservesWindowsDiscretionaryAcl()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Windows DACL preservation is not applicable on Unix.");
+            return;
+        }
+
+        using var workspace = TemporaryWorkspace.Create(outputHelper);
+        var path = Path.Combine(workspace.Path, "payload");
+        await File.WriteAllTextAsync(path, "original");
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = Assert.IsType<SecurityIdentifier>(identity.User);
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(user, FileSystemRights.FullControl, AccessControlType.Allow));
+        var destination = new FileInfo(path);
+        destination.SetAccessControl(security);
+        var originalDacl = destination.GetAccessControl(AccessControlSections.Access)
+            .GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+
+        await AgentFileWriter.WriteAsync(
+            path,
+            destinationExists: true,
+            async (stream, token) =>
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    var staging = new FileInfo(Assert.IsType<FileStream>(stream).Name);
+                    // A distinct staging DACL proves replacement preserves the destination's
+                    // protected access rules rather than publishing the inherited defaults.
+                    Assert.NotEqual(originalDacl, staging.GetAccessControl(AccessControlSections.Access)
+                        .GetSecurityDescriptorSddlForm(AccessControlSections.Access));
+                }
+                await stream.WriteAsync("replacement"u8.ToArray(), token);
+            },
+            _ => Task.CompletedTask,
+            newFileMode: null,
+            CancellationToken.None);
+
+        Assert.Equal(originalDacl, destination.GetAccessControl(AccessControlSections.Access)
+            .GetSecurityDescriptorSddlForm(AccessControlSections.Access));
+        Assert.Equal("replacement", await File.ReadAllTextAsync(path));
+        Assert.Equal(["payload"], workspace.WorkspaceRoot.EnumerateFileSystemInfos().Select(static entry => entry.Name));
     }
 
     [Fact]

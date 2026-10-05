@@ -196,6 +196,7 @@ internal sealed class OpenCodeAgentEnvironmentScanner : IAgentEnvironmentScanner
 
     internal static int ResolveSchema(IReadOnlyList<AgentClientDetection> detections, IEnumerable<JsonObject> configs)
     {
+        // Both generations share a $schema URL; use installed versions and configuration shapes.
         var versions = new HashSet<int>();
         foreach (var detection in detections.Where(detection => detection.Client is AgentClientKind.OpenCode && detection.Version is not null))
         {
@@ -290,9 +291,8 @@ internal sealed class OpenCodeAgentEnvironmentScanner : IAgentEnvironmentScanner
             return null;
         }
 
-        // Probes can return "1.18.31+build", "v2.0.0-preview.1", or "opencode 2.0.0".
-        // Build metadata does not lower precedence; 1.18.31-preview is below 1.18.31.
-        // A shared $schema URL is not version evidence for either generation.
+        // Ignore build metadata ("1.18.31+build"); prereleases ("1.18.31-preview")
+        // remain below the stable release for the catalog capability check.
         foreach (var token in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             var withoutMetadata = token.TrimStart('v').Split('+')[0];

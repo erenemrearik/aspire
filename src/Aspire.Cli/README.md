@@ -77,6 +77,8 @@ aspire <command> [options]
 
 `aspire doctor` checks for local Aspire skill files along the active directory's ancestor chain within the workspace. `aspire update --migrate` uses the selected AppHost's Git root, or the nearest `.sln`/`.slnx` directory outside Git, falling back to the selected directory when neither exists. Sibling projects are not scanned, and migration preserves existing local skill files.
 
+Changed agent configuration and managed skill files are published atomically. Replacement preserves the destination DACL on Windows and mode bits on Unix. Unix ownership, custom ACLs, and extended attributes are not preserved; files relying on that metadata should be configured manually instead.
+
 ## Examples
 
 To initialize an empty C# AppHost without discovering incidental `.sln` or `.slnx` files, run this from the repository root:

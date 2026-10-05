@@ -73,7 +73,9 @@ internal static class AgentFileWriter
 
             if (destinationExists)
             {
-                // Replace preserves destination metadata/ACLs, unlike delete-then-move.
+                // File.Replace retains the destination DACL on Windows. Unix replacement
+                // swaps the inode: only the mode bits restored above are preserved, not
+                // ownership, custom ACLs or extended attributes.
                 File.Replace(stagingPath, physicalPath, destinationBackupFileName: null);
             }
             else

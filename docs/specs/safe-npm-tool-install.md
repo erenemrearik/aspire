@@ -100,7 +100,9 @@ Scope controls configuration and generated skill destinations. The verified Play
 
 Each changed file is staged beside its destination, checked for concurrent changes, and replaced atomically. Unchanged files retain their timestamps, and user-owned extra files are not pruned. Generation cannot create unselected-client directories in the user's workspace. Acquisition, generation, and destination failures are reported separately from successful installation.
 
-**What this establishes:** The complete Playwright CLI skill is available at the successfully configured targets. Selecting both Copilot frontends does not duplicate installation or writes.
+Replacement preserves the destination DACL on Windows and mode bits on Unix. Unix ownership, custom ACLs, and extended attributes are not preserved; files relying on that metadata should be configured manually instead.
+
+**What this establishes:** The complete Playwright CLI skill is available at the successfully configured targets. Selecting Copilot and OpenCode publishes their shared skill destination once per scope.
 
 ## Verification Chain Summary
 
