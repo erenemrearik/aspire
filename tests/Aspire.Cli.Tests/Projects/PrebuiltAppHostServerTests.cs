@@ -1313,7 +1313,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var sourcePolicyIdentity = IntegrationRestorePlanResolver.CreateGlobalPackagesFolderIdentity(
             [channelSource],
             mappings);
-        var expectedIdentity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+        var expectedIdentity = BundleNuGetService.CombineCacheIdentities(
             sourcePolicyIdentity,
             result.OverlayCacheIdentity!);
         var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(expectedIdentity);
@@ -1371,7 +1371,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         var sourcePolicyIdentity = IntegrationRestorePlanResolver.CreateGlobalPackagesFolderIdentity(
             [overrideStagingFeed],
             [new PackageMapping("Aspire*", overrideStagingFeed)]);
-        var expectedIdentity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+        var expectedIdentity = BundleNuGetService.CombineCacheIdentities(
             sourcePolicyIdentity,
             result.OverlayCacheIdentity!);
         var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(expectedIdentity);
@@ -1459,7 +1459,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     [Fact]
     public void ComposePackageSourceMappings_WithoutAmbientMappings_PreservesAmbientEligibility()
     {
-        var mappings = IntegrationRestorePlan.ComposePackageSourceMappings(
+        var mappings = NuGetConfigurationBuilder.ComposePackageSourceMappings(
             [new PackageMapping("Aspire*", "https://example.com/staging")],
             ambientMappings: [],
             ambientSources:
@@ -1486,7 +1486,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     [Fact]
     public void ComposePackageSourceMappings_ReplacesCompetingAspireMappingsAndPreservesUnrelatedPolicy()
     {
-        var mappings = IntegrationRestorePlan.ComposePackageSourceMappings(
+        var mappings = NuGetConfigurationBuilder.ComposePackageSourceMappings(
             [new PackageMapping("Aspire*", "https://example.com/staging")],
             ambientMappings:
             [
@@ -1513,7 +1513,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     [Fact]
     public void ComposePackageSourceMappings_WithExactSourceOverride_PreservesAmbientDependencyMappings()
     {
-        var mappings = IntegrationRestorePlan.ComposePackageSourceMappings(
+        var mappings = NuGetConfigurationBuilder.ComposePackageSourceMappings(
             [
                 new PackageMapping("Aspire.Hosting.Redis", "https://example.com/override"),
                 new PackageMapping("Aspire*", "https://example.com/override"),
@@ -1550,7 +1550,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     [Fact]
     public void ComposePackageSourceMappings_WithExactSourceOverride_PreservesUnmappedAmbientAspireEligibility()
     {
-        var mappings = IntegrationRestorePlan.ComposePackageSourceMappings(
+        var mappings = NuGetConfigurationBuilder.ComposePackageSourceMappings(
             [
                 new PackageMapping("CommunityToolkit.Aspire.Hosting.Redis", "https://example.com/override"),
                 new PackageMapping("Aspire*", "https://example.com/override"),
@@ -1583,7 +1583,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     public void ComposePackageSourceMappings_WithExactSourceMatchingChannel_KeepsChannelAuthoritative()
     {
         const string source = "https://example.com/channel";
-        var mappings = IntegrationRestorePlan.ComposePackageSourceMappings(
+        var mappings = NuGetConfigurationBuilder.ComposePackageSourceMappings(
             [
                 new PackageMapping("CommunityToolkit.Aspire.Hosting.Redis", source),
                 new PackageMapping("Aspire*", source),
@@ -1614,7 +1614,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     [Fact]
     public void ComposePackageSourceMappings_WithAmbientMappings_DoesNotAddChannelFallbackMapping()
     {
-        var mappings = IntegrationRestorePlan.ComposePackageSourceMappings(
+        var mappings = NuGetConfigurationBuilder.ComposePackageSourceMappings(
             [
                 new PackageMapping("Aspire*", "https://example.com/staging"),
                 new PackageMapping("*", "https://api.nuget.org/v3/index.json")
@@ -1647,7 +1647,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     public void ResolveNuGetConfigSources_UsesWorkloadIdAndAvoidsDormantReservedAdditionalSourceKeys()
     {
         const string workloadId = "apphost-0123456789abcdef";
-        var sources = IntegrationRestorePlan.ResolveNuGetConfigSources(
+        var sources = NuGetConfigurationBuilder.ResolveSourceAliases(
             [
                 new PackageMapping("Aspire*", "https://example.com/staging"),
                 new PackageMapping("Contoso.*", "https://example.com/contoso"),
@@ -1676,7 +1676,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     {
         const string workloadId = "apphost-0123456789abcdef";
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            IntegrationRestorePlan.ResolveNuGetConfigSources(
+            NuGetConfigurationBuilder.ResolveSourceAliases(
                 [new PackageMapping("Aspire*", "https://example.com/staging")],
                 workloadId,
                 ambientSources: [],
@@ -1696,7 +1696,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
         bool hasClientCertificates)
     {
         const string source = "https://example.com/private";
-        var sources = IntegrationRestorePlan.ResolveNuGetConfigSources(
+        var sources = NuGetConfigurationBuilder.ResolveSourceAliases(
             [new PackageMapping("Aspire*", source)],
             "apphost-0123456789abcdef",
             ambientSources:
@@ -1719,7 +1719,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
     public void ResolveNuGetConfigSources_PreservesEnabledAliasOverDisabledAuthenticatedAlias()
     {
         const string source = "https://example.com/private";
-        var sources = IntegrationRestorePlan.ResolveNuGetConfigSources(
+        var sources = NuGetConfigurationBuilder.ResolveSourceAliases(
             [new PackageMapping("Aspire*", source)],
             "apphost-0123456789abcdef",
             ambientSources:
@@ -1751,10 +1751,11 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
             ReservedPackageSourceKeys: ["Private", "unrelated"],
             SourceIdentityKey: s_sourceIdentityKey);
 
-        var overlay = IntegrationRestorePlan.CreateNuGetConfigOverlay(
+        var overlay = NuGetConfigurationBuilder.ComposeOverlay(
             [new PackageMapping("Aspire*", source)],
             settings,
             [new NuGetConfigSource("Private", source, IsAmbient: true, IsEnabled: false)],
+            restrictToSelectedSources: false,
             globalPackagesFolder: null);
 
         Assert.True(overlay.ClearDisabledPackageSources);
@@ -1866,7 +1867,7 @@ public class PrebuiltAppHostServerTests(ITestOutputHelper outputHelper)
                 new PackageMapping("Aspire*", packageSourceOverride),
                 new PackageMapping("CommunityToolkit*", channelSource)
             ]);
-        var expectedIdentity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+        var expectedIdentity = BundleNuGetService.CombineCacheIdentities(
             sourcePolicyIdentity,
             result.OverlayCacheIdentity!);
         var expectedCacheKey = CliPathHelper.ComputeStagingCacheIdentityKey(expectedIdentity);

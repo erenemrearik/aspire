@@ -13,6 +13,7 @@ using Aspire.Hosting;
 using Aspire.Shared;
 using Microsoft.Extensions.Logging;
 using NuGet.ProjectModel;
+using NuGetPackage = Aspire.Shared.NuGetPackageCli;
 
 namespace Aspire.Cli.NuGet;
 
@@ -72,7 +73,7 @@ internal interface INuGetService
 }
 
 /// <summary>
-/// Runs bundled NuGet operations in-process and owns their reusable restore cache.
+/// Orchestrates NuGet configuration and in-process package restore with reusable restore caches.
 /// </summary>
 internal sealed class BundleNuGetService : INuGetService
 {
@@ -205,6 +206,129 @@ internal sealed class BundleNuGetService : INuGetService
         }
 
         return _nuGetClient.GetSettings(workingDirectory, sourceIdentityKey);
+    }
+
+    internal NuGetConfiguration BuildConfiguration(
+        DirectoryInfo workingDirectory,
+        string workloadId,
+        PackageMapping[]? selectedMappings,
+        bool restrictToSelectedSources,
+        string? packageScopedAppendSource = null,
+        bool hasAuthoritativeAspirePolicy = false,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(workingDirectory);
+        var settings = GetNuGetSettings(workingDirectory.FullName, cancellationToken);
+        return NuGetConfigurationBuilder.Build(
+            settings,
+            workloadId,
+            selectedMappings,
+            restrictToSelectedSources,
+            packageScopedAppendSource,
+            hasAuthoritativeAspirePolicy);
+    }
+
+    internal bool IsPackageSourceMappingEnabled(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(workingDirectory);
+        return GetNuGetSettings(workingDirectory.FullName, cancellationToken).PackageSourceMappings.Count > 0;
+    }
+
+    internal async Task<NuGetPackageOperationConfiguration> CreatePackageOperationConfigurationAsync(
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<PackageMapping>? mappings,
+        bool restrictToSelectedSources,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(workingDirectory);
+        if (restrictToSelectedSources && mappings is not { Count: > 0 })
+        {
+            throw new ArgumentException("Source-restricted discovery requires a selected source.", nameof(mappings));
+        }
+
+        // A channel's synthetic '*' fallback belongs to standalone configuration generation,
+        // not an inherited operation. Explicit-source operations retain their selected catch-all.
+        var selectedMappings = mappings?
+            .Where(mapping => restrictToSelectedSources || mapping.PackageFilter != PackageMapping.AllPackages)
+            .ToArray() ?? [];
+        var configuration = BuildConfiguration(
+            workingDirectory,
+            workloadId: "package-search",
+            selectedMappings.Length == 0 ? null : selectedMappings,
+            restrictToSelectedSources,
+            hasAuthoritativeAspirePolicy: true,
+            cancellationToken: cancellationToken);
+
+        if (configuration.Overlay is null)
+        {
+            return NuGetPackageOperationConfiguration.Ambient(workingDirectory, configuration.Settings.CacheIdentity);
+        }
+
+        var temporaryConfig = await WriteTemporaryOverlayAsync(
+            configuration,
+            workingDirectory,
+            globalPackagesFolder: null,
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The selected package mappings did not produce a NuGet policy overlay.");
+
+        return NuGetPackageOperationConfiguration.FromTemporaryOverlay(
+            workingDirectory,
+            temporaryConfig,
+            configuration.Settings.CacheIdentity);
+    }
+
+    internal IReadOnlyList<NuGetPackage> FilterPackageSearchResults(
+        IReadOnlyList<NuGetPackage> packages,
+        string? nugetConfigPath,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return _nuGetClient.FilterPackageSearchResults(packages, nugetConfigPath, workingDirectory);
+    }
+
+    internal async Task<TemporaryNuGetConfig?> WriteTemporaryOverlayAsync(
+        NuGetConfiguration configuration,
+        DirectoryInfo? parentDirectory,
+        string? globalPackagesFolder,
+        CancellationToken cancellationToken)
+    {
+        if (configuration.Overlay is not { } overlay)
+        {
+            return null;
+        }
+
+        overlay = overlay with { GlobalPackagesFolder = globalPackagesFolder };
+        return parentDirectory is null
+            ? await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
+                path => WriteNuGetConfigOverlay(overlay, path, cancellationToken)).ConfigureAwait(false)
+            : await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
+                parentDirectory,
+                path => WriteNuGetConfigOverlay(overlay, path, cancellationToken)).ConfigureAwait(false);
+    }
+
+    internal void WriteOverlay(
+        NuGetConfiguration configuration,
+        string outputPath,
+        string? globalPackagesFolder,
+        CancellationToken cancellationToken)
+    {
+        var overlay = configuration.Overlay
+            ?? throw new InvalidOperationException("The resolved configuration does not require a NuGet policy overlay.");
+        WriteNuGetConfigOverlay(overlay with { GlobalPackagesFolder = globalPackagesFolder }, outputPath, cancellationToken);
+    }
+
+    internal static string CombineCacheIdentities(string configurationIdentity, string overlayIdentity)
+    {
+        var builder = new StringBuilder();
+        foreach (var value in new[] { "SOURCE_POLICY", configurationIdentity, "OVERLAY", overlayIdentity })
+        {
+            builder.Append(value.Length);
+            builder.Append(':');
+            builder.Append(value);
+        }
+
+        return builder.ToString();
     }
 
     internal void WriteNuGetConfigOverlay(

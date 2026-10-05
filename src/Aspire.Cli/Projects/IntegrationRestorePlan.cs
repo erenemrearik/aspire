@@ -110,10 +110,11 @@ internal sealed class IntegrationRestorePlanResolver(
             executionContext.NuGetServiceIndexOverride);
         restoreSources = NormalizeSources(restoreSources, new DirectoryInfo(appDirectoryPath));
 
-        var invocationConfiguration = new NuGetInvocationConfigurationSource(nugetService).Resolve(
+        var configuration = nugetService.BuildConfiguration(
             new DirectoryInfo(appDirectoryPath),
             workloadId,
             restoreSources.PackageSourceMappings,
+            restrictToSelectedSources: false,
             restoreSources.PackageScopedAppendSource,
             restoreSources.HasAuthoritativeAspirePolicy,
             cancellationToken);
@@ -122,7 +123,8 @@ internal sealed class IntegrationRestorePlanResolver(
             effectivePackageSourceOverride,
             effectivePackageSourceOverridePattern,
             restoreSources,
-            invocationConfiguration,
+            configuration,
+            nugetService,
             appDirectoryPath,
             executionContext.AspireHomeDirectory);
     }
@@ -321,18 +323,6 @@ internal sealed class IntegrationRestorePlanResolver(
         return builder.ToString();
     }
 
-    internal static string CombineGlobalPackagesFolderIdentity(
-        string sourcePolicyIdentity,
-        string overlayIdentity)
-    {
-        var builder = new StringBuilder();
-        AppendIdentityPart(builder, "SOURCE_POLICY");
-        AppendIdentityPart(builder, sourcePolicyIdentity);
-        AppendIdentityPart(builder, "OVERLAY");
-        AppendIdentityPart(builder, overlayIdentity);
-        return builder.ToString();
-    }
-
     private static void AppendIdentityPart(StringBuilder builder, string value)
     {
         builder.Append(value.Length);
@@ -355,7 +345,8 @@ internal sealed class IntegrationRestorePlan
 {
     private readonly string? _effectivePackageSourceOverridePattern;
     private readonly IntegrationRestoreSources _restoreSources;
-    private readonly NuGetInvocationConfiguration _invocationConfiguration;
+    private readonly NuGetConfiguration _configuration;
+    private readonly BundleNuGetService _nugetService;
     private readonly string _appDirectoryPath;
     private readonly DirectoryInfo _aspireHomeDirectory;
 
@@ -363,7 +354,8 @@ internal sealed class IntegrationRestorePlan
         string? effectivePackageSourceOverride,
         string? effectivePackageSourceOverridePattern,
         IntegrationRestoreSources restoreSources,
-        NuGetInvocationConfiguration invocationConfiguration,
+        NuGetConfiguration configuration,
+        BundleNuGetService nugetService,
         string appDirectoryPath,
         DirectoryInfo aspireHomeDirectory)
     {
@@ -376,7 +368,8 @@ internal sealed class IntegrationRestorePlan
                 ? null
                 : [.. restoreSources.PackageSourceMappings]
         };
-        _invocationConfiguration = invocationConfiguration;
+        _configuration = configuration;
+        _nugetService = nugetService;
         _appDirectoryPath = appDirectoryPath;
         _aspireHomeDirectory = aspireHomeDirectory;
     }
@@ -406,9 +399,9 @@ internal sealed class IntegrationRestorePlan
         var overlay = await CreateRestoreOverlayAsync(cancellationToken).ConfigureAwait(false);
         var sources = GetNuGetSources()?.ToArray();
         string[] configPaths = overlay is null
-            ? [.. _invocationConfiguration.Settings.ConfigPaths]
-            : [overlay.ConfigFile.FullName, .. _invocationConfiguration.Settings.ConfigPaths];
-        var sensitiveSources = _invocationConfiguration.Settings.SensitiveSourceValues
+            ? [.. _configuration.Settings.ConfigPaths]
+            : [overlay.ConfigFile.FullName, .. _configuration.Settings.ConfigPaths];
+        var sensitiveSources = _configuration.Settings.SensitiveSourceValues
             .Concat(
                 _restoreSources.PackageSourceMappings?
                     .Select(static mapping => mapping.Source)
@@ -420,7 +413,7 @@ internal sealed class IntegrationRestorePlan
             overlay,
             sources,
             configPaths,
-            _invocationConfiguration.Settings.CacheIdentity,
+            _configuration.Settings.CacheIdentity,
             sensitiveSources,
             GetGlobalPackagesFolder(overlay));
     }
@@ -449,7 +442,8 @@ internal sealed class IntegrationRestorePlan
         }
         else
         {
-            _invocationConfiguration.WriteOverlay(
+            _nugetService.WriteOverlay(
+                _configuration,
                 restoreOverlayFile.FullName,
                 globalPackagesFolder,
                 cancellationToken);
@@ -458,7 +452,7 @@ internal sealed class IntegrationRestorePlan
         var rootAdditionalSources = _restoreSources.PackageSourceMappings is null
             ? GetNuGetSources()?.ToArray() ?? []
             : [];
-        var sensitiveSources = _invocationConfiguration.Settings.SensitiveSourceValues
+        var sensitiveSources = _configuration.Settings.SensitiveSourceValues
             .Concat(selectedSensitiveSources)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -472,49 +466,6 @@ internal sealed class IntegrationRestorePlan
             sensitiveSources,
             globalPackagesFolder);
     }
-
-    internal static NuGetConfigSource[] ResolveNuGetConfigSources(
-        PackageMapping[]? mappings,
-        string workloadId,
-        IReadOnlyList<NuGetSourceInfo> ambientSources,
-        IReadOnlyList<string> reservedPackageSourceKeys,
-        ReadOnlySpan<byte> sourceIdentityKey)
-        => NuGetInvocationConfigurationComposer.ResolveConfigSources(
-            mappings,
-            workloadId,
-            ambientSources,
-            reservedPackageSourceKeys,
-            sourceIdentityKey);
-
-    internal static NuGetConfigOverlay CreateNuGetConfigOverlay(
-        PackageMapping[] selectedMappings,
-        NuGetSettingsInfo settings,
-        IReadOnlyList<NuGetConfigSource> selectedSources,
-        string? globalPackagesFolder,
-        string? packageScopedAppendSource = null,
-        bool hasAuthoritativeAspirePolicy = false)
-        => NuGetInvocationConfigurationComposer.CreateOverlay(
-            selectedMappings,
-            settings,
-            selectedSources,
-            globalPackagesFolder,
-            packageScopedAppendSource,
-            hasAuthoritativeAspirePolicy);
-
-    internal static NuGetPackageSourceMapping[] ComposePackageSourceMappings(
-        IReadOnlyList<PackageMapping> selectedMappings,
-        IReadOnlyList<NuGetPackageSourceMapping> ambientMappings,
-        IReadOnlyList<NuGetSourceInfo> ambientSources,
-        IReadOnlyList<NuGetConfigSource> selectedSources,
-        string? packageScopedAppendSource = null,
-        bool hasAuthoritativeAspirePolicy = false)
-        => NuGetInvocationConfigurationComposer.ComposePackageSourceMappings(
-            selectedMappings,
-            ambientMappings,
-            ambientSources,
-            selectedSources,
-            packageScopedAppendSource,
-            hasAuthoritativeAspirePolicy);
 
     private IEnumerable<string>? GetNuGetSources()
         => _restoreSources.PackageSourceMappings is null && _restoreSources.AdditionalSources.Count > 0
@@ -557,7 +508,7 @@ internal sealed class IntegrationRestorePlan
         }
 
         var primarySource = packageSourceHints[0];
-        return _invocationConfiguration.ConfigSources
+        return _configuration.ConfigSources
             .FirstOrDefault(source => PackageSourceIdentity.Comparer.Equals(source.Source, primarySource))
             ?.Key ?? primarySource;
     }
@@ -575,7 +526,7 @@ internal sealed class IntegrationRestorePlan
         {
             // Reused ambient aliases are not re-emitted with their source URLs, so the overlay
             // identity must be paired with the selected source policy to distinguish those feeds.
-            identity = IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
+            identity = BundleNuGetService.CombineCacheIdentities(
                 identity,
                 restoreOverlay.CacheIdentity);
         }
@@ -593,7 +544,8 @@ internal sealed class IntegrationRestorePlan
             return null;
         }
 
-        var config = await _invocationConfiguration.CreateTemporaryOverlayAsync(
+        var config = await _nugetService.WriteTemporaryOverlayAsync(
+            _configuration,
             parentDirectory: null,
             globalPackagesFolder: null,
             cancellationToken).ConfigureAwait(false)
@@ -616,7 +568,8 @@ internal sealed class IntegrationRestorePlan
         try
         {
             await config.RegenerateAsync(
-                path => _invocationConfiguration.WriteOverlay(
+                path => _nugetService.WriteOverlay(
+                    _configuration,
                     path,
                     globalPackagesFolder,
                     cancellationToken)).ConfigureAwait(false);
@@ -630,12 +583,6 @@ internal sealed class IntegrationRestorePlan
     }
 
 }
-
-internal sealed record NuGetConfigSource(
-    string Key,
-    string Source,
-    bool IsAmbient,
-    bool IsEnabled);
 
 internal sealed record IntegrationRestoreSources(
     IReadOnlyList<string> AdditionalSources,

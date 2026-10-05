@@ -28,7 +28,7 @@ internal sealed class AddCommand : BaseCommand
 
     private readonly IProjectLocator _projectLocator;
     private readonly IntegrationPackageSearchService _integrationPackageSearchService;
-    private readonly INuGetSettingsProvider _nugetSettingsProvider;
+    private readonly BundleNuGetService _nugetService;
     private readonly IAddCommandPrompter _prompter;
     private readonly IDotNetSdkInstaller _sdkInstaller;
     private readonly ICliHostEnvironment _hostEnvironment;
@@ -55,12 +55,12 @@ internal sealed class AddCommand : BaseCommand
         Description = AddCommandStrings.AllArgumentDescription
     };
 
-    public AddCommand(IProjectLocator projectLocator, IntegrationPackageSearchService integrationPackageSearchService, INuGetSettingsProvider nugetSettingsProvider, IAddCommandPrompter prompter, IDotNetSdkInstaller sdkInstaller, ICliHostEnvironment hostEnvironment, IAppHostProjectFactory projectFactory, ProfilingTelemetry profilingTelemetry, CommonCommandServices services)
+    public AddCommand(IProjectLocator projectLocator, IntegrationPackageSearchService integrationPackageSearchService, BundleNuGetService nugetService, IAddCommandPrompter prompter, IDotNetSdkInstaller sdkInstaller, ICliHostEnvironment hostEnvironment, IAppHostProjectFactory projectFactory, ProfilingTelemetry profilingTelemetry, CommonCommandServices services)
         : base("add", AddCommandStrings.Description, services)
     {
         _projectLocator = projectLocator;
         _integrationPackageSearchService = integrationPackageSearchService;
-        _nugetSettingsProvider = nugetSettingsProvider;
+        _nugetService = nugetService;
         _prompter = prompter;
         _sdkInstaller = sdkInstaller;
         _hostEnvironment = hostEnvironment;
@@ -360,7 +360,7 @@ internal sealed class AddCommand : BaseCommand
                     var nugetConfigPath = Path.Combine(projectDir.FullName, "nuget.config");
                     if (!File.Exists(nugetConfigPath))
                     {
-                        var packageSourceMappingEnabled = _nugetSettingsProvider.IsPackageSourceMappingEnabled(
+                        var packageSourceMappingEnabled = _nugetService.IsPackageSourceMappingEnabled(
                             projectDir,
                             cancellationToken);
                         CreateAdditiveLocalSourceNuGetConfig(
@@ -868,25 +868,5 @@ internal class AddCommandPrompter(IInteractionService interactionService) : IAdd
         {
             return packageWithFriendlyName.Package.Id.EscapeMarkup();
         }
-    }
-}
-
-internal sealed class CommunityToolkitFirstComparer : IComparer<string>
-{
-    public int Compare(string? x, string? y)
-    {
-        ArgumentNullException.ThrowIfNull(x);
-        ArgumentNullException.ThrowIfNull(y);
-
-        var prefix = "communitytoolkit-";
-        var xStarts = x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
-        var yStarts = y.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
-
-        return (xStarts, yStarts) switch
-        {
-            (true, false) => 1,
-            (false, true) => -1,
-            _ => string.Compare(x, y, StringComparison.OrdinalIgnoreCase)
-        };
     }
 }

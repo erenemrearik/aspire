@@ -54,6 +54,8 @@ public class BundleNuGetServiceTests(ITestOutputHelper outputHelper)
         Assert.Equal(globalPackagesFolder, capturedGlobalPackagesFolder);
         Assert.Equal(1, nuGetClient.RestoreCallCount);
         Assert.Equal(1, nuGetClient.WriteManifestCallCount);
+        Assert.Equal(0, nuGetClient.GetSettingsCallCount);
+        Assert.Equal(0, nuGetClient.WriteConfigOverlayCallCount);
     }
 
     [Fact]

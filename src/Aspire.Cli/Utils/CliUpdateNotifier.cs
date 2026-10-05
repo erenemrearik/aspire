@@ -156,7 +156,7 @@ internal class CliUpdateNotifier(
 
     private async Task<IEnumerable<Shared.NuGetPackageCli>> GetCliPackagesAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
     {
-        using var searchConfiguration = await nuGetPackageCache.CreateAmbientOverlayAsync(
+        using var searchConfiguration = await nuGetPackageCache.CreateChannelConfigurationAsync(
             workingDirectory,
             channelMappings: null,
             cancellationToken);

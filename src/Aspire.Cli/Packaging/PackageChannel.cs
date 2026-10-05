@@ -202,7 +202,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
 
         var tasks = new List<Task<IEnumerable<NuGetPackage>>>();
 
-        using var searchConfiguration = await CreateSearchConfigurationAsync(
+        using var searchConfiguration = await CreatePackageOperationConfigurationAsync(
             workingDirectory,
             mappings,
             hasExplicitSourceOverride,
@@ -285,7 +285,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
 
         var tasks = new List<Task<IEnumerable<NuGetPackage>>>();
 
-        using var searchConfiguration = await CreateSearchConfigurationAsync(
+        using var searchConfiguration = await CreatePackageOperationConfigurationAsync(
             workingDirectory,
             mappings,
             hasExplicitSourceOverride,
@@ -486,7 +486,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
                 cancellationToken);
         }
 
-        using var searchConfiguration = await CreateSearchConfigurationAsync(
+        using var searchConfiguration = await CreatePackageOperationConfigurationAsync(
             workingDirectory,
             mappings,
             hasExplicitSourceOverride,
@@ -602,7 +602,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
 
         var tasks = new List<Task<IEnumerable<NuGetPackage>>>();
 
-        using var searchConfiguration = await nuGetPackageCache.CreateAmbientOverlayAsync(
+        using var searchConfiguration = await nuGetPackageCache.CreateChannelConfigurationAsync(
             workingDirectory,
             Mappings,
             cancellationToken);
@@ -720,7 +720,7 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
 
         var tasks = new List<Task<IEnumerable<NuGetPackage>>>();
 
-        using var searchConfiguration = await CreateSearchConfigurationAsync(
+        using var searchConfiguration = await CreatePackageOperationConfigurationAsync(
             workingDirectory,
             mappings,
             hasExplicitSourceOverride,
@@ -792,32 +792,33 @@ internal class PackageChannel(string name, PackageChannelQuality quality, Packag
             hasExplicitSourceOverride: true,
             cancellationToken);
 
-    internal Task<NuGetPackageSearchConfiguration> CreateChannelSearchConfigurationAsync(
+    internal Task<NuGetPackageOperationConfiguration> CreatePackageOperationConfigurationAsync(
         DirectoryInfo workingDirectory,
+        string? sourceOverride,
         CancellationToken cancellationToken)
-        => nuGetPackageCache.CreateAmbientOverlayAsync(
+    {
+        var (mappings, hasSourceOverride) = string.IsNullOrWhiteSpace(sourceOverride)
+            ? (Mappings, false)
+            : (PackageSourceOverrideMappings.CreateForSourceOnlyOperations(sourceOverride), true);
+        return CreatePackageOperationConfigurationAsync(
             workingDirectory,
-            Mappings,
+            mappings,
+            hasSourceOverride,
             cancellationToken);
+    }
 
-    internal Task<NuGetPackageSearchConfiguration> CreateSourceOverrideSearchConfigurationAsync(
-        DirectoryInfo workingDirectory,
-        PackageMapping[] mappings)
-        => nuGetPackageCache.CreateStandaloneAsync(
-            workingDirectory,
-            mappings);
-
-    private Task<NuGetPackageSearchConfiguration> CreateSearchConfigurationAsync(
+    private Task<NuGetPackageOperationConfiguration> CreatePackageOperationConfigurationAsync(
         DirectoryInfo workingDirectory,
         PackageMapping[]? mappings,
         bool hasExplicitSourceOverride,
         CancellationToken cancellationToken)
     {
         return hasExplicitSourceOverride
-            ? nuGetPackageCache.CreateStandaloneAsync(
+            ? nuGetPackageCache.CreateSourceRestrictedConfigurationAsync(
                 workingDirectory,
-                mappings ?? [])
-            : nuGetPackageCache.CreateAmbientOverlayAsync(
+                mappings ?? [],
+                cancellationToken)
+            : nuGetPackageCache.CreateChannelConfigurationAsync(
                 workingDirectory,
                 mappings,
                 cancellationToken);

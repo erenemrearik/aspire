@@ -7,7 +7,6 @@ using System.Xml.Linq;
 using Aspire.Cli.Commands;
 using Aspire.Cli.Configuration;
 using Aspire.Cli.Interaction;
-using Aspire.Cli.NuGet;
 using Aspire.Cli.Packaging;
 using Aspire.Cli.Projects;
 using Aspire.Cli.Resources;
@@ -17,6 +16,7 @@ using Aspire.Cli.Utils;
 using Microsoft.AspNetCore.InternalTesting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using NuGet.Configuration;
 using NuGetPackage = Aspire.Shared.NuGetPackageCli;
 
 namespace Aspire.Cli.Tests.Commands;
@@ -2081,9 +2081,8 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
     [Fact]
     public async Task AddCommandUsesSourceForDiscoveryAndPackageRestore()
     {
-        // Arrange
         string? addUsedSource = null;
-        var searchConfigs = new ConcurrentBag<(bool HasClear, string[] Sources)>();
+        var searchSources = new ConcurrentBag<string[]>();
         const string expectedSource = "https://custom-nuget-source.test/v3/index.json";
 
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
@@ -2094,7 +2093,7 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
             """);
         var services = CliTestHelper.CreateServiceCollection(workspace, outputHelper, options =>
         {
-
+            options.NuGetClientFactory = _ => NuGetTestHelper.CreateClient();
             // Makes it easier to isolate behavior in test case by disabling one
             // of the concurrent calls to the NuGetCache from the prefetcher.
             options.DisabledFeatures = [KnownFeatures.UpdateNotificationsEnabled];
@@ -2112,19 +2111,19 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
                 var runner = new TestDotNetCliRunner();
                 runner.SearchPackagesAsyncCallback = (dir, query, exactMatch, prerelease, take, skip, nugetConfigFile, useCache, options, cancellationToken) =>
                 {
-                    Assert.NotNull(nugetConfigFile);
-                    var config = XDocument.Load(nugetConfigFile.FullName);
-                    searchConfigs.Add((
-                        config.Descendants("packageSources").Elements("clear").Any(),
-                        config.Descendants("packageSources")
-                            .Elements("add")
-                            .Select(element => element.Attribute("value")!.Value)
-                            .ToArray()));
+                    Assert.Null(nugetConfigFile);
+                    Assert.True(File.Exists(Path.Combine(dir.FullName, "NuGet.Config")));
+                    var settings = Settings.LoadDefaultSettings(dir.FullName);
+                    searchSources.Add(new PackageSourceProvider(settings)
+                        .LoadPackageSources()
+                        .Where(source => source.IsEnabled)
+                        .Select(source => source.Source)
+                        .ToArray());
 
                     var redisPackage = new NuGetPackage()
                     {
                         Id = "Aspire.Hosting.Redis",
-                        Source = "nuget",
+                        Source = expectedSource,
                         Version = "9.2.0"
                     };
 
@@ -2148,21 +2147,15 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
         });
         using var provider = services.BuildServiceProvider();
 
-        // Act
         var command = provider.GetRequiredService<AddCommand>();
         var result = command.Parse($"add redis --source {expectedSource}");
 
         var exitCode = await result.InvokeAsync().DefaultTimeout();
 
-        // Assert
         Assert.Equal(0, exitCode);
         Assert.Equal(expectedSource, addUsedSource);
-        Assert.NotEmpty(searchConfigs);
-        Assert.All(searchConfigs, searchConfig =>
-        {
-            Assert.True(searchConfig.HasClear);
-            Assert.Equal([expectedSource], searchConfig.Sources);
-        });
+        Assert.NotEmpty(searchSources);
+        Assert.All(searchSources, sources => Assert.Equal([expectedSource], sources));
     }
 
     [Fact]
@@ -2954,15 +2947,9 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
               </packageSourceMapping>
             </configuration>
             """);
-        var settingsProvider = new NuGetSettingsProvider(
-            new BundleNuGetService(
-                NullLogger<BundleNuGetService>.Instance,
-                new NuGetClient(
-                    new TestFeatures(),
-                    new TestEnvironment(),
-                    NullLogger<NuGetClient>.Instance)));
+        var nuGetService = NuGetTestHelper.CreateService();
 
-        Assert.True(settingsProvider.IsPackageSourceMappingEnabled(
+        Assert.True(nuGetService.IsPackageSourceMappingEnabled(
             projectDirectory,
             CancellationToken.None));
 
@@ -2999,7 +2986,7 @@ public class AddCommandTests(ITestOutputHelper outputHelper)
             </configuration>
             """);
 
-        Assert.False(settingsProvider.IsPackageSourceMappingEnabled(
+        Assert.False(nuGetService.IsPackageSourceMappingEnabled(
             projectWithMappingDisabled,
             CancellationToken.None));
 

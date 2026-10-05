@@ -77,6 +77,162 @@ public class NuGetClientTests(ITestOutputHelper outputHelper)
         Assert.Equal(["2.0.0"], package.AllVersions);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SearchAsync_AppliesAmbientAndChannelMappingsBeforeDeduplication(bool useChannelOverlay)
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var selectedFeed = workspace.CreateDirectory("selected-feed");
+        var ambientFeed = workspace.CreateDirectory("ambient-feed");
+        const string packageId = "Aspire.Hosting.SearchProbe";
+        const string communityPackageId = "CommunityToolkit.Aspire.Hosting.SearchProbe";
+        CreatePackage(selectedFeed.FullName, packageId);
+        CreatePackage(ambientFeed.FullName, packageId, version: "2.0.0");
+        CreatePackage(ambientFeed.FullName, communityPackageId, version: "2.0.0");
+        File.WriteAllText(
+            Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config"),
+            $"""
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="selected" value="{selectedFeed.FullName}" />
+                <add key="ambient" value="{ambientFeed.FullName}" />
+              </packageSources>
+              <packageSourceMapping>
+                <packageSource key="selected">
+                  <package pattern="{packageId}" />
+                </packageSource>
+                <packageSource key="ambient">
+                  <package pattern="*" />
+                </packageSource>
+              </packageSourceMapping>
+            </configuration>
+            """);
+        using var configuration = await NuGetTestHelper.CreateService().CreatePackageOperationConfigurationAsync(
+            workspace.WorkspaceRoot,
+            useChannelOverlay ? [new PackageMapping("Aspire*", selectedFeed.FullName)] : null,
+            restrictToSelectedSources: false,
+            TestContext.Current.CancellationToken);
+        var client = new NuGetClient(new TestFeatures(), new TestEnvironment(), NullLogger<NuGetClient>.Instance);
+
+        var results = await client.SearchAsync(
+            "Aspire.Hosting",
+            prerelease: false,
+            take: 1000,
+            explicitSources: [],
+            configuration.ExplicitConfigFile?.FullName,
+            configuration.EffectiveWorkingDirectory.FullName,
+            TestContext.Current.CancellationToken);
+
+        Assert.Collection(
+            results,
+            package =>
+            {
+                Assert.Equal(packageId, package.Id);
+                Assert.Equal("1.0.0", package.Version);
+                Assert.Equal(["1.0.0"], package.AllVersions);
+                Assert.Equal(selectedFeed.FullName, package.Source);
+            },
+            package =>
+            {
+                Assert.Equal(communityPackageId, package.Id);
+                Assert.Equal("2.0.0", package.Version);
+                Assert.Equal(ambientFeed.FullName, package.Source);
+            });
+    }
+
+    [Fact]
+    public async Task SearchAndRestoreHonorMachineWideMappings()
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var selectedFeed = workspace.CreateDirectory("selected-feed");
+        var ambientFeed = workspace.CreateDirectory("ambient-feed");
+        var packageDirectory = workspace.CreateDirectory("packages");
+        var restoreDirectory = workspace.CreateDirectory("restore");
+        var machineDirectory = workspace.CreateDirectory("machine");
+        var packageId = $"Aspire.Hosting.MachineProbe.{Guid.NewGuid():N}";
+        CreatePackage(selectedFeed.FullName, packageId, baseAssemblyContents: "selected");
+        CreatePackage(ambientFeed.FullName, packageId, version: "9.0.0");
+        File.WriteAllText(
+            Path.Combine(machineDirectory.FullName, "NuGet.Config"),
+            $"""
+            <configuration>
+              <packageSourceMapping>
+                <packageSource key="selected">
+                  <package pattern="{packageId}" />
+                </packageSource>
+              </packageSourceMapping>
+            </configuration>
+            """);
+        File.WriteAllText(
+            Path.Combine(workspace.WorkspaceRoot.FullName, "NuGet.Config"),
+            $"""
+            <configuration>
+              <config>
+                <add key="globalPackagesFolder" value="{packageDirectory.FullName}" />
+              </config>
+              <packageSources>
+                <clear />
+                <add key="selected" value="{selectedFeed.FullName}" />
+                <add key="ambient" value="{ambientFeed.FullName}" />
+              </packageSources>
+              <packageSourceMapping>
+                <packageSource key="ambient">
+                  <package pattern="*" />
+                </packageSource>
+              </packageSourceMapping>
+            </configuration>
+            """);
+        var machineSettings = new Settings(machineDirectory.FullName, "NuGet.Config", isMachineWide: true);
+        var client = new NuGetClient(new TestFeatures(), new TestEnvironment(), NullLogger<NuGetClient>.Instance)
+        {
+            MachineWideSettingsFactory = () => new TestMachineWideSettings(machineSettings)
+        };
+
+        var snapshot = client.GetSettings(workspace.WorkspaceRoot.FullName, new byte[NuGetSourceIdentity.KeySizeInBytes]);
+        Assert.Contains(machineSettings.GetConfigFilePaths().Single(), snapshot.ConfigPaths);
+        var sdkResults = client.FilterPackageSearchResults(
+            [
+                new() { Id = packageId, Version = "1.0.0", Source = "selected" },
+                new() { Id = packageId, Version = "1.0.0", Source = selectedFeed.FullName },
+                new() { Id = packageId, Version = "9.0.0", Source = "ambient" },
+                new() { Id = packageId, Version = "9.0.0", Source = ambientFeed.FullName }
+            ],
+            nugetConfigPath: null,
+            workspace.WorkspaceRoot.FullName);
+        Assert.Equal(["selected", selectedFeed.FullName], sdkResults.Select(package => package.Source));
+
+        var results = await client.SearchAsync(
+            packageId,
+            prerelease: false,
+            take: 1000,
+            explicitSources: [],
+            nugetConfigPath: null,
+            workspace.WorkspaceRoot.FullName,
+            TestContext.Current.CancellationToken);
+        var result = Assert.Single(results);
+        Assert.Equal("1.0.0", result.Version);
+        Assert.Equal(selectedFeed.FullName, result.Source);
+
+        await client.RestoreAsync(
+            [(packageId, result.Version)],
+            framework: "net10.0",
+            runtimeIdentifier: null,
+            restoreDirectory.FullName,
+            sources: [],
+            nugetConfigPaths: snapshot.ConfigPaths,
+            workspace.WorkspaceRoot.FullName,
+            globalPackagesFolderOverride: null,
+            sensitiveSources: [],
+            TestContext.Current.CancellationToken);
+        Assert.Equal(
+            "selected",
+            await File.ReadAllTextAsync(
+                Path.Combine(packageDirectory.FullName, packageId.ToLowerInvariant(), result.Version, "lib", "net10.0", "Aspire.Test.Package.dll"),
+                TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task SearchAsync_ComparesVersionsAsStringsAcrossSources()
     {

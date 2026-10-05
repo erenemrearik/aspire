@@ -24,6 +24,7 @@ using NuGet.Versioning;
 using INuGetLogger = NuGet.Common.ILogger;
 using NuGetLogLevel = NuGet.Common.LogLevel;
 using NuGetLogMessage = NuGet.Common.ILogMessage;
+using NuGetPackage = Aspire.Shared.NuGetPackageCli;
 
 namespace Aspire.Cli.NuGet;
 
@@ -67,6 +68,8 @@ internal interface INuGetClient
         CancellationToken cancellationToken);
 
     NuGetSettingsInfo GetSettings(string workingDirectory, byte[] sourceIdentityKey);
+
+    IReadOnlyList<NuGetPackage> FilterPackageSearchResults(IReadOnlyList<NuGetPackage> packages, string? nugetConfigPath, string workingDirectory);
 
     void WriteConfigOverlay(NuGetConfigOverlay overlay, string outputPath);
 }
@@ -112,6 +115,9 @@ internal sealed class NuGetClient(
     // log. Keeping it out of each operation's captured output keeps failure messages identical to the helper's.
     private readonly DiagnosticNuGetLogger _diagnosticLogger = new(logger);
 
+    internal Func<IMachineWideSettings> MachineWideSettingsFactory { get; init; }
+        = static () => new XPlatMachineWideSetting();
+
     public async Task RestoreAsync(
         IReadOnlyList<(string Id, string Version)> packages,
         string framework,
@@ -137,10 +143,10 @@ internal sealed class NuGetClient(
             // Restore is delegated to NuGet's RestoreRunner so the CLI resolves packages exactly the way
             // the aspire-managed helper did. Reimplementing the graph walk here previously diverged from
             // NuGet on RID-specific dependencies, placeholder assets, and version selection.
-            var machineWideSettings = new XPlatMachineWideSetting();
+            var machineWideSettings = MachineWideSettingsFactory();
             var settings = nugetConfigPaths.Count > 0
                 ? Settings.LoadSettingsGivenConfigPaths(nugetConfigPaths.ToList())
-                : Settings.LoadDefaultSettings(workingDirectory, configFileName: null, machineWideSettings);
+                : LoadAmbientSettings(workingDirectory, machineWideSettings);
 
             var packageSources = ResolvePackageSources(settings, sources, addNuGetOrgFallback: false);
             var targetFramework = NuGetFramework.Parse(framework);
@@ -381,8 +387,9 @@ internal sealed class NuGetClient(
             // NuGet initializes credential providers when the operation begins, and both those providers and protocol
             // resources can log source URLs immediately. Discover credential-bearing source spellings first so every
             // diagnostic path is protected for the operation's entire lifetime.
-            var settings = LoadSettings(nugetConfigPath, workingDirectory);
+            var settings = LoadSearchSettings(nugetConfigPath, workingDirectory);
             var packageSources = LoadPackageSources(settings, explicitSources, out var usedNuGetOrgFallback);
+            var sourceFilter = CreatePackageSearchSourceFilter(settings, packageSources);
             var sensitiveSources = GetSensitiveSourceValues(packageSources);
             output = new NuGetOperationOutput(logger, sensitiveSources);
 
@@ -405,7 +412,10 @@ internal sealed class NuGetClient(
             // Shape the results exactly as the helper did, including its comparers. Versions are compared as strings
             // rather than as NuGet versions because that is what decided which source's entry survived deduplication.
             return searchResults
-                .SelectMany(packages => packages)
+                // Filter each source's results before deduplication, otherwise an ineligible
+                // feed's higher version can discard the package that restore is allowed to use.
+                .SelectMany((packages, index) => packages.Where(package =>
+                    sourceFilter(package.Id, packageSources[index].Name)))
                 .GroupBy(package => package.Id, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderByDescending(package => package.Version).First())
                 .OrderBy(package => package.Id)
@@ -564,19 +574,6 @@ internal sealed class NuGetClient(
         return packages;
     }
 
-    private static ISettings LoadSettings(string? nugetConfigPath, string workingDirectory)
-    {
-        // A config path that does not exist falls back to normal discovery, as it did in the helper.
-        if (!string.IsNullOrEmpty(nugetConfigPath) && File.Exists(nugetConfigPath))
-        {
-            return Settings.LoadSpecificSettings(
-                Path.GetDirectoryName(nugetConfigPath)!,
-                Path.GetFileName(nugetConfigPath));
-        }
-
-        return Settings.LoadDefaultSettings(workingDirectory);
-    }
-
     private static List<PackageSource> LoadPackageSources(
         ISettings settings,
         IReadOnlyList<string> explicitSources,
@@ -600,6 +597,53 @@ internal sealed class NuGetClient(
 
         return sources;
     }
+
+    public IReadOnlyList<NuGetPackage> FilterPackageSearchResults(
+        IReadOnlyList<NuGetPackage> packages,
+        string? nugetConfigPath,
+        string workingDirectory)
+    {
+        var settings = LoadSearchSettings(nugetConfigPath, workingDirectory);
+        var sources = new PackageSourceProvider(settings).LoadPackageSources().ToArray();
+        var filter = CreatePackageSearchSourceFilter(settings, sources);
+        return packages.Where(package => filter(package.Id, package.Source)).ToArray();
+    }
+
+    private static Func<string, string, bool> CreatePackageSearchSourceFilter(
+        ISettings settings,
+        IReadOnlyList<PackageSource> sources)
+    {
+        var mapping = PackageSourceMapping.GetPackageSourceMapping(settings);
+        if (!mapping.IsEnabled)
+        {
+            return static (_, _) => true;
+        }
+
+        // SDK JSON uses {"sourceName":"private","packages":[{"id":"Aspire.Hosting.Redis",...}]};
+        // sourceName can also be a location. Resolve either spelling to NuGet's source alias.
+        // Native settings and credential-bearing PackageSource objects stay inside this boundary.
+        return (packageId, sourceNameOrLocation) =>
+        {
+            var allowedKeys = mapping.GetConfiguredPackageSources(packageId);
+            return sources.Any(source =>
+                source.IsEnabled &&
+                allowedKeys.Contains(source.Name, StringComparer.OrdinalIgnoreCase) &&
+                (string.Equals(source.Name, sourceNameOrLocation, StringComparison.OrdinalIgnoreCase) ||
+                 PackageSourceIdentity.Comparer.Equals(source.Source, sourceNameOrLocation)));
+        };
+    }
+
+    private ISettings LoadSearchSettings(string? nugetConfigPath, string workingDirectory)
+    {
+        // Preserve explicitly supplied config behavior; generated overlays instead use the same
+        // ambient hierarchy, including machine-wide settings, as the restore settings snapshot.
+        return !string.IsNullOrEmpty(nugetConfigPath) && File.Exists(nugetConfigPath)
+            ? Settings.LoadSpecificSettings(Path.GetDirectoryName(nugetConfigPath)!, Path.GetFileName(nugetConfigPath))
+            : LoadAmbientSettings(workingDirectory, MachineWideSettingsFactory());
+    }
+
+    private static ISettings LoadAmbientSettings(string workingDirectory, IMachineWideSettings machineWideSettings)
+        => Settings.LoadDefaultSettings(workingDirectory, configFileName: null, machineWideSettings);
 
     private static string[] GetSensitiveSourceValues(IEnumerable<PackageSource> sources)
         => sources
@@ -642,10 +686,7 @@ internal sealed class NuGetClient(
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentNullException.ThrowIfNull(sourceIdentityKey);
 
-        var settings = Settings.LoadDefaultSettings(
-            workingDirectory,
-            configFileName: null,
-            new XPlatMachineWideSetting());
+        var settings = LoadAmbientSettings(workingDirectory, MachineWideSettingsFactory());
         var packageSourceProvider = new PackageSourceProvider(settings);
         var packageSources = packageSourceProvider.LoadPackageSources().ToArray();
         var auditSources = packageSourceProvider.LoadAuditSources().ToArray();

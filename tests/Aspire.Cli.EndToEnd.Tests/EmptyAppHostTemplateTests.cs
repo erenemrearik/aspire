@@ -90,10 +90,10 @@ public sealed class EmptyAppHostTemplateTests(ITestOutputHelper output)
         await auto.RunCommandAsync("test -f SourceOverrideServiceDefaults/SourceOverrideServiceDefaults.csproj", counter);
 
         // A local `--source` directory is enumerated directly rather than queried through a feed, so
-        // the observable evidence is the install itself: it runs from a source-scoped temporary
-        // NuGet.config directory and points `dotnet new install` at the .nupkg copied into
-        // source-feed. Logged lines look like:
-        //   Running dotnet in /tmp/aspire-nuget-configABC123 with args: new install /workspace/.../source-feed/Aspire.ProjectTemplates.13.0.0-preview.1.nupkg
+        // the observable evidence is the install itself: it runs from a source-restricted child
+        // overlay that inherits ambient settings and points `dotnet new install` at the .nupkg
+        // copied into source-feed. Logged lines look like:
+        //   Running dotnet in /workspace/aspire-nuget-configABC123 with args: new install /workspace/.../source-feed/Aspire.ProjectTemplates.13.0.0-preview.1.nupkg
         // Match the argument list instead of the randomly-suffixed temp directory.
         //
         // The negative guard names the legacy bundled search path to ensure this local-source flow

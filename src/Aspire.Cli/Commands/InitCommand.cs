@@ -666,7 +666,7 @@ internal sealed class InitCommand : BaseCommand
     /// <c>staging</c> on a CLI without the staging feature flag, or a stale <c>pr-{N}</c> on a
     /// machine without the matching hive). Persisting these would pin a name no PSM rule can
     /// satisfy and zero out polyglot <c>aspire add</c> discovery via
-    /// <c>IntegrationPackageSearchService.cs</c> line 28-30.</description></item>
+    /// <see cref="IntegrationPackageSearchService"/>.</description></item>
     /// <item><description>The matched channel is <see cref="PackageChannelType.Implicit"/>.
     /// In production the only Implicit channel created by <c>PackagingService.GetChannelsAsync</c>
     /// is <c>default</c> (the unscoped nuget.org aggregator), which no CLI identity ever

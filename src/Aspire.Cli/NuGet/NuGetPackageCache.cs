@@ -15,28 +15,28 @@ namespace Aspire.Cli.NuGet;
 
 internal interface INuGetPackageCache
 {
-    Task<NuGetPackageSearchConfiguration> CreateAmbientOverlayAsync(DirectoryInfo workingDirectory, IReadOnlyList<PackageMapping>? channelMappings, CancellationToken cancellationToken);
-    Task<NuGetPackageSearchConfiguration> CreateStandaloneAsync(DirectoryInfo workingDirectory, PackageMapping[] mappings);
-    Task<IEnumerable<NuGetPackage>> GetTemplatePackagesAsync(NuGetPackageSearchConfiguration configuration, bool prerelease, CancellationToken cancellationToken);
-    Task<IEnumerable<NuGetPackage>> GetIntegrationPackagesAsync(NuGetPackageSearchConfiguration configuration, bool prerelease, CancellationToken cancellationToken);
-    Task<IEnumerable<NuGetPackage>> GetCliPackagesAsync(NuGetPackageSearchConfiguration configuration, bool prerelease, CancellationToken cancellationToken);
-    Task<IEnumerable<NuGetPackage>> GetPackagesAsync(NuGetPackageSearchConfiguration configuration, string packageId, Func<string, bool>? filter, bool prerelease, bool useCache, CancellationToken cancellationToken);
-    Task<IEnumerable<NuGetPackage>> GetPackageVersionsAsync(NuGetPackageSearchConfiguration configuration, string exactPackageId, bool prerelease, bool useCache, CancellationToken cancellationToken);
+    Task<NuGetPackageOperationConfiguration> CreateChannelConfigurationAsync(DirectoryInfo workingDirectory, IReadOnlyList<PackageMapping>? channelMappings, CancellationToken cancellationToken);
+    Task<NuGetPackageOperationConfiguration> CreateSourceRestrictedConfigurationAsync(DirectoryInfo workingDirectory, PackageMapping[] mappings, CancellationToken cancellationToken);
+    Task<IEnumerable<NuGetPackage>> GetTemplatePackagesAsync(NuGetPackageOperationConfiguration configuration, bool prerelease, CancellationToken cancellationToken);
+    Task<IEnumerable<NuGetPackage>> GetIntegrationPackagesAsync(NuGetPackageOperationConfiguration configuration, bool prerelease, CancellationToken cancellationToken);
+    Task<IEnumerable<NuGetPackage>> GetCliPackagesAsync(NuGetPackageOperationConfiguration configuration, bool prerelease, CancellationToken cancellationToken);
+    Task<IEnumerable<NuGetPackage>> GetPackagesAsync(NuGetPackageOperationConfiguration configuration, string packageId, Func<string, bool>? filter, bool prerelease, bool useCache, CancellationToken cancellationToken);
+    Task<IEnumerable<NuGetPackage>> GetPackageVersionsAsync(NuGetPackageOperationConfiguration configuration, string exactPackageId, bool prerelease, bool useCache, CancellationToken cancellationToken);
 
     Task<IEnumerable<NuGetPackage>> GetTemplatePackagesAsync(DirectoryInfo workingDirectory, bool prerelease, FileInfo? nugetConfigFile, CancellationToken cancellationToken)
-        => GetTemplatePackagesAsync(NuGetPackageSearchConfiguration.Existing(workingDirectory, nugetConfigFile), prerelease, cancellationToken);
+        => GetTemplatePackagesAsync(NuGetPackageOperationConfiguration.FromExistingConfiguration(workingDirectory, nugetConfigFile), prerelease, cancellationToken);
 
     Task<IEnumerable<NuGetPackage>> GetIntegrationPackagesAsync(DirectoryInfo workingDirectory, bool prerelease, FileInfo? nugetConfigFile, CancellationToken cancellationToken)
-        => GetIntegrationPackagesAsync(NuGetPackageSearchConfiguration.Existing(workingDirectory, nugetConfigFile), prerelease, cancellationToken);
+        => GetIntegrationPackagesAsync(NuGetPackageOperationConfiguration.FromExistingConfiguration(workingDirectory, nugetConfigFile), prerelease, cancellationToken);
 
     Task<IEnumerable<NuGetPackage>> GetCliPackagesAsync(DirectoryInfo workingDirectory, bool prerelease, FileInfo? nugetConfigFile, CancellationToken cancellationToken)
-        => GetCliPackagesAsync(NuGetPackageSearchConfiguration.Existing(workingDirectory, nugetConfigFile), prerelease, cancellationToken);
+        => GetCliPackagesAsync(NuGetPackageOperationConfiguration.FromExistingConfiguration(workingDirectory, nugetConfigFile), prerelease, cancellationToken);
 
     Task<IEnumerable<NuGetPackage>> GetPackagesAsync(DirectoryInfo workingDirectory, string packageId, Func<string, bool>? filter, bool prerelease, FileInfo? nugetConfigFile, bool useCache, CancellationToken cancellationToken)
-        => GetPackagesAsync(NuGetPackageSearchConfiguration.Existing(workingDirectory, nugetConfigFile), packageId, filter, prerelease, useCache, cancellationToken);
+        => GetPackagesAsync(NuGetPackageOperationConfiguration.FromExistingConfiguration(workingDirectory, nugetConfigFile), packageId, filter, prerelease, useCache, cancellationToken);
 
     Task<IEnumerable<NuGetPackage>> GetPackageVersionsAsync(DirectoryInfo workingDirectory, string exactPackageId, bool prerelease, FileInfo? nugetConfigFile, bool useCache, CancellationToken cancellationToken)
-        => GetPackageVersionsAsync(NuGetPackageSearchConfiguration.Existing(workingDirectory, nugetConfigFile), exactPackageId, prerelease, useCache, cancellationToken);
+        => GetPackageVersionsAsync(NuGetPackageOperationConfiguration.FromExistingConfiguration(workingDirectory, nugetConfigFile), exactPackageId, prerelease, useCache, cancellationToken);
 }
 
 /// <summary>
@@ -90,26 +90,28 @@ internal sealed class NuGetPackageCache(
     IMemoryCache memoryCache,
     AspireCliTelemetry telemetry,
     IFeatures features,
-    NuGetInvocationConfigurationSource configurationSource) : INuGetPackageCache
+    BundleNuGetService nuGetService) : INuGetPackageCache
 {
     private const int SearchPageSize = 1000;
 
-    public Task<NuGetPackageSearchConfiguration> CreateAmbientOverlayAsync(
+    public Task<NuGetPackageOperationConfiguration> CreateChannelConfigurationAsync(
         DirectoryInfo workingDirectory,
         IReadOnlyList<PackageMapping>? channelMappings,
         CancellationToken cancellationToken)
-        => configurationSource.CreateAmbientOverlayAsync(
+        => nuGetService.CreatePackageOperationConfigurationAsync(
             workingDirectory,
             channelMappings,
+            restrictToSelectedSources: false,
             cancellationToken);
 
-    public Task<NuGetPackageSearchConfiguration> CreateStandaloneAsync(
+    public Task<NuGetPackageOperationConfiguration> CreateSourceRestrictedConfigurationAsync(
         DirectoryInfo workingDirectory,
-        PackageMapping[] mappings)
-        => NuGetInvocationConfigurationSource.CreateStandaloneAsync(workingDirectory, mappings);
+        PackageMapping[] mappings,
+        CancellationToken cancellationToken)
+        => nuGetService.CreatePackageOperationConfigurationAsync(workingDirectory, mappings, restrictToSelectedSources: true, cancellationToken);
 
     public async Task<IEnumerable<NuGetPackage>> GetTemplatePackagesAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         bool prerelease,
         CancellationToken cancellationToken)
     {
@@ -126,7 +128,7 @@ internal sealed class NuGetPackageCache(
     }
 
     public async Task<IEnumerable<NuGetPackage>> GetIntegrationPackagesAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         bool prerelease,
         CancellationToken cancellationToken)
     {
@@ -134,7 +136,7 @@ internal sealed class NuGetPackageCache(
     }
 
     public async Task<IEnumerable<NuGetPackage>> GetCliPackagesAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         bool prerelease,
         CancellationToken cancellationToken)
     {
@@ -152,7 +154,7 @@ internal sealed class NuGetPackageCache(
     }
 
     public async Task<IEnumerable<NuGetPackage>> GetPackagesAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         string query,
         Func<string, bool>? filter,
         bool prerelease,
@@ -225,11 +227,15 @@ internal sealed class NuGetPackageCache(
             return isOfficialPackage;
         };
 
-        return collectedPackages.Where(effectiveFilter);
+        return nuGetService.FilterPackageSearchResults(
+            collectedPackages,
+            configuration.ExplicitConfigFile?.FullName,
+            configuration.EffectiveWorkingDirectory.FullName,
+            cancellationToken).Where(effectiveFilter);
     }
 
     public async Task<IEnumerable<NuGetPackage>> GetPackageVersionsAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         string exactPackageId,
         bool prerelease,
         bool useCache,
@@ -274,7 +280,11 @@ internal sealed class NuGetPackageCache(
             return true;
         };
 
-        return collectedPackages.Where(effectiveFilter);
+        return nuGetService.FilterPackageSearchResults(
+            collectedPackages,
+            configuration.ExplicitConfigFile?.FullName,
+            configuration.EffectiveWorkingDirectory.FullName,
+            cancellationToken).Where(effectiveFilter);
     }
 
 }

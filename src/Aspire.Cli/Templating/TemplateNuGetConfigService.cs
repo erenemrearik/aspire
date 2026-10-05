@@ -426,13 +426,10 @@ internal sealed class TemplateNuGetConfigService(
         KnownEmoji? statusEmoji,
         CancellationToken cancellationToken)
     {
-        using var searchConfiguration = string.IsNullOrWhiteSpace(sourceOverride)
-            ? await selection.Channel.CreateChannelSearchConfigurationAsync(
-                executionContext.WorkingDirectory,
-                cancellationToken)
-            : await selection.Channel.CreateSourceOverrideSearchConfigurationAsync(
-                executionContext.WorkingDirectory,
-                PackageSourceOverrideMappings.CreateForSourceOnlyOperations(sourceOverride));
+        using var installationConfiguration = await selection.Channel.CreatePackageOperationConfigurationAsync(
+            executionContext.WorkingDirectory,
+            sourceOverride,
+            cancellationToken);
 
         var collector = new OutputCollector();
 
@@ -452,7 +449,7 @@ internal sealed class TemplateNuGetConfigService(
                     // dotnet new install has no --configfile option. Running from the generated
                     // overlay directory lets NuGet discover the overlay and continue walking the
                     // original workspace hierarchy for ambient sources and credentials.
-                    nugetConfigFile: searchConfiguration.ConfigurationFile,
+                    nugetConfigFile: installationConfiguration.ConfigurationFile,
                     nugetSource: string.IsNullOrWhiteSpace(sourceOverride) ? selection.Package.Source : sourceOverride,
                     force: true,
                     options: options,

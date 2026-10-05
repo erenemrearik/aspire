@@ -3,6 +3,7 @@
 
 using System.Xml.Linq;
 using Aspire.Cli.NuGet;
+using NuGetPackage = Aspire.Shared.NuGetPackageCli;
 
 namespace Aspire.Cli.Tests.TestServices;
 
@@ -143,6 +144,12 @@ internal sealed class FakeNuGetClient : INuGetClient
                 [],
                 sourceIdentityKey);
     }
+
+    public IReadOnlyList<NuGetPackage> FilterPackageSearchResults(
+        IReadOnlyList<NuGetPackage> packages,
+        string? nugetConfigPath,
+        string workingDirectory)
+        => NuGetTestHelper.CreateClient().FilterPackageSearchResults(packages, nugetConfigPath, workingDirectory);
 
     public void WriteConfigOverlay(NuGetConfigOverlay overlay, string outputPath)
     {

@@ -18,27 +18,29 @@ internal sealed class BundleNuGetPackageCache(
     INuGetClient nuGetClient,
     ILogger<BundleNuGetPackageCache> logger,
     IFeatures features,
-    NuGetInvocationConfigurationSource configurationSource) : INuGetPackageCache
+    BundleNuGetService nuGetService) : INuGetPackageCache
 {
     // The aspire-managed helper was always invoked with --take 1000.
     private const int SearchTake = 1000;
 
-    public Task<NuGetPackageSearchConfiguration> CreateAmbientOverlayAsync(
+    public Task<NuGetPackageOperationConfiguration> CreateChannelConfigurationAsync(
         DirectoryInfo workingDirectory,
         IReadOnlyList<PackageMapping>? channelMappings,
         CancellationToken cancellationToken)
-        => configurationSource.CreateAmbientOverlayAsync(
+        => nuGetService.CreatePackageOperationConfigurationAsync(
             workingDirectory,
             channelMappings,
+            restrictToSelectedSources: false,
             cancellationToken);
 
-    public Task<NuGetPackageSearchConfiguration> CreateStandaloneAsync(
+    public Task<NuGetPackageOperationConfiguration> CreateSourceRestrictedConfigurationAsync(
         DirectoryInfo workingDirectory,
-        PackageMapping[] mappings)
-        => NuGetInvocationConfigurationSource.CreateStandaloneAsync(workingDirectory, mappings);
+        PackageMapping[] mappings,
+        CancellationToken cancellationToken)
+        => nuGetService.CreatePackageOperationConfigurationAsync(workingDirectory, mappings, restrictToSelectedSources: true, cancellationToken);
 
     public async Task<IEnumerable<NuGetPackage>> GetTemplatePackagesAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         bool prerelease,
         CancellationToken cancellationToken)
     {
@@ -52,7 +54,7 @@ internal sealed class BundleNuGetPackageCache(
     }
 
     public async Task<IEnumerable<NuGetPackage>> GetIntegrationPackagesAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         bool prerelease,
         CancellationToken cancellationToken)
     {
@@ -66,7 +68,7 @@ internal sealed class BundleNuGetPackageCache(
     }
 
     public async Task<IEnumerable<NuGetPackage>> GetCliPackagesAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         bool prerelease,
         CancellationToken cancellationToken)
     {
@@ -80,7 +82,7 @@ internal sealed class BundleNuGetPackageCache(
     }
 
     public async Task<IEnumerable<NuGetPackage>> GetPackagesAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         string packageId,
         Func<string, bool>? filter,
         bool prerelease,
@@ -97,7 +99,7 @@ internal sealed class BundleNuGetPackageCache(
     }
 
     public async Task<IEnumerable<NuGetPackage>> GetPackageVersionsAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         string exactPackageId,
         bool prerelease,
         bool useCache,
@@ -126,7 +128,7 @@ internal sealed class BundleNuGetPackageCache(
     }
 
     private async Task<List<NuGetPackage>> SearchAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         string query,
         bool prerelease,
         CancellationToken cancellationToken)
@@ -146,7 +148,7 @@ internal sealed class BundleNuGetPackageCache(
     }
 
     private async Task<IReadOnlyList<NuGetSearchResult>> SearchClientAsync(
-        NuGetPackageSearchConfiguration configuration,
+        NuGetPackageOperationConfiguration configuration,
         string query,
         bool prerelease,
         CancellationToken cancellationToken)

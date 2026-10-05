@@ -4,14 +4,16 @@
 using System.Text.Json;
 using Aspire.Cli.Configuration;
 using Aspire.Cli.Interaction;
-using Aspire.Cli.Packaging;
 using Aspire.Cli.Projects;
 using Aspire.Cli.Utils;
 using Semver;
 using NuGetPackage = Aspire.Shared.NuGetPackageCli;
 
-namespace Aspire.Cli.Commands;
+namespace Aspire.Cli.Packaging;
 
+/// <summary>
+/// Coordinates shared integration discovery, channel selection, and package matching.
+/// </summary>
 internal sealed class IntegrationPackageSearchService(
     IPackagingService packagingService,
     IProjectLocator projectLocator,

@@ -101,7 +101,7 @@ When an AppHost has no requested channel and inherits the running CLI's SDK vers
 
 Polyglot `aspire add` passes the channel selected during package discovery and any explicit `--source` value into this same restore policy. It does not create or modify an AppHost-local user NuGet configuration file.
 
-An explicit source scopes package discovery, polyglot compatibility filtering, and version selection exclusively to that source, so the command cannot offer an integration or version that the source does not contain. Without an explicit source, exact-version discovery uses each candidate channel's package-source mappings rather than performing an unscoped ambient search.
+An explicit source scopes package discovery, polyglot compatibility filtering, and version selection exclusively to that source, so the command cannot offer an integration or version that the source does not contain. Its temporary overlay disables unselected source aliases while inheriting the selected alias's credentials, client certificates, and transport settings. Without an explicit source, ordinary and exact-version discovery enforce each candidate channel's effective package-source mappings, including relevant ambient mappings.
 
 After selection, the selected canonical package ID is mapped authoritatively to the explicit source. The source is also mapped for `Aspire*` and general dependencies, while the effective ambient, identity, and project-channel policy remains eligible for the rest of the package's dependency closure. The command therefore appends a package feed rather than treating it as a complete package universe. If the same Aspire package ID and version exists in multiple eligible feeds, NuGet does not provide source priority; the package can come from either feed or an existing global-packages entry.
 
@@ -125,7 +125,7 @@ The CLI uses `NuGet.Configuration` directly instead of reproducing NuGet's confi
 
 For a requested discovery directory, the operation:
 
-1. Loads the normal NuGet hierarchy with `Settings.LoadDefaultSettings`.
+1. Loads the normal NuGet hierarchy with `Settings.LoadDefaultSettings`, including the cross-platform machine-wide settings provider used by package restore and search.
 2. Returns configuration paths in highest-to-lowest precedence order.
 3. Computes an opaque cache identity from NuGet's effective package and audit sources, package-source mappings, signature-validation mode, trusted signers, the global packages folder, and configuration path ordering.
 4. Returns non-secret source descriptors containing the source name, enabled state, credential and client-certificate capability flags, and a per-invocation keyed identity of the resolved location.
@@ -145,7 +145,22 @@ The CLI matches effective Aspire package source locations to the opaque identiti
 
 When the effective policy includes package-source mappings, the CLI writes a small `NuGet.Config` overlay.
 
-A shared NuGet invocation configuration source resolves the ambient settings snapshot, source aliases, and effective mapping overlay for both integration restore and channel-aware package or template operations. Stable channel operations contribute no selected source policy and use ambient NuGet configuration directly. Other channels contribute only their Aspire-specific mappings; their synthetic `*` fallback is not copied into the invocation overlay, so ambient configuration continues to own unrelated package sources. SDK-driven package searches and template installation place the temporary overlay below the caller's working directory so normal NuGet hierarchy discovery still loads repository and user configuration.
+Configuration responsibilities are separated by what they own:
+
+| Type or layer | Responsibility |
+|---|---|
+| Packaging and restore policy | Select channel/source intent, package patterns, and cache-isolation requirements. `Packaging/IntegrationPackageSearchService` coordinates shared integration discovery and matching rather than belonging to a command. |
+| `BundleNuGetService` | Load the evaluated snapshot through the native client, invoke composition, and materialize configuration for an operation. Independently, perform package restores, coordinate reusable restore-cache locking and reuse, and generate package probe manifests. |
+| `NuGetConfigurationBuilder` | Purely compose selected source aliases and the effective overlay from the snapshot and selected policy. It does not load settings, create files, or hold a service reference. |
+| `NuGetConfiguration` | Hold the resolved snapshot, aliases, and already-composed overlay. It has no service reference, configuration-loading methods, or file-writing methods. |
+| Operation and restore descriptors | Carry execution directories, config paths, and cache identities, and own temporary-overlay lifetimes. |
+| `NuGetClient` | Own full native settings and protocol objects, evaluate search eligibility with NuGet's mapping rules, serialize overlays, and execute native restore/search. Credentials and native authentication behavior stay here. |
+
+The service is not a wrapper around the configuration value. Its package-restore entry point works with execution inputs and does not require a `NuGetConfiguration`; the configuration is needed only by composition and materialization operations. Combining them would make a passive policy result responsible for restore execution, cache concurrency, and file lifetime.
+
+Stable channel operations contribute no selected source policy and use ambient NuGet configuration directly. Other channels contribute only their Aspire-specific mappings; their synthetic `*` fallback is not copied into the operation overlay, so ambient configuration continues to own unrelated package sources. SDK-driven package searches and template installation place the temporary overlay below the caller's working directory so normal NuGet hierarchy discovery still loads repository and user configuration.
+
+NuGet package search does not enforce package-source mapping. Both bundled and SDK-driven discovery therefore apply NuGet's native mapping evaluator to search results. Bundled discovery applies eligibility before cross-source deduplication, so an ineligible feed's higher version cannot discard an eligible lower version. SDK-driven discovery evaluates per-source results for both ordinary and exact-version searches; source names or locations are resolved to native source aliases inside `NuGetClient`.
 
 A selected channel or explicit source override augments the effective `packageSources` set: its source is introduced when it is not already configured, while ambient sources remain available. Package eligibility is different. The effective `packageSourceMapping` policy selectively replaces ambient mappings that can tie with or outrank an authoritative selected pattern. A package-scoped `aspire add --source` mapping keeps the exact selected package authoritative while mapping both the appended source and the resolved identity or channel feed to `Aspire*`.
 
@@ -157,6 +172,8 @@ The overlay can contain:
 - Mapping entries that refer only to NuGet source keys.
 - A controlled global packages folder.
 - A `disabledPackageSources` override when every ambient alias for an explicitly selected source is disabled. The overlay clears inherited disabled state, enables one selected alias, and re-emits the other disabled ambient aliases. NuGet treats the presence of an `<add>` key in this section as disabled state; the entry remains disabled even when its `value` attribute is `false`.
+
+Source-restricted discovery and template installation use this same composer, with a restriction that disables every unselected alias and removes its mapping entries. Removing those entries prevents an unselected source's exact package mapping from outranking the selected source's `*` mapping. This restriction is part of the resolved overlay, not a file-writer option, so temporary, generated-root, and regenerated writers all materialize the same policy. Restore's additive dependency-source behavior is unchanged.
 
 When a selected source is not already represented by an ambient alias, Aspire namespaces its generated key with the same stable workload identifier derived from the AppHost path for DCP. The primary selected source uses `aspire-<workload-id>`. Additional generated sources use `aspire-<workload-id>-0`, `aspire-<workload-id>-1`, and so on, skipping reserved additional keys. A conflicting reserved primary key fails restore rather than silently selecting another alias or inheriting name-bound settings. Sources already represented by ambient aliases continue to use those aliases so NuGet-owned credentials and client certificates remain associated with the correct keys.
 

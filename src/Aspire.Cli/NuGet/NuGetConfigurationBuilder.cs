@@ -2,290 +2,54 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Aspire.Cli.Packaging;
-using Aspire.Cli.Projects;
 
 namespace Aspire.Cli.NuGet;
 
 /// <summary>
-/// Provides the effective NuGet configuration for one package or template invocation.
+/// Combines evaluated ambient NuGet settings with a selected package-source policy.
 /// </summary>
-internal sealed class NuGetPackageSearchConfiguration : IDisposable
+internal static class NuGetConfigurationBuilder
 {
-    private readonly TemporaryNuGetConfig? _temporaryConfig;
-
-    private NuGetPackageSearchConfiguration(
-        DirectoryInfo originalWorkingDirectory,
-        DirectoryInfo effectiveWorkingDirectory,
-        FileInfo? explicitConfigFile,
-        FileInfo? configurationFile,
-        string cacheIdentity,
-        TemporaryNuGetConfig? temporaryConfig)
-    {
-        OriginalWorkingDirectory = originalWorkingDirectory;
-        EffectiveWorkingDirectory = effectiveWorkingDirectory;
-        ExplicitConfigFile = explicitConfigFile;
-        ConfigurationFile = configurationFile;
-        CacheIdentity = cacheIdentity;
-        _temporaryConfig = temporaryConfig;
-    }
-
-    public DirectoryInfo OriginalWorkingDirectory { get; }
-
-    public DirectoryInfo EffectiveWorkingDirectory { get; }
-
-    /// <summary>
-    /// Gets the standalone config passed through an explicit <c>--configfile</c> option.
-    /// Ambient overlays remain null so NuGet discovers the overlay and its parent hierarchy.
-    /// </summary>
-    public FileInfo? ExplicitConfigFile { get; }
-
-    /// <summary>
-    /// Gets the generated configuration file, when one exists.
-    /// </summary>
-    public FileInfo? ConfigurationFile { get; }
-
-    public string CacheIdentity { get; }
-
-    public static NuGetPackageSearchConfiguration Ambient(
-        DirectoryInfo workingDirectory,
-        string cacheIdentity)
-        => new(
-            workingDirectory,
-            workingDirectory,
-            explicitConfigFile: null,
-            configurationFile: null,
-            cacheIdentity,
-            temporaryConfig: null);
-
-    public static NuGetPackageSearchConfiguration Standalone(
-        DirectoryInfo workingDirectory,
-        TemporaryNuGetConfig temporaryConfig)
-        => new(
-            workingDirectory,
-            workingDirectory,
-            temporaryConfig.ConfigFile,
-            temporaryConfig.ConfigFile,
-            temporaryConfig.CacheIdentity,
-            temporaryConfig);
-
-    public static NuGetPackageSearchConfiguration AmbientOverlay(
-        DirectoryInfo workingDirectory,
-        TemporaryNuGetConfig temporaryConfig,
-        string ambientCacheIdentity)
-        => new(
-            workingDirectory,
-            temporaryConfig.ConfigFile.Directory!,
-            explicitConfigFile: null,
-            temporaryConfig.ConfigFile,
-            IntegrationRestorePlanResolver.CombineGlobalPackagesFolderIdentity(
-                ambientCacheIdentity,
-                temporaryConfig.CacheIdentity),
-            temporaryConfig);
-
-    public static NuGetPackageSearchConfiguration Existing(
-        DirectoryInfo workingDirectory,
-        FileInfo? configurationFile)
-        => new(
-            workingDirectory,
-            workingDirectory,
-            configurationFile,
-            configurationFile,
-            configurationFile?.FullName ?? "ambient",
-            temporaryConfig: null);
-
-    public void Dispose()
-    {
-        _temporaryConfig?.Dispose();
-    }
-}
-
-/// <summary>
-/// Creates invocation-scoped NuGet configurations for package searches and template installation.
-/// </summary>
-internal sealed class NuGetInvocationConfigurationSource(BundleNuGetService nugetService)
-{
-    private const string WorkloadId = "package-search";
-
-    public NuGetInvocationConfiguration Resolve(
-        DirectoryInfo workingDirectory,
+    public static NuGetConfiguration Build(
+        NuGetSettingsInfo settings,
         string workloadId,
         PackageMapping[]? selectedMappings,
-        string? packageScopedAppendSource = null,
-        bool hasAuthoritativeAspirePolicy = false,
-        CancellationToken cancellationToken = default)
+        bool restrictToSelectedSources,
+        string? packageScopedAppendSource,
+        bool hasAuthoritativeAspirePolicy)
     {
-        ArgumentNullException.ThrowIfNull(workingDirectory);
+        ArgumentNullException.ThrowIfNull(settings);
         ArgumentException.ThrowIfNullOrWhiteSpace(workloadId);
+        if (restrictToSelectedSources && selectedMappings is not { Length: > 0 })
+        {
+            throw new ArgumentException("Source-restricted configuration requires a selected source.", nameof(selectedMappings));
+        }
 
-        var settings = nugetService.GetNuGetSettings(
-            workingDirectory.FullName,
-            cancellationToken);
-        var configSources = NuGetInvocationConfigurationComposer.ResolveConfigSources(
+        var configSources = ResolveSourceAliases(
             selectedMappings,
             workloadId,
             settings.Sources,
             settings.ReservedPackageSourceKeys,
             settings.SourceIdentityKey);
 
-        return new NuGetInvocationConfiguration(
-            selectedMappings,
+        var overlay = selectedMappings is null
+            ? null
+            : ComposeOverlay(
+                selectedMappings,
+                settings,
+                configSources,
+                restrictToSelectedSources,
+                globalPackagesFolder: null,
+                packageScopedAppendSource,
+                hasAuthoritativeAspirePolicy);
+
+        return new NuGetConfiguration(
             settings,
             configSources,
-            packageScopedAppendSource,
-            hasAuthoritativeAspirePolicy,
-            nugetService);
+            overlay);
     }
 
-    public async Task<NuGetPackageSearchConfiguration> CreateAmbientOverlayAsync(
-        DirectoryInfo workingDirectory,
-        IReadOnlyList<PackageMapping>? channelMappings,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(workingDirectory);
-
-        var selectedMappings = channelMappings?
-            .Where(static mapping => mapping.PackageFilter != PackageMapping.AllPackages)
-            .ToArray() ?? [];
-        if (selectedMappings.Length == 0)
-        {
-            var ambientConfiguration = Resolve(
-                workingDirectory,
-                WorkloadId,
-                selectedMappings: null,
-                cancellationToken: cancellationToken);
-            return NuGetPackageSearchConfiguration.Ambient(
-                workingDirectory,
-                ambientConfiguration.Settings.CacheIdentity);
-        }
-
-        var invocationConfiguration = Resolve(
-            workingDirectory,
-            WorkloadId,
-            selectedMappings,
-            hasAuthoritativeAspirePolicy: true,
-            cancellationToken: cancellationToken);
-        var temporaryConfig = await invocationConfiguration.CreateTemporaryOverlayAsync(
-            workingDirectory,
-            globalPackagesFolder: null,
-            cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("The selected package mappings did not produce a NuGet policy overlay.");
-
-        return NuGetPackageSearchConfiguration.AmbientOverlay(
-            workingDirectory,
-            temporaryConfig,
-            invocationConfiguration.Settings.CacheIdentity);
-    }
-
-    public static async Task<NuGetPackageSearchConfiguration> CreateStandaloneAsync(
-        DirectoryInfo workingDirectory,
-        PackageMapping[] mappings)
-    {
-        ArgumentNullException.ThrowIfNull(workingDirectory);
-        ArgumentNullException.ThrowIfNull(mappings);
-
-        var temporaryConfig = await TemporaryNuGetConfig.CreateAsync(mappings).ConfigureAwait(false);
-        return NuGetPackageSearchConfiguration.Standalone(
-            workingDirectory,
-            temporaryConfig);
-    }
-}
-
-/// <summary>
-/// Represents ambient NuGet settings combined with one invocation's selected source policy.
-/// </summary>
-internal sealed class NuGetInvocationConfiguration
-{
-    private readonly string? _packageScopedAppendSource;
-    private readonly bool _hasAuthoritativeAspirePolicy;
-    private readonly BundleNuGetService _nugetService;
-
-    public NuGetInvocationConfiguration(
-        PackageMapping[]? selectedMappings,
-        NuGetSettingsInfo settings,
-        NuGetConfigSource[] configSources,
-        string? packageScopedAppendSource,
-        bool hasAuthoritativeAspirePolicy,
-        BundleNuGetService nugetService)
-    {
-        SelectedMappings = selectedMappings is null ? null : [.. selectedMappings];
-        Settings = settings with
-        {
-            ConfigPaths = [.. settings.ConfigPaths],
-            Sources = [.. settings.Sources],
-            SensitiveSourceValues = [.. settings.SensitiveSourceValues],
-            PackageSourceMappings = [.. settings.PackageSourceMappings],
-            DisabledPackageSourceKeys = [.. settings.DisabledPackageSourceKeys],
-            ReservedPackageSourceKeys = [.. settings.ReservedPackageSourceKeys],
-            SourceIdentityKey = [.. settings.SourceIdentityKey]
-        };
-        ConfigSources = [.. configSources];
-        _packageScopedAppendSource = packageScopedAppendSource;
-        _hasAuthoritativeAspirePolicy = hasAuthoritativeAspirePolicy;
-        _nugetService = nugetService;
-    }
-
-    public PackageMapping[]? SelectedMappings { get; }
-
-    public NuGetSettingsInfo Settings { get; }
-
-    public IReadOnlyList<NuGetConfigSource> ConfigSources { get; }
-
-    public NuGetConfigOverlay CreateOverlay(string? globalPackagesFolder)
-    {
-        if (SelectedMappings is null)
-        {
-            throw new InvalidOperationException("An invocation without selected mappings does not require a NuGet policy overlay.");
-        }
-
-        return NuGetInvocationConfigurationComposer.CreateOverlay(
-            SelectedMappings,
-            Settings,
-            ConfigSources,
-            globalPackagesFolder,
-            _packageScopedAppendSource,
-            _hasAuthoritativeAspirePolicy);
-    }
-
-    public async Task<TemporaryNuGetConfig?> CreateTemporaryOverlayAsync(
-        DirectoryInfo? parentDirectory,
-        string? globalPackagesFolder,
-        CancellationToken cancellationToken)
-    {
-        if (SelectedMappings is null)
-        {
-            return null;
-        }
-
-        var overlay = CreateOverlay(globalPackagesFolder);
-        return parentDirectory is null
-            ? await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-                path => _nugetService.WriteNuGetConfigOverlay(
-                    overlay,
-                    path,
-                    cancellationToken)).ConfigureAwait(false)
-            : await TemporaryNuGetConfig.CreateRestoreOverlayAsync(
-                parentDirectory,
-                path => _nugetService.WriteNuGetConfigOverlay(
-                    overlay,
-                    path,
-                    cancellationToken)).ConfigureAwait(false);
-    }
-
-    public void WriteOverlay(
-        string outputPath,
-        string? globalPackagesFolder,
-        CancellationToken cancellationToken)
-    {
-        _nugetService.WriteNuGetConfigOverlay(
-            CreateOverlay(globalPackagesFolder),
-            outputPath,
-            cancellationToken);
-    }
-}
-
-internal static class NuGetInvocationConfigurationComposer
-{
-    public static NuGetConfigSource[] ResolveConfigSources(
+    public static NuGetConfigSource[] ResolveSourceAliases(
         PackageMapping[]? mappings,
         string workloadId,
         IReadOnlyList<NuGetSourceInfo> ambientSources,
@@ -368,10 +132,11 @@ internal static class NuGetInvocationConfigurationComposer
         return [.. resolvedSources];
     }
 
-    public static NuGetConfigOverlay CreateOverlay(
+    public static NuGetConfigOverlay ComposeOverlay(
         PackageMapping[] selectedMappings,
         NuGetSettingsInfo settings,
         IReadOnlyList<NuGetConfigSource> selectedSources,
+        bool restrictToSelectedSources,
         string? globalPackagesFolder,
         string? packageScopedAppendSource = null,
         bool hasAuthoritativeAspirePolicy = false)
@@ -390,19 +155,41 @@ internal static class NuGetInvocationConfigurationComposer
                 .Where(key => !enabledSourceKeys.Contains(key))
                 .ToArray()
             : [];
+        var packageSourceMappings = ComposePackageSourceMappings(
+            selectedMappings,
+            settings.PackageSourceMappings,
+            settings.Sources,
+            selectedSources,
+            packageScopedAppendSource,
+            hasAuthoritativeAspirePolicy);
+
+        if (restrictToSelectedSources)
+        {
+            // Search ignores mappings. Source-restricted operations must disable other aliases
+            // without replacing the hierarchy that owns authentication and transport settings.
+            var selectedKeys = selectedSources
+                .Select(static source => source.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            clearDisabledPackageSources = true;
+            disabledPackageSourceKeys = settings.Sources
+                .Select(static source => source.Name)
+                .Concat(settings.DisabledPackageSourceKeys)
+                .Where(key => !selectedKeys.Contains(key))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            // A disabled source's exact mapping can outrank the selected source's '*' mapping.
+            // Remove its mappings as well so template installation can resolve from --source.
+            packageSourceMappings = packageSourceMappings
+                .Where(mapping => selectedKeys.Contains(mapping.SourceKey))
+                .ToArray();
+        }
 
         return new NuGetConfigOverlay(
             selectedSources
                 .Where(static source => !source.IsAmbient)
                 .Select(static source => (Key: source.Key, Source: source.Source))
                 .ToArray(),
-            ComposePackageSourceMappings(
-                selectedMappings,
-                settings.PackageSourceMappings,
-                settings.Sources,
-                selectedSources,
-                packageScopedAppendSource,
-                hasAuthoritativeAspirePolicy),
+            packageSourceMappings,
             clearDisabledPackageSources,
             disabledPackageSourceKeys,
             globalPackagesFolder);

@@ -417,5 +417,5 @@ public class BundleNuGetPackageCacheTests(ITestOutputHelper outputHelper)
             provider.GetRequiredService<INuGetClient>(),
             NullLogger<BundleNuGetPackageCache>.Instance,
             provider.GetRequiredService<IFeatures>(),
-            provider.GetRequiredService<NuGetInvocationConfigurationSource>());
+            provider.GetRequiredService<BundleNuGetService>());
 }

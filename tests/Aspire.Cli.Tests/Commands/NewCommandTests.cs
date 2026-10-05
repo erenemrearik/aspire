@@ -20,6 +20,7 @@ using Aspire.Cli.Tests.Utils;
 using Microsoft.AspNetCore.InternalTesting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using NuGet.Configuration;
 using NuGetPackage = Aspire.Shared.NuGetPackageCli;
 
 namespace Aspire.Cli.Tests.Commands;
@@ -2166,21 +2167,28 @@ public class NewCommandTests(ITestOutputHelper outputHelper)
 
         var services = CreateServiceCollection(workspace, options =>
         {
+            options.NuGetClientFactory = _ => NuGetTestHelper.CreateClient();
             options.DotNetCliRunnerFactory = _ =>
             {
-                var runner = CreateTestRunnerWithStandardPackages();
+                var runner = new TestDotNetCliRunner
+                {
+                    SearchPackagesAsyncCallback = (_, _, _, _, _, _, _, _, _, _) =>
+                        (0, [new NuGetPackage { Id = "Aspire.ProjectTemplates", Source = sourceOverride, Version = "9.2.0" }])
+                };
                 runner.InstallTemplateAsyncCallback = (packageName, version, nugetConfigFile, nugetSource, force, invocationOptions, cancellationToken) =>
                 {
                     Assert.NotNull(nugetConfigFile);
 
                     var document = XDocument.Load(nugetConfigFile.FullName);
-                    var installPackageSources = document.Root!
-                        .Element("packageSources")!
-                        .Elements("add")
-                        .Select(element => (string)element.Attribute("value")!)
+                    var settings = Settings.LoadDefaultSettings(nugetConfigFile.Directory!.FullName);
+                    var installPackageSources = new PackageSourceProvider(settings)
+                        .LoadPackageSources()
+                        .Where(source => source.IsEnabled)
+                        .Select(source => source.Source)
                         .ToArray();
 
                     Assert.Equal([sourceOverride], installPackageSources);
+                    Assert.Null(document.Root!.Element("packageSources")?.Element("clear"));
 
                     return (0, version);
                 };

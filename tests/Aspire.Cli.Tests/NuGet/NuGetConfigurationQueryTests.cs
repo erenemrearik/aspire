@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aspire.Cli.Tests.NuGet;
 
-public class NuGetSettingsProviderTests(ITestOutputHelper outputHelper)
+public class NuGetConfigurationQueryTests(ITestOutputHelper outputHelper)
 {
     [Fact]
     public void IsPackageSourceMappingEnabled_UsesNuGetConfigHierarchy()
@@ -27,9 +27,9 @@ public class NuGetSettingsProviderTests(ITestOutputHelper outputHelper)
               </packageSourceMapping>
             </configuration>
             """);
-        var provider = CreateProvider();
+        var service = CreateService();
 
-        var enabled = provider.IsPackageSourceMappingEnabled(
+        var enabled = service.IsPackageSourceMappingEnabled(
             projectDirectory,
             TestContext.Current.CancellationToken);
 
@@ -82,20 +82,20 @@ public class NuGetSettingsProviderTests(ITestOutputHelper outputHelper)
               </packageSourceMapping>
             </configuration>
             """);
-        var provider = CreateProvider();
+        var service = CreateService();
 
-        Assert.False(provider.IsPackageSourceMappingEnabled(
+        Assert.False(service.IsPackageSourceMappingEnabled(
             nonCanonicalDirectory,
             TestContext.Current.CancellationToken));
-        Assert.False(provider.IsPackageSourceMappingEnabled(
+        Assert.False(service.IsPackageSourceMappingEnabled(
             mappingThenClearDirectory,
             TestContext.Current.CancellationToken));
-        Assert.True(provider.IsPackageSourceMappingEnabled(
+        Assert.True(service.IsPackageSourceMappingEnabled(
             clearThenMappingDirectory,
             TestContext.Current.CancellationToken));
     }
 
-    private static NuGetSettingsProvider CreateProvider()
+    private static BundleNuGetService CreateService()
     {
         var nuGetClient = new NuGetClient(
             new TestFeatures(),
@@ -104,6 +104,6 @@ public class NuGetSettingsProviderTests(ITestOutputHelper outputHelper)
         var bundleNuGetService = new BundleNuGetService(
             NullLogger<BundleNuGetService>.Instance,
             nuGetClient);
-        return new NuGetSettingsProvider(bundleNuGetService);
+        return bundleNuGetService;
     }
 }

@@ -2320,19 +2320,20 @@ public class PackagingServiceTests(ITestOutputHelper outputHelper)
 
     private sealed class FakeNuGetPackageCacheWithPackages(List<Aspire.Shared.NuGetPackageCli> packages) : INuGetPackageCache
     {
-        public Task<NuGetPackageSearchConfiguration> CreateAmbientOverlayAsync(
+        public Task<NuGetPackageOperationConfiguration> CreateChannelConfigurationAsync(
             DirectoryInfo workingDirectory,
             IReadOnlyList<PackageMapping>? channelMappings,
             CancellationToken cancellationToken)
-            => Task.FromResult(NuGetPackageSearchConfiguration.Ambient(workingDirectory, cacheIdentity: "ambient"));
+            => Task.FromResult(NuGetPackageOperationConfiguration.Ambient(workingDirectory, cacheIdentity: "ambient"));
 
-        public Task<NuGetPackageSearchConfiguration> CreateStandaloneAsync(
+        public Task<NuGetPackageOperationConfiguration> CreateSourceRestrictedConfigurationAsync(
             DirectoryInfo workingDirectory,
-            PackageMapping[] mappings)
-            => Task.FromResult(NuGetPackageSearchConfiguration.Ambient(workingDirectory, cacheIdentity: "standalone"));
+            PackageMapping[] mappings,
+            CancellationToken cancellationToken)
+            => Task.FromResult(NuGetPackageOperationConfiguration.Ambient(workingDirectory, cacheIdentity: "source-restricted"));
 
         public Task<IEnumerable<Aspire.Shared.NuGetPackageCli>> GetTemplatePackagesAsync(
-            NuGetPackageSearchConfiguration configuration,
+            NuGetPackageOperationConfiguration configuration,
             bool prerelease,
             CancellationToken cancellationToken)
         {
@@ -2344,19 +2345,19 @@ public class PackagingServiceTests(ITestOutputHelper outputHelper)
         }
 
         public Task<IEnumerable<Aspire.Shared.NuGetPackageCli>> GetIntegrationPackagesAsync(
-            NuGetPackageSearchConfiguration configuration,
+            NuGetPackageOperationConfiguration configuration,
             bool prerelease,
             CancellationToken cancellationToken)
             => GetTemplatePackagesAsync(configuration, prerelease, cancellationToken);
 
         public Task<IEnumerable<Aspire.Shared.NuGetPackageCli>> GetCliPackagesAsync(
-            NuGetPackageSearchConfiguration configuration,
+            NuGetPackageOperationConfiguration configuration,
             bool prerelease,
             CancellationToken cancellationToken)
             => Task.FromResult<IEnumerable<Aspire.Shared.NuGetPackageCli>>([]);
 
         public Task<IEnumerable<Aspire.Shared.NuGetPackageCli>> GetPackagesAsync(
-            NuGetPackageSearchConfiguration configuration,
+            NuGetPackageOperationConfiguration configuration,
             string packageId,
             Func<string, bool>? filter,
             bool prerelease,
@@ -2365,7 +2366,7 @@ public class PackagingServiceTests(ITestOutputHelper outputHelper)
             => GetTemplatePackagesAsync(configuration, prerelease, cancellationToken);
 
         public Task<IEnumerable<Aspire.Shared.NuGetPackageCli>> GetPackageVersionsAsync(
-            NuGetPackageSearchConfiguration configuration,
+            NuGetPackageOperationConfiguration configuration,
             string exactPackageId,
             bool prerelease,
             bool useCache,

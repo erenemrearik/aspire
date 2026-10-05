@@ -216,8 +216,6 @@ internal static class CliTestHelper
         services.AddSingleton(options.BundlePayloadProviderFactory);
         services.AddSingleton(options.BundleServiceFactory);
         services.AddSingleton<BundleNuGetService>();
-        services.AddSingleton<NuGetInvocationConfigurationSource>();
-        services.AddTransient<INuGetSettingsProvider, NuGetSettingsProvider>();
         services.AddSingleton<IInstallSidecarReader, InstallSidecarReader>();
         services.AddSingleton<IPeerInstallProbe, PeerInstallProbe>();
         services.AddSingleton<IInstallationDiscovery, InstallationDiscovery>();
@@ -594,8 +592,8 @@ internal sealed class CliServiceCollectionTestOptions
         var cache = serviceProvider.GetRequiredService<IMemoryCache>();
         var telemetry = serviceProvider.GetRequiredService<AspireCliTelemetry>();
         var features = serviceProvider.GetRequiredService<IFeatures>();
-        var configurationSource = serviceProvider.GetRequiredService<NuGetInvocationConfigurationSource>();
-        return new NuGetPackageCache(cliRunner, cache, telemetry, features, configurationSource);
+        var nuGetService = serviceProvider.GetRequiredService<BundleNuGetService>();
+        return new NuGetPackageCache(cliRunner, cache, telemetry, features, nuGetService);
     };
 
     public Func<IServiceProvider, INuGetClient> NuGetClientFactory { get; set; } = _ => new FakeNuGetClient();
