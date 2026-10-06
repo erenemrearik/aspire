@@ -987,6 +987,29 @@ public class DescribeCommandTests(ITestOutputHelper outputHelper)
     }
 
     [Theory]
+    [InlineData("api-1")]
+    [InlineData("API-2")]
+    public async Task DescribeCommand_MermaidFormat_PreservesSelectedReplicaNames(string resource)
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var outputWriter = new TestOutputTextWriter(outputHelper);
+        using var provider = CreateDescribeTestServices(workspace, outputWriter, [
+            new ResourceSnapshot
+            {
+                Name = "frontend", DisplayName = "frontend", ResourceType = "Project", State = "Running",
+                Relationships = [new() { ResourceName = "api", Type = "Reference" }]
+            },
+            new ResourceSnapshot { Name = "api-2", DisplayName = "api", ResourceType = "Project", State = "Running" },
+            new ResourceSnapshot { Name = "api-1", DisplayName = "api", ResourceType = "Project", State = "Running" }
+        ], disableAnsi: true);
+
+        var exitCode = await provider.GetRequiredService<RootCommand>().Parse($"resources {resource} --format mermaid").InvokeAsync().DefaultTimeout();
+
+        Assert.Equal(CliExitCodes.Success, exitCode);
+        await Verify(string.Join("", outputWriter.Logs), "mmd").UseParameters(resource);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("cache")]
     public async Task DescribeCommand_MermaidFormat_FiltersResources(string resource)

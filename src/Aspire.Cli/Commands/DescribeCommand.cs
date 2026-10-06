@@ -208,6 +208,8 @@ internal sealed class DescribeCommand : BaseCommand
 
     private int ExecuteSnapshot(IReadOnlyList<ResourceSnapshot> snapshots, string? dashboardBaseUrl, string? resourceName, ResourceOutputFormat format, bool includeDisabledCommands)
     {
+        var allSnapshots = snapshots;
+
         // Filter by resource name if specified
         if (resourceName is not null)
         {
@@ -228,7 +230,7 @@ internal sealed class DescribeCommand : BaseCommand
             var diagram = MermaidGraphExporter.Export(
                 graphResources,
                 r => r.Name,
-                r => ResourceSnapshotMapper.GetResourceName(r, graphResources),
+                r => ResourceSnapshotMapper.GetResourceName(r, allSnapshots),
                 r => r.Relationships
                     .Where(relationship => !string.Equals(relationship.ResourceName, r.DisplayName, StringComparisons.ResourceName))
                     .SelectMany(relationship => resourcesByDisplayName[relationship.ResourceName])
