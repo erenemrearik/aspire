@@ -1,0 +1,142 @@
+{
+  "run_id": 37427038688,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/37427038688",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-06T08:02:59Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20746,
+    "title": "Add Mermaid resource graph export to the dashboard and CLI",
+    "author": "mitchdenny",
+    "state": "closed",
+    "head_branch": "mitchdenny-resource-graph-mermaid-export",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20746",
+    "merged_at": "2026-10-06T07:00:38Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "b00cff093521bf5ff04f729a44a57b21d228f3a8",
+    "failed_sha": "c2a257b0f48797bb2689f499e4eb1ff1c5c65066",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "dcc203534f5d41bc03e831c9cc67ac09092da52d",
+        "message": "Add one-time Aspire usefulness feedback in VS Code (#20399) ## Description Add a lightweight way to measure whether Aspire improves users' development experience without sending them to a full survey. This measures a Yes/No perceived-benefit rate, not NSAT or an objective productivity improvement. **Draft: the campaign is disabled and its expiry is unset.** Classification/privacy approval and verified production ingestion/reporting are required before enabling it. ### User-facing usage Once the ",
+        "html_url": "https://github.com/microsoft/aspire/commit/dcc203534f5d41bc03e831c9cc67ac09092da52d",
+        "pull_request": {
+          "number": 20399,
+          "title": "Add one-time Aspire usefulness feedback in VS Code",
+          "url": "https://github.com/microsoft/aspire/pull/20399",
+          "merged_at": "2026-10-05T17:38:27Z"
+        }
+      },
+      {
+        "sha": "e5f8dc6b1194773458881b400b1e2c91f91a33d8",
+        "message": "Preserve child exception stacks in dashboard aggregate-error telemetry (#20732) ## Description Dashboard telemetry for Blazor circuit error 111 can contain an `AggregateException` with an empty stack trace. Blazor creates disposal aggregates and passes them directly to its error handler without throwing them, so the original stacks are on the child exceptions rather than the aggregate. Record the child exception types, messages, and stacks instead, so disposal failures can be traced to the affec",
+        "html_url": "https://github.com/microsoft/aspire/commit/e5f8dc6b1194773458881b400b1e2c91f91a33d8",
+        "pull_request": {
+          "number": 20732,
+          "title": "Preserve child exception stacks in dashboard aggregate-error telemetry",
+          "url": "https://github.com/microsoft/aspire/pull/20732",
+          "merged_at": "2026-10-05T19:08:21Z"
+        }
+      },
+      {
+        "sha": "34988cb0e05889a0501d075ffe15165e1f767f30",
+        "message": "Prepare repository metadata for Aspire 17.0 (#20569) ## Description Remove the disabled, temporary main-to-release/14.0 synchronization workflow, its harness/tests, watchdog entry, and obsolete operating instructions. That workflow served the advance integration branch while `main` developed 13.6 and is no longer needed. Restrict the `main` milestone rule to merged PRs so PRs closed without merging are not assigned milestone 17.0. Leave the existing `release/13.6` rule unchanged. Per review feed",
+        "html_url": "https://github.com/microsoft/aspire/commit/34988cb0e05889a0501d075ffe15165e1f767f30",
+        "pull_request": {
+          "number": 20569,
+          "title": "Prepare repository metadata for Aspire 17.0",
+          "url": "https://github.com/microsoft/aspire/pull/20569",
+          "merged_at": "2026-10-05T21:58:54Z"
+        }
+      },
+      {
+        "sha": "833be629720d582a57118babf1423201aa4944e9",
+        "message": "Reduce dashboard CPU under sustained metric ingestion (#20736)",
+        "html_url": "https://github.com/microsoft/aspire/commit/833be629720d582a57118babf1423201aa4944e9",
+        "pull_request": {
+          "number": 20736,
+          "title": "Reduce dashboard CPU under sustained metric ingestion",
+          "url": "https://github.com/microsoft/aspire/pull/20736",
+          "merged_at": "2026-10-05T23:13:54Z"
+        }
+      },
+      {
+        "sha": "c2a257b0f48797bb2689f499e4eb1ff1c5c65066",
+        "message": "Add Mermaid resource graph export to the dashboard and CLI (#20746) ## Description Resource graphs are useful for documenting and sharing an application's topology, but currently cannot be exported from the dashboard or CLI. This adds **Export as Mermaid** to the graph controls, opening a large dialog with the generated source, **Copy to clipboard**, and **Download** as `resources.mmd`. It also adds `aspire resources --format mermaid` (and `aspire describe --format mermaid`) for direct file redi",
+        "html_url": "https://github.com/microsoft/aspire/commit/c2a257b0f48797bb2689f499e4eb1ff1c5c65066",
+        "pull_request": {
+          "number": 20746,
+          "title": "Add Mermaid resource graph export to the dashboard and CLI",
+          "url": "https://github.com/microsoft/aspire/pull/20746",
+          "merged_at": "2026-10-06T07:00:38Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Dashboard.Components.Tests, Dashboard.Components, Dashboard.Com... / Dashboard.Components (windows-latest)",
+      "id": 112149721345,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37427038688/job/112149721345",
+      "classification": "flaky-test",
+      "reason": "1 of 692 tests failed: ManageDataDialogTests bUnit JSInterop handler for initializeIconCheckboxKeyboard wasn't configured to return a result, causing a hang. Known recurring bUnit timing issue unrelated to the merged Mermaid export PR.",
+      "failed_steps": [
+        "Run tests (Windows)"
+      ]
+    },
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Hosting.JavaScript.Tests, Hosting.JavaScript, Hosting.JavaScrip... / Hosting.JavaScript (windows-latest)",
+      "id": 112149727447,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37427038688/job/112149727447",
+      "classification": "flaky-test",
+      "reason": "2 of 419 tests failed: DenoFunctionalTests.VerifyDenoAppDirectExecutionWorks/TaskScriptWorks failed because DenoAppFixture.InitializeAsync hit a timing race where the 'denoscript' service endpoint wasn't allocated yet, unrelated to the merged Mermaid export PR.",
+      "failed_steps": [
+        "Run tests (Windows)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Hosting.JavaScript.Tests.DenoFunctionalTests.VerifyDenoAppDirectExecutionWorks",
+      "job": "Tests / No-package tests (regular, Aspire.Hosting.JavaScript.Tests, Hosting.JavaScript, Hosting.JavaScrip... / Hosting.JavaScript (windows-latest)",
+      "error": "Class fixture type 'Aspire.Hosting.JavaScript.Tests.DenoAppFixture' threw in InitializeAsync\n---- System.IO.InvalidDataException : Service denoscript should have valid address at this point",
+      "stack_trace": "----- Inner Stack Trace -----\n   at Aspire.Hosting.Dcp.DcpModelUtilities.TryAddLocalhostAllocatedEndpoint(ServiceWithModelResource sp, Boolean allowPending, Nullable`1 fallbackPort) in /_/src/Aspire.Hosting/Dcp/DcpModelUtilities.cs:line 186\n   at Aspire.Hosting.Dcp.DcpModelUtilities.TryAddWorkloadAllocatedEndpoints[TDcpResource](RenderedModelResource`1 resource, Boolean enableAspireContainerTunnel, String containerHostName) in /_/src/Aspire.Hosting/Dcp/DcpModelUtilities.cs:line 129\n   at Aspire.Hosting.Dcp.DcpExecutor.<>c__DisplayClass36_1.<<RunApplicationAsync>b__4>d.MoveNext() in /_/src/Aspire.Hosting/Dcp/DcpExecutor.cs:line 221\n--- End of stack trace from previous location ---\n   at Aspire.Hosting.Dcp.DcpExecutor.<>c__DisplayClass36_1.<<RunApplicationAsync>b__6>d.MoveNext() in /_/src/Aspire.Hosting/Dcp/DcpExecutor.cs:line 267\n--- End of stack trace from previous location ---\n   at Aspire.Hosting.Dcp.DcpExecutor.RunApplicationAsync(CancellationToken ct) in /_/src/Aspire.Hosting/Dcp/DcpExecutor.cs:line 273\n   at Aspire.Hosting.Orchestrator.ApplicationOrchestrator.RunApplicationAsync(CancellationToken cancellationToken) in /_/src/Aspire.Hosting/Orchestrator/ApplicationOrchestrator.cs:line 626\n   at Aspire.Hosting.Orchestrator.OrchestratorHostService.StartAsync(CancellationToken cancellationToken) in /_/src/Aspire.Hosting/Orchestrator/OrchestratorHostService.cs:line 41\n   at Microsoft.Extensions.Hosting.Internal.Host.<StartAsync>b__14_1(IHostedService service, CancellationToken token)\n   at Microsoft.Extensions.Hosting.Internal.Host.ForeachService[T](IEnumerable`1 services, CancellationToken token, Boolean concurrent, Boolean abortOnFirstException, List`1 exceptions, Func`3 operation)\n   at Microsoft.Extensions.Hosting.Internal.Host.<StartAsync>g__LogAndRethrow|14_3(<>c__DisplayClass14_0&)\n   at Microsoft.Extensions.Hosting.Internal.Host.StartAsync(CancellationToken cancellationToken)\n   at Aspire.Hosting.DistributedApplication.StartAsync(CancellationToken cancellati",
+      "standard_output": "",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Unrelated to the Mermaid export PR; a DCP endpoint-allocation timing race during fixture startup on windows-latest, not test or product code owned by this change."
+    },
+    {
+      "name": "Aspire.Hosting.JavaScript.Tests.DenoFunctionalTests.VerifyDenoAppTaskScriptWorks",
+      "job": "Tests / No-package tests (regular, Aspire.Hosting.JavaScript.Tests, Hosting.JavaScript, Hosting.JavaScrip... / Hosting.JavaScript (windows-latest)",
+      "error": "Class fixture type 'Aspire.Hosting.JavaScript.Tests.DenoAppFixture' threw in InitializeAsync\n---- System.IO.InvalidDataException : Service denoscript should have valid address at this point",
+      "stack_trace": "----- Inner Stack Trace -----\n   at Aspire.Hosting.Dcp.DcpModelUtilities.TryAddLocalhostAllocatedEndpoint(ServiceWithModelResource sp, Boolean allowPending, Nullable`1 fallbackPort) in /_/src/Aspire.Hosting/Dcp/DcpModelUtilities.cs:line 186\n   at Aspire.Hosting.Dcp.DcpModelUtilities.TryAddWorkloadAllocatedEndpoints[TDcpResource](RenderedModelResource`1 resource, Boolean enableAspireContainerTunnel, String containerHostName) in /_/src/Aspire.Hosting/Dcp/DcpModelUtilities.cs:line 129\n   at Aspire.Hosting.Dcp.DcpExecutor.<>c__DisplayClass36_1.<<RunApplicationAsync>b__4>d.MoveNext() in /_/src/Aspire.Hosting/Dcp/DcpExecutor.cs:line 221\n--- End of stack trace from previous location ---\n   at Aspire.Hosting.Dcp.DcpExecutor.<>c__DisplayClass36_1.<<RunApplicationAsync>b__6>d.MoveNext() in /_/src/Aspire.Hosting/Dcp/DcpExecutor.cs:line 267\n--- End of stack trace from previous location ---\n   at Aspire.Hosting.Dcp.DcpExecutor.RunApplicationAsync(CancellationToken ct) in /_/src/Aspire.Hosting/Dcp/DcpExecutor.cs:line 273\n   at Aspire.Hosting.Orchestrator.ApplicationOrchestrator.RunApplicationAsync(CancellationToken cancellationToken) in /_/src/Aspire.Hosting/Orchestrator/ApplicationOrchestrator.cs:line 626\n   at Aspire.Hosting.Orchestrator.OrchestratorHostService.StartAsync(CancellationToken cancellationToken) in /_/src/Aspire.Hosting/Orchestrator/OrchestratorHostService.cs:line 41\n   at Microsoft.Extensions.Hosting.Internal.Host.<StartAsync>b__14_1(IHostedService service, CancellationToken token)\n   at Microsoft.Extensions.Hosting.Internal.Host.ForeachService[T](IEnumerable`1 services, CancellationToken token, Boolean concurrent, Boolean abortOnFirstException, List`1 exceptions, Func`3 operation)\n   at Microsoft.Extensions.Hosting.Internal.Host.<StartAsync>g__LogAndRethrow|14_3(<>c__DisplayClass14_0&)\n   at Microsoft.Extensions.Hosting.Internal.Host.StartAsync(CancellationToken cancellationToken)\n   at Aspire.Hosting.DistributedApplication.StartAsync(CancellationToken cancellati",
+      "standard_output": "",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Same shared class fixture failure as VerifyDenoAppDirectExecutionWorks; a DCP endpoint-allocation timing race during fixture startup, unrelated to the merged Mermaid export PR."
+    },
+    {
+      "name": "Aspire.Dashboard.Components.Tests.Dialogs.ManageDataDialogTests.Render_ClearedSignals_PrunesSelectionsAndSupportsRemovingEmptyResource(dashboardClientIsReadOnly: True)",
+      "job": "Tests / No-package tests (regular, Aspire.Dashboard.Components.Tests, Dashboard.Components, Dashboard.Com... / Dashboard.Components (windows-latest)",
+      "error": "Bunit.JSRuntimeInvocationNotSetException : bUnit's JSInterop invocation handler was setup to handle the call:\n\n    InvokeVoidAsync(\"initializeIconCheckboxKeyboard\", Microsoft.AspNetCore.Components.ElementReference)\n\nHowever, the invocation handler was not configured to return a result,\ncausing the invocation to hang indefinitely.\n\nTo fix this, configure the handler to return a result using one of the following methods:\n\n    handler.SetVoidResult();\n    handler.SetCanceled();\n    handler.SetException(new Exception(\"error message\"));",
+      "stack_trace": "at Microsoft.JSInterop.JSObjectReferenceExtensions.InvokeVoidAsync(IJSObjectReference jsObjectReference, String identifier, Object[] args)\n   at Aspire.Dashboard.Components.IconCheckbox.OnAfterRenderAsync(Boolean firstRender) in /_/src/Aspire.Dashboard/Components/Controls/IconCheckbox.razor.cs:line 105\n   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetErrorHandledTask(Task taskToHandle, ComponentState owningComponentState)\n   at Bunit.RenderedComponentWaitForHelperExtensions.WaitForAssertion[TComponent](IRenderedComponent`1 renderedComponent, Action assertion, Nullable`1 timeout) in /_/src/bunit/Extensions/WaitForHelpers/RenderedComponentWaitForHelperExtensions.WaitForState.cs:line 102\n   at Aspire.Dashboard.Components.Tests.Dialogs.ManageDataDialogTests.Render_ClearedSignals_PrunesSelectionsAndSupportsRemovingEmptyResource(Boolean dashboardClientIsReadOnly) in /_/tests/Aspire.Dashboard.Components.Tests/Dialogs/ManageDataDialogTests.cs:line 246\n--- End of stack trace from previous location ---",
+      "standard_output": "Temporary workspace created at: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\Aspire.Dashboard.Components.Tests\\Workspace\\3czq1r2w.vvq\nDisposing temporary workspace at: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\Aspire.Dashboard.Components.Tests\\Workspace\\3czq1r2w.vvq",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Known recurring bUnit JSInterop setup gap for IconCheckbox.initializeIconCheckboxKeyboard (prior cause seen with a different theory parameter); unrelated to the merged Mermaid export PR which doesn't touch IconCheckbox."
+    }
+  ],
+  "causes": [
+    "dashboard-components-managedatadialog-iconcheckbox-jsinterop-true",
+    "hosting-javascript-denoappfixture-directexecution-invalidaddress",
+    "hosting-javascript-denoappfixture-taskscript-invalidaddress"
+  ]
+}
