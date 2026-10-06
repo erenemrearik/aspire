@@ -3,7 +3,7 @@ import { ChildProcessWithoutNullStreams } from 'child_process';
 import { spawnCliProcess, terminateCliProcess } from '../utils/process/cliProcess';
 import { AspireTerminalProvider } from '../utils/AspireTerminalProvider';
 import { extensionLogOutputChannel } from '../utils/logging';
-import { errorFetchingAppHosts } from '../loc/strings';
+import { errorFetchingAppHosts, errorStoppingAppHostWatcher } from '../loc/strings';
 import { AppHostCliRunner, LimitedOutputBuffer, oneShotOutputBufferLimit } from './appHostCliRunner';
 import { windowCliPathTarget } from '../utils/cliPathVariables';
 import { reportCliResolvedForOperation } from '../utils/cliOperationResolution';
@@ -11,6 +11,7 @@ import { reportCliResolvedForOperation } from '../utils/cliOperationResolution';
 export interface PsOutput {
     readonly stdout: string;
     readonly canCompleteGlobalLoading: boolean;
+    readonly followOutputsToReplay?: readonly string[];
 }
 
 interface PsProcessTermination {
@@ -27,6 +28,7 @@ interface PsProcessTermination {
  */
 export class AppHostPsPoller implements vscode.Disposable {
     private static readonly _oneShotOutputBufferLimit = oneShotOutputBufferLimit;
+    private static readonly _authoritativeSnapshotFollowOutputLimit = 256;
 
     private readonly _onDidReceivePsOutput = new vscode.EventEmitter<PsOutput>();
     readonly onDidReceivePsOutput = this._onDidReceivePsOutput.event;
@@ -58,6 +60,10 @@ export class AppHostPsPoller implements vscode.Disposable {
     private _authoritativeSnapshotPendingForce = false;
     private _authoritativeSnapshotRequestId = 0;
     private _activeAuthoritativeSnapshotRequestId: number | undefined;
+    private readonly _authoritativeSnapshotFollowOutputs: string[] = [];
+    private _authoritativeSnapshotFollowOutputsOverflowed = false;
+    private _authoritativeSnapshotCaptured = false;
+    private _authoritativeSnapshotContested = false;
 
     constructor(
         private readonly _terminalProvider: AspireTerminalProvider,
@@ -104,6 +110,7 @@ export class AppHostPsPoller implements vscode.Disposable {
 
         if (this._supportsPsFollow) {
             this._startPsFollow();
+            this._startPsFollowReconciliation();
             return;
         }
 
@@ -115,6 +122,21 @@ export class AppHostPsPoller implements vscode.Disposable {
             && this._isDataActive()
             && this._pollingRequested
             && generation === this._psPollingGeneration;
+    }
+
+    private _startPsFollowReconciliation(): void {
+        if (this._pollingInterval) {
+            clearInterval(this._pollingInterval);
+        }
+
+        // The long-lived stream is the fast path, but an AppHost can start while the CLI is
+        // transitioning from its initial scan to the follow subscription. Periodic authoritative
+        // snapshots close that missed-delta window without restarting the stream.
+        this._pollingInterval = setInterval(() => {
+            if (!this._disposed) {
+                this.refreshAppHostsFromAuthoritativeSnapshot();
+            }
+        }, this.getPollingIntervalMs());
     }
 
     private _startPsIntervalPolling(fetchImmediately = true): void {
@@ -145,6 +167,10 @@ export class AppHostPsPoller implements vscode.Disposable {
         this._authoritativeSnapshotPending = false;
         this._authoritativeSnapshotPendingForce = false;
         this._activeAuthoritativeSnapshotRequestId = undefined;
+        this._authoritativeSnapshotFollowOutputs.length = 0;
+        this._authoritativeSnapshotFollowOutputsOverflowed = false;
+        this._authoritativeSnapshotCaptured = false;
+        this._authoritativeSnapshotContested = false;
         if (options?.clearPostStopRefreshTimers ?? true) {
             this._clearPostStopRefreshTimers();
         }
@@ -175,7 +201,7 @@ export class AppHostPsPoller implements vscode.Disposable {
                 () => this._releasePsProcess(psProcess),
                 error => {
                     termination.failed = true;
-                    termination.errorMessage = errorFetchingAppHosts(String(error));
+                    termination.errorMessage = errorStoppingAppHostWatcher(String(error));
                     this._updatePsCleanupError();
                     throw error;
                 }),
@@ -193,16 +219,12 @@ export class AppHostPsPoller implements vscode.Disposable {
     }
 
     private _updatePsCleanupError(): void {
-        // A successful snapshot or a pending retry does not establish that the old tree exited.
-        // Keep its cleanup failure independent of data-fetch errors until ownership is released.
         const failure = Array.from(this._psProcessTerminations.values())
             .find(termination => termination.errorMessage !== undefined);
         this._onDidChangePsCleanupError.fire(failure?.errorMessage);
     }
 
     private async _waitForPsProcessTerminations(): Promise<void> {
-        // One failed cleanup must not let deactivation leave while another owned tree is
-        // still terminating, including a concurrent authoritative snapshot process.
         const results = await Promise.allSettled(Array.from(this._psProcessTerminations.values(), termination => termination.promise));
         const failures = results
             .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -277,6 +299,7 @@ export class AppHostPsPoller implements vscode.Disposable {
                     return;
                 }
 
+                this._recordAuthoritativeSnapshotFollowOutput(line);
                 this._onDidChangePsError.fire(undefined);
                 this._onDidReceivePsOutput.fire({ stdout: line, canCompleteGlobalLoading: false });
             },
@@ -373,6 +396,10 @@ export class AppHostPsPoller implements vscode.Disposable {
         this._authoritativeSnapshotInProgress = true;
         const snapshotRequestId = ++this._authoritativeSnapshotRequestId;
         this._activeAuthoritativeSnapshotRequestId = snapshotRequestId;
+        this._authoritativeSnapshotFollowOutputs.length = 0;
+        this._authoritativeSnapshotFollowOutputsOverflowed = false;
+        this._authoritativeSnapshotCaptured = false;
+        this._authoritativeSnapshotContested = false;
         const isCurrentSnapshot = () => this._activeAuthoritativeSnapshotRequestId === snapshotRequestId
             && !this._disposed
             && (force || this._isDataActive());
@@ -385,6 +412,10 @@ export class AppHostPsPoller implements vscode.Disposable {
 
             if (pollingGeneration !== this._psPollingGeneration) {
                 this._activeAuthoritativeSnapshotRequestId = undefined;
+                this._authoritativeSnapshotFollowOutputs.length = 0;
+                this._authoritativeSnapshotFollowOutputsOverflowed = false;
+                this._authoritativeSnapshotCaptured = false;
+                this._authoritativeSnapshotContested = false;
                 this._authoritativeSnapshotInProgress = false;
                 return;
             }
@@ -392,7 +423,25 @@ export class AppHostPsPoller implements vscode.Disposable {
             if (!this._disposed && (force || this._isDataActive())) {
                 if (code === 0) {
                     this._onDidChangePsError.fire(undefined);
-                    this._onDidReceivePsOutput.fire({ stdout, canCompleteGlobalLoading: true });
+                    if (this._authoritativeSnapshotFollowOutputsOverflowed || this._authoritativeSnapshotContested) {
+                        // The replay window cannot be trusted, so applying the snapshot could
+                        // overwrite newer follow state. Overflow queues a retry to reconcile once
+                        // activity settles, without retaining an unbounded history. Contention is
+                        // deliberately left to the polling timer instead: a delta landing inside the
+                        // snapshot's startup window is common enough that retrying immediately could
+                        // spawn `aspire ps` in a tight loop, and a contested window is itself proof
+                        // that follow is delivering, which is when reconciliation matters least.
+                        this._onDidRequestClearLoading.fire();
+                    }
+                    else {
+                        // Apply the authoritative snapshot to recover AppHosts whose follow delta was
+                        // missed, then replay deltas through the repository's canonical instance matcher.
+                        this._onDidReceivePsOutput.fire({
+                            stdout,
+                            canCompleteGlobalLoading: true,
+                            followOutputsToReplay: [...this._authoritativeSnapshotFollowOutputs],
+                        });
+                    }
                 } else {
                     this._onDidRequestClearLoading.fire();
                     this._onDidChangePsError.fire(errorFetchingAppHosts(stderr || `exit code ${code}`));
@@ -400,6 +449,10 @@ export class AppHostPsPoller implements vscode.Disposable {
             }
 
             this._activeAuthoritativeSnapshotRequestId = undefined;
+            this._authoritativeSnapshotFollowOutputs.length = 0;
+            this._authoritativeSnapshotFollowOutputsOverflowed = false;
+            this._authoritativeSnapshotCaptured = false;
+            this._authoritativeSnapshotContested = false;
             this._authoritativeSnapshotInProgress = false;
             if (this._authoritativeSnapshotPending) {
                 const pendingForce = this._authoritativeSnapshotPendingForce;
@@ -407,14 +460,61 @@ export class AppHostPsPoller implements vscode.Disposable {
                 this._authoritativeSnapshotPendingForce = false;
                 this.refreshAppHostsFromAuthoritativeSnapshot(pendingForce);
             }
-        }, { force, isCurrent: isCurrentSnapshot });
+        }, {
+            force,
+            isCurrent: isCurrentSnapshot,
+            // `aspire ps` enumerates and then writes its JSON, so the first byte of output is a
+            // safe lower bound for when the snapshot was captured. Deltas observed from that point
+            // on are provably newer than the snapshot and are replayed over it; deltas observed
+            // before it are unorderable and abandon the snapshot instead, which is handled in
+            // `_recordAuthoritativeSnapshotFollowOutput`.
+            onFirstStdout: () => {
+                if (this._activeAuthoritativeSnapshotRequestId === snapshotRequestId) {
+                    this._authoritativeSnapshotCaptured = true;
+                }
+            },
+            onAttemptRestart: () => {
+                if (this._activeAuthoritativeSnapshotRequestId === snapshotRequestId) {
+                    this._authoritativeSnapshotCaptured = false;
+                    this._authoritativeSnapshotContested = false;
+                    this._authoritativeSnapshotFollowOutputs.length = 0;
+                    this._authoritativeSnapshotFollowOutputsOverflowed = false;
+                }
+            },
+        });
+    }
+
+    private _recordAuthoritativeSnapshotFollowOutput(line: string): void {
+        if (this._activeAuthoritativeSnapshotRequestId === undefined) {
+            return;
+        }
+
+        if (!this._authoritativeSnapshotCaptured) {
+            // This delta cannot be ordered against the snapshot. It was observed before the first
+            // byte of output, but the CLI had already enumerated at some unknown instant inside
+            // that window, so the delta is either newer than the snapshot or older than it and
+            // there is no evidence to tell which. Replaying it could resurrect an AppHost the
+            // snapshot deliberately omits; dropping it lets the snapshot overwrite a stop that
+            // really did happen after enumeration. The snapshot is abandoned instead, leaving the
+            // live follow state in place until a later snapshot lands on an uncontested window.
+            this._authoritativeSnapshotContested = true;
+            return;
+        }
+
+        if (this._authoritativeSnapshotFollowOutputs.length < AppHostPsPoller._authoritativeSnapshotFollowOutputLimit) {
+            this._authoritativeSnapshotFollowOutputs.push(line);
+        }
+        else {
+            this._authoritativeSnapshotFollowOutputsOverflowed = true;
+            this._authoritativeSnapshotPending = true;
+        }
     }
 
     private _isCurrentPsFetch(fetchVersion: number): boolean {
         return !this._disposed && this._isDataActive() && fetchVersion === this._psFetchVersion;
     }
 
-    private async _runPsCommand(args: string[], callback: (code: number, stdout: string, stderr: string) => void, options?: { fetchVersion?: number; force?: boolean; isCurrent?: () => boolean }): Promise<void> {
+    private async _runPsCommand(args: string[], callback: (code: number, stdout: string, stderr: string) => void, options?: { fetchVersion?: number; force?: boolean; isCurrent?: () => boolean; onFirstStdout?: () => void; onAttemptRestart?: () => void }): Promise<void> {
         const fetchVersion = options?.fetchVersion;
         const force = options?.force === true;
         const isCurrentPsCommand = () => {
@@ -470,7 +570,13 @@ export class AppHostPsPoller implements vscode.Disposable {
         psProcess = spawnCliProcess(this._terminalProvider, cliPath, invocationArgs, {
             createProcessGroup: true,
             noExtensionVariables: true,
-            stdoutCallback: (data) => { stdout += data; },
+            stdoutCallback: (data) => {
+                if (stdout.length === 0 && data.length > 0) {
+                    options?.onFirstStdout?.();
+                }
+
+                stdout += data;
+            },
             stderrCallback: (data) => { stderr += data; },
             exitCallback: (code) => {
                 removePsProcess();
@@ -478,6 +584,10 @@ export class AppHostPsPoller implements vscode.Disposable {
                     if ((code ?? 1) !== 0) {
                         const retryArgs = this._cliRunner.tryGetNoLogoRetryArgs(cliPath, invocationArgs, stdout, stderr, 'aspire ps');
                         if (retryArgs) {
+                            // A rejected --nologo can report itself on stdout, which already fired
+                            // onFirstStdout for an attempt that produced no snapshot. Let the caller
+                            // drop that false capture so the retry's window starts from its own output.
+                            options?.onAttemptRestart?.();
                             this._runPsCommand(retryArgs, callback, options);
                             return;
                         }
@@ -525,9 +635,8 @@ export class AppHostPsPoller implements vscode.Disposable {
     }
 
     dispose(): void {
-        void this.shutdown().catch(error => {
-            extensionLogOutputChannel.error(`Failed to shut down aspire ps: ${String(error)}`);
-        });
+        // Individual failures are already logged; shutdown callers still receive their rejection.
+        void this.shutdown().catch(() => undefined);
     }
 }
 

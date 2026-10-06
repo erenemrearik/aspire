@@ -10,6 +10,9 @@ import { AspireEditorCommandProvider } from './editor/AspireEditorCommandProvide
 import type { AspireDebugConsoleOutputEvent } from './types/extensionApi';
 import { extensionLogOutputChannel } from './utils/logging';
 import type { AppHostDataRepository } from './data/AppHostDataRepository';
+import { resetEditorAssistanceWindowState } from './services/editorAssistanceWindowState';
+import { type EditorResourceSessionSnapshot } from './services/appHostLaunchContracts';
+import { getOrCreateIdentityForCurrentAppHostTarget, type OpaqueAppHostIdentity } from './utils/appHostIdentity';
 
 export class AspireExtensionContext implements vscode.Disposable {
     private static readonly _cliStopTimeoutMs = 5_000;
@@ -80,6 +83,48 @@ export class AspireExtensionContext implements vscode.Disposable {
         // Disposed sessions can remain tracked only as CLI process owners. They must still be
         // visible to deactivation, but not to RPC lookups or extension-state snapshots.
         return this._aspireDebugSessions.filter(session => !session.isDisposed);
+    }
+
+    get editorResourceSessions(): readonly EditorResourceSessionSnapshot[] {
+        return this.aspireDebugSessions.flatMap(session =>
+            session.editorResourceSessions.map(resourceSession => ({
+                appHostPath: resourceSession.appHostPath,
+                ...(resourceSession.appHostIdentity === undefined
+                    ? {}
+                    : { appHostIdentity: resourceSession.appHostIdentity }),
+                targetPath: resourceSession.targetPath,
+                ...(resourceSession.resourceExecutablePaths === undefined
+                    ? {}
+                    : { resourceExecutablePaths: [...resourceSession.resourceExecutablePaths] }),
+                state: resourceSession.state,
+                mode: resourceSession.mode,
+            })));
+    }
+
+    getAspireDebugSessionsForAppHostIdentity(identity: OpaqueAppHostIdentity): readonly AspireDebugSession[] {
+        return this.aspireDebugSessions.filter(session => {
+            const appHostPath = session.resolvedAppHostPath ?? session.appHostPath;
+            return session.operationKind === 'run' &&
+                appHostPath !== undefined &&
+                (session.appHostIdentity ?? getOrCreateIdentityForCurrentAppHostTarget(appHostPath)) === identity;
+        });
+    }
+
+    getAspireDebugSessionDashboardOwners(): readonly {
+        readonly appHostIdentity: OpaqueAppHostIdentity;
+        readonly session: AspireDebugSession;
+    }[] {
+        return this.aspireDebugSessions.flatMap(session => {
+            const appHostPath = session.resolvedAppHostPath ?? session.appHostPath;
+            if (session.operationKind !== 'run' || appHostPath === undefined) {
+                return [];
+            }
+
+            return [{
+                appHostIdentity: session.appHostIdentity ?? getOrCreateIdentityForCurrentAppHostTarget(appHostPath),
+                session,
+            }];
+        });
     }
 
     addAspireDebugSession(debugSession: AspireDebugSession) {
@@ -205,7 +250,6 @@ export class AspireExtensionContext implements vscode.Disposable {
             return [];
         }
         catch (error) {
-            extensionLogOutputChannel.error(`Failed to stop AppHost data sources during extension deactivation: ${String(error)}`);
             return [error];
         }
     }
@@ -416,6 +460,7 @@ export class AspireExtensionContext implements vscode.Disposable {
 
         this._isDisposed = true;
         this._dataRepository?.dispose();
+        resetEditorAssistanceWindowState();
         this._debugSessionStateSubscriptions.forEach(disposable => disposable.dispose());
         this._debugSessionStateSubscriptions.clear();
         this._debugSessionOutputSubscriptions.forEach(disposable => disposable.dispose());
