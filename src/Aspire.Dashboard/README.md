@@ -19,6 +19,15 @@ including replica names; resource values, endpoints, and other configuration are
 Paste the file contents into a `mermaid` code block in Markdown or open the file with a Mermaid-compatible viewer.
 The export captures the graph at that moment; it does not include the interactive graph's layout or live state.
 
+To export from the command line instead, run:
+
+```bash
+aspire resources --format mermaid >> file.txt
+```
+
+This exports a snapshot of the running AppHost's resources, excluding hidden resources by default. Use `--include-hidden`
+to include them. The CLI also accepts `aspire describe --format mermaid`; `--follow` is not supported for this format.
+
 ## Security considerations
 
 The dashboard can display sensitive information, including resource configuration, environment variables, console logs, and telemetry. Secure the dashboard and its endpoints whenever they are accessible beyond a trusted local development environment.
