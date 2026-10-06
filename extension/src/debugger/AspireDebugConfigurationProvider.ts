@@ -266,15 +266,14 @@ export class AspireDebugConfigurationProvider implements vscode.DebugConfigurati
                 ?? projectDebuggerSettings?.disableLaunchProfile;
             const hasNestedLaunchProfileOptions = nestedDisableLaunchProfile === true
                 || nestedLaunchProfile !== undefined;
-            let effectiveLaunchProfile = hasNestedLaunchProfileOptions
+            const cliOwnsDotnetAppHostLaunch = command === 'run'
+                && effectiveAppHostLanguage === 'csharp'
+                && !isCsharpInstalled();
+            const canForwardNestedLaunchProfile = cliOwnsDotnetAppHostLaunch
+                && nestedDisableLaunchProfile !== true;
+            const effectiveLaunchProfile = hasNestedLaunchProfileOptions && !canForwardNestedLaunchProfile
                 ? undefined
-                : aspireConfig.launchProfile;
-            if (command === 'run' &&
-                effectiveAppHostLanguage === 'csharp' &&
-                !isCsharpInstalled() &&
-                nestedDisableLaunchProfile !== true) {
-                effectiveLaunchProfile = nestedLaunchProfile ?? aspireConfig.launchProfile;
-            }
+                : nestedLaunchProfile ?? aspireConfig.launchProfile;
             const rootArguments = Array.isArray(config.args) ? [...config.args] : undefined;
             const launchArguments = hasNestedLaunchProfileOptions
                 ? removeRootLaunchProfileCliArg(rootArguments)

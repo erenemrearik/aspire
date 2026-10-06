@@ -24,10 +24,6 @@ An **AppHost** defines your app in code: services, containers, databases, front 
 - **Monitor without leaving VS Code:** See resource health summaries and quick actions beside resource definitions in your AppHost.
 - **Move toward production.** Deploy, publish artifacts, and run pipeline steps using the Aspire view.
 
-## AppHost launch profiles
-
-When running a .NET AppHost, `debuggers.apphost.launchProfile` takes precedence over `debuggers.project.launchProfile` and top-level `launchProfile`. The selected profile is honored whether the C# extension is enabled, disabled, or not installed. CLI-owned launches require a CLI that supports `--launch-profile`; unsupported versions report an error instead of ignoring the selection.
-
 ## Bring your stack
 
 Aspire can bring together C#, TypeScript and JavaScript, Python, Go, Java, containers, databases, cloud resources, and more. Browse the [integration gallery](https://aspire.dev/integrations/gallery/) to find the pieces your app needs.
