@@ -10,16 +10,27 @@ The dashboard shows:
 
 ## SQL visualization
 
-The text visualizer highlights query-only fields in structured logs and spans as SQL.
+The text visualizer highlights recognized query fields in structured logs and spans as SQL.
 It recognizes `db.query.text` and the legacy `db.statement` semantic conventions,
-using `db.system.name` or `db.system` to avoid highlighting queries for non-SQL databases.
-It also recognizes field names such as `commandText`, `queryText`, `sql`, `sqlQuery`,
-`sqlStatement`, `sql.query`, and `sql.statement`, ignoring case.
-Entire log messages are not automatically highlighted as SQL.
+as well as field names such as `commandText`, `queryText`, `sql`, `sqlQuery`,
+`sqlStatement`, `sql.query`, and `sql.statement`, ignoring case for these additional names.
+For fields that can contain non-SQL queries, `db.system.name` or legacy `db.system`
+is used when present to restrict automatic SQL highlighting to known SQL databases.
+Structured-log attribute detection is limited to logger categories starting with
+`Microsoft.EntityFrameworkCore`, `Npgsql`, or `MySqlConnector`; span attribute
+detection does not require a logger category.
 
-SQL can also be selected manually in the visualizer's format dropdown. Like Markdown,
-it is available when the content is not detected as JSON or XML. SQL highlighting
-preserves the original query text and does not reformat it.
+Entire command-log messages are also automatically highlighted as SQL for logger
+categories starting with `Microsoft.EntityFrameworkCore.Database.Command`,
+`Npgsql.Command`, `MySqlConnector.MySqlCommand`, or `NHibernate.SQL`. This applies
+to the Message property in log details and the View message action. The full message,
+including any timing, parameter, or other metadata, is preserved rather than extracting SQL.
+
+An explicit initial SQL format takes precedence over automatic JSON/XML detection.
+Users can still change the format in the visualizer's dropdown. Without an explicit
+format, existing JSON/XML detection applies, and SQL and Markdown can be selected
+manually for content that is not detected as JSON or XML. SQL highlighting preserves
+the original text and does not reformat it.
 
 ## Security considerations
 
