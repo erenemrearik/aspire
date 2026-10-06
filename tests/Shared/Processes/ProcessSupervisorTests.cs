@@ -82,6 +82,34 @@ public class ProcessSupervisorTests(ProcessTestFixture fixture)
         await Task.WhenAll(identities.Select(ProcessTestFixture.AssertExitedAsync));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecutionWithoutScope_ReapsDescendantsAfterGuardianExit(bool cancel)
+    {
+        using var readiness = new ProcessTestReadiness();
+        await using var guardian = ProcessTestFixture.CreateProcess(fixture.CreateSupervisorStartInfo(
+            fixture.CreateStartInfo("tree", readiness.Name)), new ChildProcessOptions());
+        await guardian.StartAsync(TestContext.Current.CancellationToken);
+        var identities = await readiness.ReadTreeAsync();
+        if (cancel)
+        {
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => guardian.WaitForExitAsync(cancellation.Token));
+        }
+        else
+        {
+            using var observedGuardian = Process.GetProcessById(guardian.ProcessId);
+            observedGuardian.Kill(entireProcessTree: false);
+        }
+
+        // Execution itself must verify containment. No supervising owner wrapper
+        // should be required to reap orphaned workers.
+        await guardian.DisposeAsync();
+        await Task.WhenAll(identities.Select(ProcessTestFixture.AssertExitedAsync));
+    }
+
     [Fact]
     public async Task OwnerCrash_GuardianIndependentlyReapsRuntimeAndWorker()
     {

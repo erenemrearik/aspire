@@ -14,6 +14,7 @@ import {
     type AspireExportedFunction,
     type AspireExportMetadata,
     type AspireIntegrationDefinition,
+    type AspireCapabilityParameter,
 } from './base.mjs';
 import { AspireClient, CancellationToken, wrapIfHandle, type AspireClientRpc } from './transport.mjs';
 
@@ -97,16 +98,32 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
 
     // Callback relay — when an integration calls a guest-owned callback, we
     // route it through the AppHost server's invokeGuestCallback method.
-    const invokeGuestCallback = async <TResult,>(callbackId: string, positionalArgs: readonly unknown[]): Promise<TResult> => {
+    const invokeGuestCallback = async (callbackId: string, positionalArgs: readonly unknown[], projection: AspireCapabilityParameter): Promise<unknown> => {
         const callArgs: JsonObject = {};
         for (let i = 0; i < positionalArgs.length; i++) {
             callArgs[`p${i}`] = positionalArgs[i];
         }
         log(`Invoking guest callback ${callbackId} (${positionalArgs.length} positional arg(s))`);
         try {
-            const result = await connection.sendRequest<TResult>('invokeGuestCallback', callbackId, callArgs);
+            const result = await connection.sendRequest<unknown>('invokeGuestCallback', callbackId, callArgs);
             log(`Guest callback ${callbackId} completed`);
-            return wrapIfHandle(result, client) as TResult;
+            if (projection.callbackReturnType?.typeId === 'void') {
+                // Void callbacks return { p0: modifiedDto, p1: ... }. Only projected DTO
+                // parameters participate in writeback; handle arguments remain server-owned.
+                if (typeof result === 'object' && result !== null && !Array.isArray(result)) {
+                    for (const [index, parameter] of (projection.callbackParameters ?? []).entries()) {
+                        const original = positionalArgs[index];
+                        const modified = (result as JsonObject)[`p${index}`];
+                        if (parameter.type.category === 'Dto'
+                            && typeof original === 'object' && original !== null && !Array.isArray(original)
+                            && typeof modified === 'object' && modified !== null && !Array.isArray(modified)) {
+                            Object.assign(original, wrapIfHandle(modified, client));
+                        }
+                    }
+                }
+                return undefined;
+            }
+            return wrapIfHandle(result, client);
         } catch (error) {
             log(`Guest callback ${callbackId} failed: ${error instanceof Error ? error.message : String(error)}`);
             throw error;
@@ -166,7 +183,7 @@ export async function runIntegrationHost(host: IntegrationHostDefinition): Promi
                 if (param.isCallback && typeof wrappedArgs[param.name] === 'string') {
                     const callbackId = wrappedArgs[param.name] as string;
                     wrappedArgs[param.name] = async (...callbackArgs: unknown[]) =>
-                        invokeGuestCallback(callbackId, callbackArgs);
+                        invokeGuestCallback(callbackId, callbackArgs, param);
                 }
                 if (param.type?.typeId === 'cancellationToken') {
                     wrappedArgs[param.name] = CancellationToken.from(controller.signal);

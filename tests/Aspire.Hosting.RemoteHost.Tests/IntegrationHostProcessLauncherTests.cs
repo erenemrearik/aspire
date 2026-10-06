@@ -79,7 +79,8 @@ public class IntegrationHostProcessLauncherTests(ITestOutputHelper output)
         {
             ["REMOTE_APP_HOST_SOCKET_PATH"] = "test-socket",
             [RemoteHostKnownConfigNames.RemoteAppHostToken] = "test-token",
-            ["IntegrationHost:OutputDrainIdleTimeout"] = "00:00:10"
+            ["IntegrationHost:OutputDrainIdleTimeout"] = "00:00:10",
+            ["IntegrationHost:ShutdownTimeout"] = "00:00:12"
         }).Build());
         var launcher = new IntegrationHostProcessLauncher(
             new LanguageSupportResolver(services, () => [typeof(TestIntegrationLanguageSupport).Assembly], NullLogger<LanguageSupportResolver>.Instance),
@@ -109,6 +110,7 @@ public class IntegrationHostProcessLauncherTests(ITestOutputHelper output)
         var options = Assert.IsType<ChildProcessOptions>(factory.Options);
         Assert.Same(clock, options.TimeProvider);
         Assert.Equal(TimeSpan.FromSeconds(10), options.OutputDrainIdleTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(12), options.TerminationTimeout);
         Assert.Collection(logger.Entries,
             entry => Assert.Equal(LogLevel.Information, entry.Level),
             entry =>

@@ -56,6 +56,7 @@ internal sealed class IntegrationHostProcessLauncher(
             var execution = processFactory.Create(ProcessSupervisor.CreateStartInfo(startInfo, null, configuration.ShutdownTimeout), logger, new ChildProcessOptions
             {
                 TimeProvider = timeProvider,
+                TerminationTimeout = configuration.ShutdownTimeout,
                 OutputDrainIdleTimeout = configuration.OutputDrainIdleTimeout,
                 StandardOutputCallback = line => logger.LogInformation("IntegrationHost[{Name}]: {Line}", descriptor.PackageName, line),
                 StandardErrorCallback = line => logger.LogWarning("IntegrationHost[{Name}]: {Line}", descriptor.PackageName, line)
@@ -66,7 +67,7 @@ internal sealed class IntegrationHostProcessLauncher(
                 {
                     throw new InvalidOperationException($"Could not start integration host '{descriptor.PackageName}'.");
                 }
-                var process = new ProcessScope(execution, logger, descriptor.PackageName, configuration.ShutdownTimeout, timeProvider);
+                var process = new ProcessScope(execution, logger, descriptor.PackageName);
                 activity.SetIntegrationHostProcessId(process.ProcessId);
                 logger.LogInformation("Started integration host supervisor '{Name}' (PID {Pid}).", descriptor.PackageName, process.ProcessId);
 

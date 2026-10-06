@@ -20,7 +20,7 @@ public class ProcessScopeTests
             (_, _, _) => Task.FromResult((0, (string?)null)), () => 1)
         {
             ProcessId = int.MaxValue,
-            WaitForExitAsyncCallback = (_, _) => Task.FromException<int>(cleanupFailure)
+            DisposeCallback = () => throw cleanupFailure
         };
         await execution.StartAsync(TestContext.Current.CancellationToken);
         var scope = new ProcessScope(execution, NullLogger.Instance, "test installation");
@@ -31,38 +31,40 @@ public class ProcessScopeTests
             failure => Assert.Same(operationFailure, failure),
             failure => Assert.Same(cleanupFailure, failure));
         Assert.Equal(1, execution.DisposeCount);
-        Assert.Equal(1, execution.KillCount);
+        Assert.Equal(0, execution.KillCount);
     }
 
     [Fact]
-    public async Task WaitForExitAsync_PreservesCancellationAndTerminationFailures()
+    public async Task WaitForExitAsync_ForwardsExecutionCancellationAndTerminationFailures()
     {
         var terminationFailure = new InvalidOperationException("Could not terminate guardian.");
-        var rootExit = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var cancellationFailure = new OperationCanceledException(cancellation.Token);
+        var executionFailure = new AggregateException(cancellationFailure, terminationFailure);
         var execution = new TestProcessExecution(
             "guardian", [], null, new ProcessInvocationOptions(),
             (_, _, _) => Task.FromResult((0, (string?)null)), () => 1)
         {
             ProcessId = int.MaxValue,
-            WaitForExitAsyncCallback = (_, _) => rootExit.Task,
-            KillCallback = _ => throw terminationFailure
+            WaitForExitAsyncCallback = (_, token) => token.IsCancellationRequested
+                ? Task.FromException<int>(executionFailure)
+                : Task.FromResult(0)
         };
         await execution.StartAsync(TestContext.Current.CancellationToken);
         var scope = new ProcessScope(execution, NullLogger.Instance, "cancelled installation");
         try
         {
-            using var cancellation = new CancellationTokenSource();
-            cancellation.Cancel();
-
             var exception = await Assert.ThrowsAsync<AggregateException>(() => scope.WaitForExitAsync(cancellation.Token));
 
+            Assert.Same(executionFailure, exception);
             Assert.Collection(exception.InnerExceptions,
-                failure => Assert.IsAssignableFrom<OperationCanceledException>(failure),
+                failure => Assert.Same(cancellationFailure, failure),
                 failure => Assert.Same(terminationFailure, failure));
+            Assert.Equal(0, execution.KillCount);
         }
         finally
         {
-            rootExit.TrySetResult(0);
             await scope.DisposeAsync();
         }
     }

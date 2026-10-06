@@ -5,6 +5,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Aspire.TestUtilities;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Testing;
 using Xunit;
 
 namespace Aspire.Shared.Tests;
@@ -139,6 +141,102 @@ public class ChildProcessTests(ProcessTestFixture fixture)
         await observedProcess.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.True(observedProcess.HasExited);
         await process.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Shutdown_UsesSharedGracefulBudgetAndEscalates(bool dispose, bool signalFailure)
+    {
+        using var readiness = new ProcessTestReadiness();
+        using var gracefulBudget = new CancellationTokenSource();
+        using var cancellation = new CancellationTokenSource();
+        var signaled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sink = new TestSink();
+        var signalCount = 0;
+        var budgetCount = 0;
+        var signaledPid = 0;
+        var signalToken = CancellationToken.None;
+        await using var process = ProcessTestFixture.CreateProcess(fixture.CreateStartInfo("wait", readiness.Name),
+            new TestLogger("shared shutdown", sink, enabled: true),
+            new ChildProcessOptions
+            {
+                BeginGracefulShutdown = () =>
+                {
+                    Interlocked.Increment(ref budgetCount);
+                    return gracefulBudget.Token;
+                },
+                RequestGracefulShutdownAsync = (pid, token) =>
+                {
+                    Interlocked.Increment(ref signalCount);
+                    signaledPid = pid;
+                    signalToken = token;
+                    signaled.TrySetResult();
+                    return signalFailure
+                        ? Task.FromException(new InvalidOperationException("test signal failure"))
+                        : Task.CompletedTask;
+                }
+            });
+        await process.StartAsync(TestContext.Current.CancellationToken);
+        var identity = await readiness.ReadRuntimeAsync();
+        cancellation.Cancel();
+        var shutdown = dispose
+            ? process.DisposeAsync().AsTask()
+            : Assert.ThrowsAnyAsync<OperationCanceledException>(() => process.WaitForExitAsync(cancellation.Token));
+        try
+        {
+            await signaled.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+            Assert.False(shutdown.IsCompleted);
+            Assert.Equal(1, budgetCount);
+            Assert.Equal(1, signalCount);
+            Assert.Equal(identity.ProcessId, signaledPid);
+            Assert.Equal(gracefulBudget.Token, signalToken);
+        }
+        finally
+        {
+            gracefulBudget.Cancel();
+        }
+        await shutdown.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await ProcessTestFixture.AssertExitedAsync(identity);
+        if (signalFailure)
+        {
+            var entry = Assert.Single(sink.Writes, entry => entry.Exception?.Message == "test signal failure");
+            Assert.Equal(LogLevel.Warning, entry.LogLevel);
+        }
+    }
+
+    [Fact]
+    public async Task WaitForExitAsync_PreservesCancellationAndShutdownFailure()
+    {
+        using var readiness = new ProcessTestReadiness();
+        using var cancellation = new CancellationTokenSource();
+        var shutdownFailure = new InvalidOperationException("test graceful window failure");
+        var sink = new TestSink();
+        var budgetCount = 0;
+        await using var process = ProcessTestFixture.CreateProcess(fixture.CreateStartInfo("wait", readiness.Name),
+            new TestLogger("failed shutdown", sink, enabled: true),
+            new ChildProcessOptions
+            {
+                BeginGracefulShutdown = () => Interlocked.Increment(ref budgetCount) == 1
+                    ? throw shutdownFailure
+                    : null,
+                RequestGracefulShutdownAsync = (_, _) => Task.CompletedTask
+            });
+        await process.StartAsync(TestContext.Current.CancellationToken);
+        var identity = await readiness.ReadRuntimeAsync();
+        cancellation.Cancel();
+
+        var exception = await Assert.ThrowsAsync<AggregateException>(() => process.WaitForExitAsync(cancellation.Token));
+
+        Assert.Collection(exception.InnerExceptions,
+            failure => Assert.Equal(cancellation.Token, Assert.IsAssignableFrom<OperationCanceledException>(failure).CancellationToken),
+            failure => Assert.Same(shutdownFailure, failure));
+        var entry = Assert.Single(sink.Writes, entry => ReferenceEquals(entry.Exception, shutdownFailure));
+        Assert.Equal(LogLevel.Error, entry.LogLevel);
+        await process.DisposeAsync();
+        await ProcessTestFixture.AssertExitedAsync(identity);
     }
 
 #if NET11_0_OR_GREATER

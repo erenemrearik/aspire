@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AspireExport, defineIntegration } from '@aspire/base';
-import { CancellationToken, Handle, registerCallback, registerCancellation, registerHandleWrapper, unregisterCallback, type AspireClientRpc } from '@aspire/transport';
+import { CancellationToken, Handle, invokeRegisteredCallback, registerCallback, registerCancellation, registerHandleWrapper, unregisterCallback, type AspireClientRpc } from '@aspire/transport';
 import { runIntegrationHost } from '../../../src/Aspire.Hosting.CodeGeneration.TypeScript/Resources/integration-host.mts';
 
 const { onRequest, sendRequest, onClose } = vi.hoisted(() => ({
@@ -41,6 +41,81 @@ describe('integration host callback relay', () => {
         vi.unstubAllEnvs();
         vi.restoreAllMocks();
         vi.clearAllMocks();
+    });
+
+    it.each(['void', 'string'] as const)('applies DTO writeback only for a %s callback across a serialized round trip', async (returnType) => {
+        vi.stubEnv('REMOTE_APP_HOST_SOCKET_PATH', 'integration-test-socket');
+        vi.stubEnv('ASPIRE_REMOTE_APPHOST_TOKEN', 'integration-test-token');
+        vi.stubEnv('ASPIRE_INTEGRATION_HOST_REGISTRATION_ID', 'integration-test-registration');
+        vi.spyOn(process, 'on').mockReturnValue(process);
+        vi.spyOn(console, 'log').mockImplementation(() => {});
+        let client!: AspireClientRpc;
+        registerHandleWrapper('test/DtoClient', (_handle, transport) => {
+            client = transport;
+            return transport;
+        });
+        const options = { name: 'default', untouched: 'retained', nested: { value: 'original' } };
+        const second = { name: 'second' };
+        const nonDto = { name: 'not-a-dto' };
+        const callbackId = registerCallback((first: typeof options, other: typeof second, unprojected: typeof nonDto, nullable: unknown) => {
+            first.name = 'configured-by-guest';
+            first.nested = { value: 'configured' };
+            other.name = 'second-configured';
+            unprojected.name = 'must-not-write-back';
+            expect(nullable).toBeNull();
+            return returnType === 'string' ? 'callback-result' : undefined;
+        });
+        sendRequest.mockImplementation(async (method: string, id: string, args: unknown) => {
+            if (method !== 'invokeGuestCallback') {
+                return true;
+            }
+            // Serialize both ways so a shared object cannot make a missing writeback pass.
+            const response = await invokeRegisteredCallback(id, JSON.parse(JSON.stringify(args)), client);
+            return JSON.parse(JSON.stringify(response));
+        });
+        const capability = AspireExport({
+            id: 'test/dtoWriteback',
+            method: 'dtoWriteback',
+            description: 'Exercise callback DTO writeback',
+            projection: {
+                parameters: [{
+                    name: 'configure',
+                    isCallback: true,
+                    callbackReturnType: { typeId: returnType, category: 'Primitive' },
+                    callbackParameters: [
+                        { name: 'options', type: { typeId: 'test/Options', category: 'Dto' } },
+                        { name: 'second', type: { typeId: 'test/Options', category: 'Dto' } },
+                        { name: 'other', type: { typeId: 'object', category: 'Unknown' } },
+                        { name: 'nullable', type: { typeId: 'test/Options', category: 'Dto', isNullable: true } },
+                    ],
+                }],
+            },
+        }, async ({ configure }: { configure: (...args: unknown[]) => Promise<unknown> }) => {
+            const result = await configure(options, second, nonDto, null);
+            return { result, options, second, nonDto };
+        });
+        try {
+            await runIntegrationHost({
+                packageName: 'test-host',
+                integrations: [defineIntegration({ name: 'test', capabilities: [capability] })],
+            });
+            const handler = onRequest.mock.calls.find(([method]) =>
+                typeof method === 'object' && method.method === 'handleExternalCapability')![1];
+            const response = await handler('test/dtoWriteback', {
+                configure: callbackId,
+                probe: { $handle: 'client', $type: 'test/DtoClient' },
+            });
+            expect(response.result).toBe(returnType === 'void' ? undefined : 'callback-result');
+            expect(options).toEqual({
+                name: returnType === 'void' ? 'configured-by-guest' : 'default',
+                untouched: 'retained',
+                nested: { value: returnType === 'void' ? 'configured' : 'original' },
+            });
+            expect(second).toEqual({ name: returnType === 'void' ? 'second-configured' : 'second' });
+            expect(nonDto).toEqual({ name: 'not-a-dto' });
+        } finally {
+            unregisterCallback(callbackId);
+        }
     });
 
     it.each(['handle', 'nested'] as const)('wraps a %s callback result before invoking integration code', async (shape) => {

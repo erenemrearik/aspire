@@ -19,6 +19,31 @@ public sealed class ProcessExecutionTests(ITestOutputHelper outputHelper)
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task WaitForExitAsync_UsesGracefulPolicyAtShutdown(bool enabled)
+    {
+        using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);
+        var scriptFile = await CreateLongRunningScriptAsync(workspace.WorkspaceRoot);
+        using var shutdownService = new TestGracefulShutdownWindow { IsEnabled = !enabled };
+        var signaler = new RecordingGracefulSignaler(onSignal: pid =>
+        {
+            TryKillProcess(pid);
+            return Task.FromResult(true);
+        });
+        await using var execution = CreateExecution(scriptFile, isolateConsole: false, signaler, shutdownService);
+        await execution.StartAsync(TestContext.Current.CancellationToken);
+        shutdownService.IsEnabled = enabled;
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution.WaitForExitAsync(cancellation.Token));
+
+        Assert.True(execution.HasExited);
+        Assert.Equal(enabled ? [execution.ProcessId] : Array.Empty<int>(), signaler.Pids);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task WaitForExitAsync_WithGracefulServices_InvokesSignalerAndThrowsOnCancellation(bool isolateConsole)
     {
         using var workspace = TemporaryWorkspace.CreateForCli(outputHelper);

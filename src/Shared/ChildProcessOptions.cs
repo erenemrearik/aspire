@@ -9,10 +9,16 @@ namespace Aspire.Shared;
 internal sealed class ChildProcessOptions
 {
     /// <summary>
-    /// Gets the clock used for output-drain deadlines.
+    /// Gets the clock used for output-drain and termination deadlines.
     /// </summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
     public TimeSpan OutputDrainIdleTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan TerminationTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// Begins the caller's graceful window, or returns null to terminate immediately.
+    /// </summary>
+    public Func<CancellationToken?>? BeginGracefulShutdown { get; init; }
+    public Func<int, CancellationToken, Task>? RequestGracefulShutdownAsync { get; init; }
 
     public Action<string>? StandardOutputCallback { get; init; }
     public Action<string>? StandardErrorCallback { get; init; }

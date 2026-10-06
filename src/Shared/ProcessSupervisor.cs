@@ -124,10 +124,9 @@ internal static partial class ProcessSupervisor
         // Inherit the guardian's pipes rather than adding another output pump. Diagnostics go
         // directly to the owner even when the guardian must kill its own Unix process group.
         var process = new ChildProcess(
-            startInfo, logger, new ChildProcessOptions(), OperatingSystem.IsWindows());
+            startInfo, logger, new ChildProcessOptions { TerminationTimeout = terminationTimeout }, OperatingSystem.IsWindows());
         await using var processLifetime = process.ConfigureAwait(false);
 
-        var started = false;
         try
         {
             if (!ProcessStartTimeHelper.IsProcessRunning(parentId, parentStarted))
@@ -145,7 +144,6 @@ internal static partial class ProcessSupervisor
             {
                 throw new InvalidOperationException($"Could not start supervised command '{command.FileName}'.");
             }
-            started = true;
 
             logger.LogInformation("Started '{Command}' (runtime PID {Pid}, owner PID {OwnerPid}, cwd '{Directory}').",
                 command.FileName, process.ProcessId, parentId, Environment.CurrentDirectory);
@@ -175,35 +173,12 @@ internal static partial class ProcessSupervisor
         }
         finally
         {
-            if (OperatingSystem.IsWindows())
-            {
-                if (started && !process.HasExited)
-                {
-                    try
-                    {
-                        process.Kill(entireProcessTree: true);
-                    }
-                    catch (InvalidOperationException) when (process.HasExited)
-                    {
-                    }
-                    try
-                    {
-                        await process.WaitForRootExitAsync(CancellationToken.None).WaitAsync(terminationTimeout).ConfigureAwait(false);
-                    }
-                    catch (TimeoutException ex)
-                    {
-                        logger.LogError(ex, "Could not observe runtime PID {Pid} termination within {Timeout}.",
-                            process.ProcessId, terminationTimeout);
-                        throw;
-                    }
-                }
-            }
-            else
+            if (!OperatingSystem.IsWindows())
             {
                 // The guardian is the group leader, so this also terminates the guardian.
                 // It stays outside user code: a blocked Node event loop or lifecycle script
                 // cannot defeat the owner-liveness check or descendant cleanup.
-                ProcessScope.KillGroup(Environment.ProcessId);
+                ChildProcess.KillProcessGroup(Environment.ProcessId);
             }
         }
     }

@@ -2,8 +2,10 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 #if !NET11_0_OR_GREATER
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
@@ -19,7 +21,7 @@ namespace Aspire.Shared;
 /// the extension-host launch path, which reads <see cref="Arguments"/> /
 /// <see cref="EnvironmentVariables"/> and returns before starting) don't orphan a process.
 /// </summary>
-internal class ChildProcess : IChildProcess
+internal partial class ChildProcess : IChildProcess
 {
     private static readonly TimeSpan s_drainPollInterval = TimeSpan.FromMilliseconds(100);
 
@@ -43,6 +45,7 @@ internal class ChildProcess : IChildProcess
         bool isWindows)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.OutputDrainIdleTimeout, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.TerminationTimeout, TimeSpan.Zero);
         _startInfo = startInfo;
         _logger = logger;
         _options = options;
@@ -236,11 +239,21 @@ internal class ChildProcess : IChildProcess
         {
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException cancellationFailure)
         {
             _logger.LogDebug("{FileName}({ProcessId}) wait was canceled, stopping it", FileName, _processId);
 
-            await ShutdownOnCancelAsync(process).ConfigureAwait(false);
+            try
+            {
+                await ShutdownOnCancelAsync(process).ConfigureAwait(false);
+            }
+            catch (Exception terminationFailure)
+            {
+                _logger.LogError(terminationFailure, "Failed to stop {FileName}({ProcessId}) after cancellation.", FileName, _processId);
+                throw new AggregateException(
+                    $"Cancelled execution of {FileName} could not complete shutdown.",
+                    cancellationFailure, terminationFailure);
+            }
 
             // The child has now been signalled/killed by the coordinator. Drain trailing stdout/stderr
             // before propagating the cancellation so callers that observe output — or that swallow the
@@ -265,12 +278,170 @@ internal class ChildProcess : IChildProcess
         return process.ExitCode;
     }
 
-    protected virtual Task ShutdownOnCancelAsync(Process process)
+    private async Task ShutdownOnCancelAsync(Process process)
     {
-        ForceKillChild(process);
+        if (_options.RequestGracefulShutdownAsync is { } requestShutdown
+            && _options.BeginGracefulShutdown?.Invoke() is { } gracefulToken)
+        {
+            await ShutdownLadderAsync(process, requestShutdown, gracefulToken).ConfigureAwait(false);
+        }
+        else
+        {
+            ForceKillChild(process);
+            await process.WaitForExitAsync(CancellationToken.None).WaitAsync(
+                _options.TerminationTimeout, _options.TimeProvider, CancellationToken.None).ConfigureAwait(false);
+        }
 
-        return Task.CompletedTask;
+        if (_isSupervisor)
+        {
+            await VerifyContainedTerminationAsync(process).ConfigureAwait(false);
+        }
     }
+
+    private async Task ShutdownLadderAsync(Process process, Func<int, CancellationToken, Task> requestShutdown, CancellationToken gracefulToken)
+    {
+        // Signalling can itself await exit. Dispatch it concurrently with the same shared
+        // command budget, and observe it even when the child exits before dispatch finishes.
+        var signalTask = InvokeSignalerAsync(requestShutdown, _processId, gracefulToken);
+        try
+        {
+            try
+            {
+                await process.WaitForExitAsync(gracefulToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (gracefulToken.IsCancellationRequested)
+            {
+            }
+            if (!process.HasExited)
+            {
+                KillOwnedProcess(process, entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None).WaitAsync(
+                    _options.TerminationTimeout, _options.TimeProvider, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            try
+            {
+                await signalTask.WaitAsync(_options.TerminationTimeout, _options.TimeProvider, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (TimeoutException ex)
+            {
+                _logger.LogWarning(ex, "Graceful shutdown signalling for {FileName}({ProcessId}) did not complete within {Timeout}.",
+                    FileName, _processId, _options.TerminationTimeout);
+                // Retain observation after the bounded drain without delaying child cleanup.
+                // InvokeSignalerAsync catches and logs failures, including after this drain.
+            }
+        }
+    }
+
+    private async Task InvokeSignalerAsync(Func<int, CancellationToken, Task> signaler, int pid, CancellationToken gracefulToken)
+    {
+        try
+        {
+            await Task.Yield();
+            await signaler(pid, gracefulToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (gracefulToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to issue graceful shutdown to {FileName} (pid {Pid}); escalating to kill.", FileName, pid);
+        }
+    }
+
+    private static void KillOwnedProcess(Process process, bool entireProcessTree)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree);
+            }
+        }
+        catch (InvalidOperationException) when (process.HasExited)
+        {
+        }
+    }
+
+    private async Task VerifyContainedTerminationAsync(Process process)
+    {
+        try
+        {
+            if (!_isWindows)
+            {
+                RequestGroupTermination(process);
+            }
+            // Before setsid succeeds, no group exists. Reap the root as well, then signal
+            // again to cover a guardian establishing its group during that startup race.
+            KillOwnedProcess(process, entireProcessTree: true);
+            await process.WaitForExitAsync().WaitAsync(_options.TerminationTimeout, _options.TimeProvider).ConfigureAwait(false);
+            if (!_isWindows)
+            {
+                RequestGroupTermination(process);
+                using var deadline = new CancellationTokenSource(_options.TerminationTimeout, _options.TimeProvider);
+                try
+                {
+                    while (ProcessGroupExists(_processId))
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(25), _options.TimeProvider, deadline.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException ex) when (deadline.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"Process group {_processId} still exists after cleanup timeout {_options.TerminationTimeout}.", ex);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to verify cleanup of {FileName}({ProcessId}) within {Timeout}.",
+                FileName, _processId, _options.TerminationTimeout);
+            throw;
+        }
+    }
+
+    internal static void KillProcessGroup(int processGroupId)
+    {
+        // Negative PID targets the POSIX group, including orphaned descendants. ESRCH
+        // means it is already gone: https://pubs.opengroup.org/onlinepubs/9799919799/functions/kill.html
+        if (kill(-processGroupId, 9) != 0 && Marshal.GetLastPInvokeError() != 3)
+        {
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), $"Could not terminate process group {processGroupId}.");
+        }
+    }
+
+    private void RequestGroupTermination(Process process)
+    {
+        try
+        {
+            KillProcessGroup(_processId);
+        }
+        catch (Win32Exception ex) when (OperatingSystem.IsMacOS() && ex.NativeErrorCode == 1 && process.HasExited)
+        {
+            // Darwin can return EPERM during orphan reaping. Only ESRCH in the
+            // bounded group-exit loop establishes cleanup, not permission failure.
+            _logger.LogDebug(ex, "Waiting for exited process group {ProcessId} to disappear.", _processId);
+        }
+    }
+
+    private static bool ProcessGroupExists(int processGroupId)
+    {
+        if (kill(-processGroupId, 0) == 0)
+        {
+            return true;
+        }
+        return Marshal.GetLastPInvokeError() switch
+        {
+            1 => true,
+            3 => false,
+            var error => throw new Win32Exception(error, $"Could not verify termination of process group {processGroupId}.")
+        };
+    }
+
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int kill(int pid, int signal);
 
     private void ForceKillChild(Process process)
     {
@@ -314,23 +485,12 @@ internal class ChildProcess : IChildProcess
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(
+            _logger.LogError(
                 ex,
                 "Failed to terminate {FileName} process (entireProcessTree={EntireProcessTree}).",
                 FileName,
                 entireProcessTree);
-        }
-    }
-
-    protected static int GetSafePid(Process process)
-    {
-        try
-        {
-            return process.Id;
-        }
-        catch (Exception)
-        {
-            return -1;
+            throw;
         }
     }
 
@@ -357,34 +517,27 @@ internal class ChildProcess : IChildProcess
             return;
         }
 
-        // DotNetCliRunner does not dispose the execution (StartBackchannelAsync runs fire-and-forget
-        // and reads HasExited/ExitCode after the await — see DotNetCliRunner.cs), so this path is
-        // reached only by explicit `await using` consumers (the session, guest launcher) and tests.
-        //
-        // Terminate the child if it is still running. On the normal teardown paths the caller drives
-        // WaitForExitAsync(token) first, so the shutdown ladder has already exited or killed the
-        // process by the time we get here and this is a no-op. It matters for the path where an
-        // execution was started but never driven (e.g. a fault between Start and the caller wiring up
-        // its wait loop): Process.Dispose releases handles but does NOT terminate the process — so
-        // without this kill the child would be orphaned. Owning "kill if still alive on dispose" here
-        // keeps that responsibility off every consumer.
         try
         {
-            if (!process.HasExited)
+            if (_isSupervisor)
             {
-                process.Kill(entireProcessTree: true);
+                // Contained commands can finish cooperatively before their group is retired.
+                // The same execution owns cleanup on cancellation, launch failure, and disposal.
+                try
+                {
+                    await process.WaitForExitAsync().WaitAsync(_options.TerminationTimeout, _options.TimeProvider).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    _logger.LogWarning("{FileName}({ProcessId}) did not stop within {Timeout}; terminating its process scope.",
+                        FileName, _processId, _options.TerminationTimeout);
+                }
+                await VerifyContainedTerminationAsync(process).ConfigureAwait(false);
             }
-        }
-        catch (InvalidOperationException) when (process.HasExited)
-        {
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to terminate {FileName}({ProcessId}) during disposal.", FileName, _processId);
-        }
-
-        try
-        {
+            else if (!process.HasExited)
+            {
+                await ShutdownOnCancelAsync(process).ConfigureAwait(false);
+            }
             await DrainOutputAsync(CancellationToken.None).ConfigureAwait(false);
         }
         finally
