@@ -130,16 +130,60 @@ public class AddMongoDBTests(ITestOutputHelper testOutputHelper)
     }
 
     [Fact]
-    public void WithMongoExpressWaitsForTheServer()
+    public async Task WithMongoExpressWaitsForTheServer()
     {
         using var builder = TestDistributedApplicationBuilder.Create(testOutputHelper);
         var mongo = builder.AddMongoDB("mongo")
             .WithMongoExpress();
 
+        using var app = builder.Build();
+        await builder.Eventing.PublishAsync(new BeforeStartEvent(app.Services, app.Services.GetRequiredService<DistributedApplicationModel>()));
+
         var mongoExpress = Assert.Single(builder.Resources.OfType<MongoExpressContainerResource>());
         var wait = Assert.Single(mongoExpress.Annotations.OfType<WaitAnnotation>());
         Assert.Same(mongo.Resource, wait.Resource);
         Assert.Equal(WaitType.WaitUntilHealthy, wait.WaitType);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WithMongoExpressWaitsForTheAdvancedReplicaSet(bool addCompanionBeforeMember)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(testOutputHelper);
+        var mongo = builder.AddMongoDB("mongo").WithoutHttpsCertificate();
+        var replicaSet = builder.AddMongoDBReplicaSet("rs0");
+        builder.AddMongoDBReplicaSet("other").WithMember(builder.AddMongoDB("other-mongo").WithoutHttpsCertificate());
+
+        if (addCompanionBeforeMember)
+        {
+            mongo.WithMongoExpress();
+            replicaSet.WithMember(mongo);
+        }
+        else
+        {
+            replicaSet.WithMember(mongo);
+            mongo.WithMongoExpress();
+        }
+
+        using var app = builder.Build();
+        await builder.Eventing.PublishAsync(new BeforeStartEvent(app.Services, app.Services.GetRequiredService<DistributedApplicationModel>()));
+
+        var mongoExpress = Assert.Single(builder.Resources.OfType<MongoExpressContainerResource>());
+        Assert.Collection(mongoExpress.Annotations.OfType<WaitAnnotation>(),
+            wait =>
+            {
+                Assert.Same(mongo.Resource, wait.Resource);
+                Assert.Equal(WaitType.WaitUntilHealthy, wait.WaitType);
+            },
+            wait =>
+            {
+                Assert.Same(replicaSet.Resource, wait.Resource);
+                Assert.Equal(WaitType.WaitUntilHealthy, wait.WaitType);
+            });
+        var memberWait = Assert.Single(replicaSet.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Same(mongo.Resource, memberWait.Resource);
+        Assert.Equal(WaitType.WaitUntilStarted, memberWait.WaitType);
     }
 
     [Fact]

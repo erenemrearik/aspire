@@ -329,8 +329,8 @@ public static class MongoDBBuilderExtensions
             .WithRelationship(builder.Resource, KnownRelationshipTypes.Manages)
             // NOTE: Mongo Express lists collections as soon as it connects and exits if that fails. The image's entrypoint
             // only waits for the TCP port, which a replica set member opens before it is initialized or elected primary,
-            // and the member rejects reads until then (`NotPrimaryNoSecondaryOk`). The server's health check covers
-            // replica set initialization and primary election.
+            // and the member rejects reads until then (`NotPrimaryNoSecondaryOk`). For single-member sets, the server's
+            // health check covers initialization and primary election.
             .WaitFor(builder)
             .ExcludeFromManifest();
 
@@ -344,6 +344,20 @@ public static class MongoDBBuilderExtensions
 #pragma warning restore CS0618
 
         configureContainer?.Invoke(resourceBuilder);
+
+        builder.ApplicationBuilder.Eventing.Subscribe<BeforeStartEvent>((@event, ct) =>
+        {
+            // WithMember can be called after WithMongoExpress. Resolve membership once the model is complete:
+            // advanced members' health checks only ping, so the companion must also wait for the set to be healthy.
+            var replicaSet = @event.Model.Resources.OfType<MongoDBReplicaSetResource>()
+                .SingleOrDefault(r => r.Members.Contains(builder.Resource));
+            if (replicaSet is not null)
+            {
+                resourceBuilder.WaitFor(builder.ApplicationBuilder.CreateResourceBuilder(replicaSet));
+            }
+
+            return Task.CompletedTask;
+        });
 
         return builder;
     }
