@@ -158,7 +158,7 @@ public class ContainerImageResourceTests
         using var app = builder.Build();
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => app.ExecuteBeforeStartHooksAsync(default));
-        Assert.Equal("Image artifact 'tools' has no source. Configure it with WithImageSource.", exception.Message);
+        Assert.Equal("Image artifact 'tools' has no source. Configure it with WithImageSource, WithDockerfile, or WithDockerfileBuilder.", exception.Message);
     }
 
     [Fact]

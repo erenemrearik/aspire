@@ -8,6 +8,8 @@ using Aspire.Hosting.Publishing;
 using Aspire.Hosting.Utils;
 
 #pragma warning disable ASPIREPIPELINES003
+#pragma warning disable ASPIREDOCKERFILEBUILDER001
+#pragma warning disable ASPIREFILESYSTEM001
 
 namespace Aspire.Hosting;
 
@@ -23,9 +25,13 @@ public static class ContainerImageResourceBuilderExtensions
     /// <param name="name">The source artifact resource name.</param>
     /// <returns>The image artifact builder.</returns>
     /// <remarks>
-    /// Configure an existing registry image with <c>WithImageSource</c>. Sources are independent
+    /// Configure an existing registry image with <c>WithImageSource</c>, or a build description with
+    /// <c>WithDockerfile</c> or <c>WithDockerfileBuilder</c>. Sources are independent
     /// of destinations and can be shared across registries. This experimental API registers
     /// artifacts in publish mode only; local image preparation and registry emulation are not implemented.
+    /// Build prepares Dockerfile artifacts without publishing them. Deployment builds each source once and
+    /// publishes its complete image to every selected destination. Dockerfile artifacts require Docker's
+    /// containerd image store to retain all platforms and attestations; Podman artifact publication is not implemented.
     /// Deployment resolves each associated remote source once and publishes its complete referenced
     /// content to each destination using Docker with Buildx. Separate OCI referrers are not copied.
     /// </remarks>
@@ -74,8 +80,333 @@ public static class ContainerImageResourceBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         var source = ContainerImageName.ParseSource(image);
+        RemoveBuildSource(builder.Resource);
 
         return builder.WithAnnotation(new ContainerImageSourceAnnotation(source), ResourceAnnotationMutationBehavior.Replace);
+    }
+
+    /// <summary>
+    /// Configures a Dockerfile build as the source of an image artifact.
+    /// </summary>
+    /// <param name="builder">The image artifact builder.</param>
+    /// <param name="contextPath">The build context path, relative to the AppHost directory unless absolute.</param>
+    /// <param name="dockerfilePath">The Dockerfile path, relative to the build context unless absolute. Defaults to <c>Dockerfile</c>.</param>
+    /// <param name="stage">The optional target stage in a multi-stage Dockerfile.</param>
+    /// <returns>The original image artifact builder.</returns>
+    /// <remarks>
+    /// Source configuration is last-wins. Replacing a source discards its build arguments, secrets, and generated
+    /// Dockerfile callbacks, and invalidates publication evidence. Explicit container build options are retained.
+    /// The resource remains an artifact, not a runnable container. This records a build description without building
+    /// or publishing it during model construction. Build and deployment use Docker with its containerd image store;
+    /// unsupported stores fail explicitly rather than discarding platforms or attestations. Local run-mode preparation is not implemented.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var source = builder.AddContainerImage("tools").WithDockerfile("./tools");
+    /// var destination = registry.AddImage("published-tools", source);
+    /// </code>
+    /// </example>
+    /// <exception cref="ArgumentNullException">The builder or context path is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The context path is empty or a path is invalid.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExport("withContainerImageDockerfile", MethodName = "withDockerfile")]
+    public static IResourceBuilder<ContainerImageResource> WithDockerfile(
+        this IResourceBuilder<ContainerImageResource> builder,
+        string contextPath,
+        string? dockerfilePath = null,
+        string? stage = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrEmpty(contextPath);
+        var context = Path.GetFullPath(contextPath, builder.ApplicationBuilder.AppHostDirectory);
+        var dockerfile = Path.GetFullPath(dockerfilePath ?? "Dockerfile", context);
+        var annotation = new DockerfileBuildAnnotation(context, dockerfile, stage);
+
+        return SetBuildSource(builder, annotation);
+    }
+
+    /// <summary>
+    /// Configures an image artifact's Dockerfile using an asynchronous builder callback.
+    /// </summary>
+    /// <param name="builder">The image artifact builder.</param>
+    /// <param name="contextPath">The build context path, relative to the AppHost directory unless absolute.</param>
+    /// <param name="callback">The callback that constructs the Dockerfile.</param>
+    /// <param name="stage">The optional target stage in a multi-stage Dockerfile.</param>
+    /// <returns>The original image artifact builder.</returns>
+    /// <remarks>
+    /// Repeated builder calls compose callbacks in registration order; the first call establishes the context and stage.
+    /// Generation is deferred and uses UTF-8 without a BOM and LF line endings. Adding a callback invalidates generated
+    /// content and publication evidence, while retaining build arguments and secrets. Selecting a different source
+    /// discards the callbacks. Each pipeline execution rematerializes the callbacks and builds the source once.
+    /// Publication requires Docker's containerd image store. Local run-mode preparation is not implemented.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The builder, context path, or callback is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The context path is empty or invalid.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExport("withContainerImageDockerfileBuilder", MethodName = "withDockerfileBuilder")]
+    public static IResourceBuilder<ContainerImageResource> WithDockerfileBuilder(
+        this IResourceBuilder<ContainerImageResource> builder,
+        string contextPath,
+        Func<DockerfileBuilderCallbackContext, Task> callback,
+        string? stage = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrEmpty(contextPath);
+        ArgumentNullException.ThrowIfNull(callback);
+        var context = Path.GetFullPath(contextPath, builder.ApplicationBuilder.AppHostDirectory);
+        var callbacks = new DockerfileBuilderCallbackAnnotation();
+        DockerfileBuildAnnotation annotation;
+        if (builder.Resource.TryGetLastAnnotation<DockerfileBuilderCallbackAnnotation>(out var previous))
+        {
+            var original = builder.Resource.GetSource().Dockerfile
+                ?? throw new InvalidOperationException($"Image artifact '{builder.Resource.Name}' has Dockerfile callbacks without a Dockerfile source.");
+            foreach (var existing in previous.Callbacks)
+            {
+                callbacks.AddCallback(existing);
+            }
+            // A fresh annotation invalidates materialized output when callbacks are appended.
+            annotation = DockerfileHelper.CloneBuildAnnotation(original);
+        }
+        else
+        {
+            var dockerfile = builder.ApplicationBuilder.FileSystemService.TempDirectory.CreateTempFile("Dockerfile").Path;
+            annotation = new DockerfileBuildAnnotation(context, dockerfile, stage)
+            {
+                DockerfileFactory = DockerfileHelper.CreateDockerfileFromBuilderAsync
+            };
+        }
+        callbacks.AddCallback(callback);
+        SetBuildSource(builder, annotation);
+
+        return builder.WithAnnotation(callbacks, ResourceAnnotationMutationBehavior.Replace);
+    }
+
+    /// <summary>
+    /// Configures an image artifact's Dockerfile using a synchronous builder callback.
+    /// </summary>
+    /// <param name="builder">The image artifact builder.</param>
+    /// <param name="contextPath">The build context path, relative to the AppHost directory unless absolute.</param>
+    /// <param name="callback">The callback that constructs the Dockerfile.</param>
+    /// <param name="stage">The optional target stage in a multi-stage Dockerfile.</param>
+    /// <returns>The original image artifact builder.</returns>
+    /// <remarks>Uses the same deferred, composing behavior as the asynchronous overload.</remarks>
+    /// <exception cref="ArgumentNullException">The builder, context path, or callback is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The context path is empty or invalid.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExportIgnore(Reason = "Polyglot AppHosts use the asynchronous withDockerfileBuilder callback.")]
+    public static IResourceBuilder<ContainerImageResource> WithDockerfileBuilder(
+        this IResourceBuilder<ContainerImageResource> builder,
+        string contextPath,
+        Action<DockerfileBuilderCallbackContext> callback,
+        string? stage = null)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+
+        return builder.WithDockerfileBuilder(contextPath, context =>
+        {
+            callback(context);
+            return Task.CompletedTask;
+        }, stage);
+    }
+
+    /// <summary>
+    /// Adds an argument to an image artifact's Dockerfile build.
+    /// </summary>
+    /// <param name="builder">The image artifact builder.</param>
+    /// <param name="name">The build argument name.</param>
+    /// <param name="value">The argument value, or <see langword="null"/> to use the build process's environment.</param>
+    /// <returns>The original image artifact builder.</returns>
+    /// <remarks>Configure a Dockerfile source first. Secret parameters must use <c>WithBuildSecret</c>.</remarks>
+    /// <exception cref="ArgumentNullException">The builder or name is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The name is empty.</exception>
+    /// <exception cref="InvalidOperationException">There is no Dockerfile source or the value is a secret parameter.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExportIgnore(Reason = "Polyglot AppHosts use the string-or-parameter withBuildArg dispatcher.")]
+    public static IResourceBuilder<ContainerImageResource> WithBuildArg(
+        this IResourceBuilder<ContainerImageResource> builder, string name, object? value)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        if (value is ParameterResource { Secret: true } parameter)
+        {
+            throw new InvalidOperationException(
+                $"Cannot add secret parameter '{parameter.Name}' as build argument '{name}' while configuring resource '{builder.Resource.Name}'. Use WithBuildSecret instead.");
+        }
+        UpdateBuildSource(builder.Resource, nameof(WithBuildArg), annotation => annotation.BuildArguments[name] = value);
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Adds a parameter-backed argument to an image artifact's Dockerfile build.
+    /// </summary>
+    /// <param name="builder">The image artifact builder.</param>
+    /// <param name="name">The build argument name.</param>
+    /// <param name="value">A non-secret parameter builder belonging to the same application.</param>
+    /// <returns>The original image artifact builder.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The name is empty or the builders belong to different applications.</exception>
+    /// <exception cref="InvalidOperationException">There is no Dockerfile source or the parameter is secret.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExportIgnore(Reason = "Polyglot AppHosts use the string-or-parameter withBuildArg dispatcher.")]
+    public static IResourceBuilder<ContainerImageResource> WithBuildArg(
+        this IResourceBuilder<ContainerImageResource> builder, string name, IResourceBuilder<ParameterResource> value)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(value);
+        ValidateApplication(builder.ApplicationBuilder, value.ApplicationBuilder);
+
+        return builder.WithBuildArg(name, value.Resource);
+    }
+
+    /// <summary>
+    /// Adds an argument to an image artifact's Dockerfile build.
+    /// </summary>
+    /// <param name="builder">The image artifact builder.</param>
+    /// <param name="name">The build argument name.</param>
+    /// <param name="value">A string or non-secret parameter builder.</param>
+    /// <returns>The original image artifact builder.</returns>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExport(MethodName = "withBuildArg")]
+    internal static IResourceBuilder<ContainerImageResource> WithContainerImageBuildArg(
+        this IResourceBuilder<ContainerImageResource> builder,
+        string name,
+        [AspireUnion(typeof(string), typeof(IResourceBuilder<ParameterResource>))] object value)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentNullException.ThrowIfNull(value);
+
+        return value switch
+        {
+            string text => builder.WithBuildArg(name, (object)text),
+            IResourceBuilder<ParameterResource> parameter => builder.WithBuildArg(name, parameter),
+            _ => throw new ArgumentException("Expected a string or parameter builder.", nameof(value))
+        };
+    }
+
+    /// <summary>
+    /// Adds a parameter-backed secret to an image artifact's Dockerfile build.
+    /// </summary>
+    /// <param name="builder">The image artifact builder.</param>
+    /// <param name="name">The build secret name.</param>
+    /// <param name="value">The parameter builder belonging to the same application.</param>
+    /// <returns>The original image artifact builder.</returns>
+    /// <remarks>The value remains a parameter reference in manifests and is passed as a build secret, not an argument.</remarks>
+    /// <exception cref="ArgumentNullException">A required argument is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The name is empty or the builders belong to different applications.</exception>
+    /// <exception cref="InvalidOperationException">There is no Dockerfile source.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExport("withContainerImageBuildSecret", MethodName = "withBuildSecret")]
+    public static IResourceBuilder<ContainerImageResource> WithBuildSecret(
+        this IResourceBuilder<ContainerImageResource> builder, string name, IResourceBuilder<ParameterResource> value)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentNullException.ThrowIfNull(value);
+        ValidateApplication(builder.ApplicationBuilder, value.ApplicationBuilder);
+        UpdateBuildSource(builder.Resource, nameof(WithBuildSecret), annotation => annotation.BuildSecrets[name] = value.Resource);
+
+        return builder;
+    }
+
+    private static IResourceBuilder<ContainerImageResource> SetBuildSource(
+        IResourceBuilder<ContainerImageResource> builder, DockerfileBuildAnnotation annotation)
+    {
+        annotation.ImageName ??= ImageNameGenerator.GenerateImageName(builder);
+        annotation.ImageTag ??= ImageNameGenerator.GenerateImageTag(builder);
+        var defaults = DockerfileHelper.CreateDefaultBuildOptions();
+        RemoveBuildSource(builder.Resource);
+        // Keep defaults before user callbacks even when the source is reconfigured.
+        builder.Resource.Annotations.Insert(0, defaults);
+        builder.WithAnnotation(annotation, ResourceAnnotationMutationBehavior.Replace);
+
+        return builder.WithAnnotation(new ContainerImageSourceAnnotation(annotation, defaults), ResourceAnnotationMutationBehavior.Replace);
+    }
+
+    /// <summary>
+    /// Configures an image artifact's container build options using an asynchronous callback.
+    /// </summary>
+    /// <param name="builder">The image artifact builder.</param>
+    /// <param name="callback">The callback that configures build options.</param>
+    /// <returns>The original image artifact builder.</returns>
+    /// <remarks>
+    /// Explicit callbacks run after source defaults and survive source replacement.
+    /// Use <c>ContainerTargetPlatform.AllLinux</c> to select both Linux AMD64 and ARM64.
+    /// Docker archive output is supported; OCI archive output is not implemented for Dockerfile image artifacts.
+    /// Adding options invalidates materialized Dockerfile content and publication evidence.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">The builder or callback is <see langword="null"/>.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExport("withContainerImageBuildOptions", MethodName = "withContainerBuildOptions")]
+    public static IResourceBuilder<ContainerImageResource> WithContainerBuildOptions(
+        this IResourceBuilder<ContainerImageResource> builder,
+        Func<ContainerBuildOptionsCallbackContext, Task> callback)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(callback);
+        if (builder.Resource.TryGetLastAnnotation<ContainerImageSourceAnnotation>(out var source) && source.Dockerfile is not null)
+        {
+            var active = builder.Resource.GetSource();
+            var defaults = active.BuildOptions
+                ?? throw new InvalidOperationException($"Image artifact '{builder.Resource.Name}' has no Dockerfile build options.");
+            var annotation = DockerfileHelper.CloneBuildAnnotation(source.Dockerfile);
+            builder.WithAnnotation(annotation, ResourceAnnotationMutationBehavior.Replace);
+            builder.WithAnnotation(new ContainerImageSourceAnnotation(annotation, defaults), ResourceAnnotationMutationBehavior.Replace);
+        }
+
+        return builder.WithAnnotation(new ContainerBuildOptionsCallbackAnnotation(callback), ResourceAnnotationMutationBehavior.Append);
+    }
+
+    /// <summary>
+    /// Configures an image artifact's container build options using a synchronous callback.
+    /// </summary>
+    /// <param name="builder">The image artifact builder.</param>
+    /// <param name="callback">The callback that configures build options.</param>
+    /// <returns>The original image artifact builder.</returns>
+    /// <remarks>Uses the same ordering and invalidation behavior as the asynchronous overload.</remarks>
+    /// <exception cref="ArgumentNullException">The builder or callback is <see langword="null"/>.</exception>
+    [Experimental("ASPIREPIPELINES003", UrlFormat = "https://aka.ms/aspire/diagnostics/{0}")]
+    [AspireExportIgnore(Reason = "Polyglot AppHosts use the asynchronous withContainerBuildOptions callback.")]
+    public static IResourceBuilder<ContainerImageResource> WithContainerBuildOptions(
+        this IResourceBuilder<ContainerImageResource> builder,
+        Action<ContainerBuildOptionsCallbackContext> callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+
+        return builder.WithContainerBuildOptions(context =>
+        {
+            callback(context);
+            return Task.CompletedTask;
+        });
+    }
+
+    private static void RemoveBuildSource(ContainerImageResource resource)
+    {
+        if (resource.TryGetLastAnnotation<ContainerImageSourceAnnotation>(out var source) && source.BuildOptions is { } defaults)
+        {
+            resource.Annotations.Remove(defaults);
+        }
+        foreach (var annotation in resource.Annotations.Where(annotation =>
+            annotation is DockerfileBuildAnnotation or DockerfileBuilderCallbackAnnotation).ToArray())
+        {
+            resource.Annotations.Remove(annotation);
+        }
+    }
+
+    private static void UpdateBuildSource(
+        ContainerImageResource resource, string methodName, Action<DockerfileBuildAnnotation> update)
+    {
+        var annotation = DockerfileHelper.GetBuildAnnotation(resource, methodName);
+        var source = resource.GetSource();
+        var defaults = source.BuildOptions
+            ?? throw new InvalidOperationException($"Image artifact '{resource.Name}' has no Dockerfile build options.");
+        var replacement = DockerfileHelper.CloneBuildAnnotation(annotation);
+        update(replacement);
+        resource.Annotations.Remove(annotation);
+        resource.Annotations.Add(replacement);
+        resource.Annotations.Remove(source);
+        resource.Annotations.Add(new ContainerImageSourceAnnotation(replacement, defaults));
     }
 
     /// <summary>
@@ -237,10 +568,18 @@ public static class ContainerImageResourceBuilderExtensions
     internal static void ConfigureDestination(DestinationImageResource resource) =>
         resource.Annotations.Add(new ManifestPublishingCallbackAnnotation(context => WriteDestinationManifestAsync(context, resource)));
 
-    private static Task WriteSourceManifestAsync(ManifestPublishingContext context, ContainerImageResource resource)
+    private static async Task WriteSourceManifestAsync(ManifestPublishingContext context, ContainerImageResource resource)
     {
         context.Writer.WriteString("type", "containerimage.v0");
-        context.Writer.WriteString("source", resource.GetSource().Image);
+        var source = resource.GetSource();
+        if (source.Dockerfile is not null)
+        {
+            await context.WriteBuildContextAsync(resource).ConfigureAwait(false);
+        }
+        else
+        {
+            context.Writer.WriteString("source", source.Image);
+        }
         context.Writer.WriteStartObject("publications");
         foreach (var publication in resource.GetPublications().OrderBy(publication => publication.Destination.Name, StringComparers.ResourceName))
         {
@@ -251,8 +590,6 @@ public static class ContainerImageResourceBuilderExtensions
             context.Writer.WriteEndObject();
         }
         context.Writer.WriteEndObject();
-
-        return Task.CompletedTask;
     }
 
     private static Task WriteDestinationManifestAsync(ManifestPublishingContext context, DestinationImageResource resource)

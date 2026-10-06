@@ -1648,16 +1648,22 @@ class MergeRouteParameters(typing.TypedDict, total=False):
     middleware: str
 
 
-class BindMountParameters(typing.TypedDict, total=False):
-    source: typing.Required[str]
-    target: typing.Required[str]
-    is_read_only: bool
-
-
 class DockerfileParameters(typing.TypedDict, total=False):
     context_path: typing.Required[str]
     dockerfile_path: str
     stage: str
+
+
+class DockerfileBuilderParameters(typing.TypedDict, total=False):
+    context_path: typing.Required[str]
+    callback: typing.Required[typing.Callable[[DockerfileBuilderCallbackContext], None]]
+    stage: str
+
+
+class BindMountParameters(typing.TypedDict, total=False):
+    source: typing.Required[str]
+    target: typing.Required[str]
+    is_read_only: bool
 
 
 class DockerfileFactoryParameters(typing.TypedDict, total=False):
@@ -1682,12 +1688,6 @@ class ContainerFilesCallbackParameters(typing.TypedDict, total=False):
     destination_path: typing.Required[str]
     callback: typing.Required[typing.Callable[[ContainerFileSystemCallbackContext, CancellationToken], typing.Iterable[ContainerFileSystemItem]]]
     options: ContainerFilesOptions
-
-
-class DockerfileBuilderParameters(typing.TypedDict, total=False):
-    context_path: typing.Required[str]
-    callback: typing.Required[typing.Callable[[DockerfileBuilderCallbackContext], None]]
-    stage: str
 
 
 class McpServerParameters(typing.TypedDict, total=False):
@@ -9053,6 +9053,11 @@ class ContainerImageResourceKwargs(_BaseResourceKwargs, total=False):
     """ContainerImageResource options."""
 
     image_source: str
+    dockerfile: str | DockerfileParameters
+    dockerfile_builder: tuple[str, typing.Callable[[DockerfileBuilderCallbackContext], None]] | DockerfileBuilderParameters
+    build_arg: tuple[str, str | ParameterResource]
+    build_secret: tuple[str, ParameterResource]
+    container_build_options: typing.Callable[[ContainerBuildOptionsCallbackContext], None]
 
 class ContainerImageResource(_BaseResource, AbstractResourceWithoutLifetime):
     """ContainerImageResource resource."""
@@ -9071,6 +9076,70 @@ class ContainerImageResource(_BaseResource, AbstractResourceWithoutLifetime):
         self._handle = self._wrap_builder(result)
         return self
 
+    def with_dockerfile(self, context_path: str, *, dockerfile_path: str | None = None, stage: str | None = None) -> typing.Self:
+        """Configures a Dockerfile build as the source of an image artifact."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['contextPath'] = context_path
+        if dockerfile_path is not None:
+            rpc_args['dockerfilePath'] = dockerfile_path
+        if stage is not None:
+            rpc_args['stage'] = stage
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withContainerImageDockerfile',
+            rpc_args,
+        )
+        self._handle = self._wrap_builder(result)
+        return self
+
+    def with_dockerfile_builder(self, context_path: str, callback: typing.Callable[[DockerfileBuilderCallbackContext], None], *, stage: str | None = None) -> typing.Self:
+        """Configures an image artifact's Dockerfile using an asynchronous builder callback."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['contextPath'] = context_path
+        rpc_args['callback'] = self._client.register_callback(callback, ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.DockerfileBuilderCallbackContext",))
+        if stage is not None:
+            rpc_args['stage'] = stage
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withContainerImageDockerfileBuilder',
+            rpc_args,
+        )
+        self._handle = self._wrap_builder(result)
+        return self
+
+    def with_build_arg(self, name: str, value: str | ParameterResource) -> typing.Self:
+        """Adds an argument to an image artifact's Dockerfile build."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['name'] = name
+        rpc_args['value'] = value
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withContainerImageBuildArg',
+            rpc_args,
+        )
+        self._handle = self._wrap_builder(result)
+        return self
+
+    def with_build_secret(self, name: str, value: ParameterResource) -> typing.Self:
+        """Adds a parameter-backed secret to an image artifact's Dockerfile build."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['name'] = name
+        rpc_args['value'] = value
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withContainerImageBuildSecret',
+            rpc_args,
+        )
+        self._handle = self._wrap_builder(result)
+        return self
+
+    def with_container_build_options(self, callback: typing.Callable[[ContainerBuildOptionsCallbackContext], None]) -> typing.Self:
+        """Configures an image artifact's container build options using an asynchronous callback."""
+        rpc_args: dict[str, typing.Any] = {'builder': self._handle}
+        rpc_args['callback'] = self._client.register_callback(callback, ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
+        result = self._client.invoke_capability(
+            'Aspire.Hosting/withContainerImageBuildOptions',
+            rpc_args,
+        )
+        self._handle = self._wrap_builder(result)
+        return self
+
     def __init__(self, handle: Handle, client: AspireClient, **kwargs: typing.Unpack[ContainerImageResourceKwargs]) -> None:
         if _image_source := kwargs.pop("image_source", None):
             if _validate_type(_image_source, str):
@@ -9079,6 +9148,56 @@ class ContainerImageResource(_BaseResource, AbstractResourceWithoutLifetime):
                 handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerImageSource', rpc_args))
             else:
                 raise TypeError("Invalid type for option 'image_source'. Expected: str")
+        if _dockerfile := kwargs.pop("dockerfile", None):
+            if _validate_type(_dockerfile, str):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["contextPath"] = typing.cast(str, _dockerfile)
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerImageDockerfile', rpc_args))
+            elif _validate_dict_types(_dockerfile, DockerfileParameters):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["contextPath"] = typing.cast(DockerfileParameters, _dockerfile)["context_path"]
+                rpc_args["dockerfilePath"] = typing.cast(DockerfileParameters, _dockerfile).get("dockerfile_path")
+                rpc_args["stage"] = typing.cast(DockerfileParameters, _dockerfile).get("stage")
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerImageDockerfile', rpc_args))
+            else:
+                raise TypeError("Invalid type for option 'dockerfile'. Expected: str or DockerfileParameters")
+        if _dockerfile_builder := kwargs.pop("dockerfile_builder", None):
+            if _validate_tuple_types(_dockerfile_builder, (str, typing.Callable[[DockerfileBuilderCallbackContext], None])):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["contextPath"] = typing.cast(tuple[str, typing.Callable[[DockerfileBuilderCallbackContext], None]], _dockerfile_builder)[0]
+                rpc_args["callback"] = client.register_callback(typing.cast(tuple[str, typing.Callable[[DockerfileBuilderCallbackContext], None]], _dockerfile_builder)[1], ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.DockerfileBuilderCallbackContext",))
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerImageDockerfileBuilder', rpc_args))
+            elif _validate_dict_types(_dockerfile_builder, DockerfileBuilderParameters):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["contextPath"] = typing.cast(DockerfileBuilderParameters, _dockerfile_builder)["context_path"]
+                rpc_args["callback"] = client.register_callback(typing.cast(DockerfileBuilderParameters, _dockerfile_builder)["callback"], ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.DockerfileBuilderCallbackContext",))
+                rpc_args["stage"] = typing.cast(DockerfileBuilderParameters, _dockerfile_builder).get("stage")
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerImageDockerfileBuilder', rpc_args))
+            else:
+                raise TypeError("Invalid type for option 'dockerfile_builder'. Expected: (str, Callable[[DockerfileBuilderCallbackContext], None]) or DockerfileBuilderParameters")
+        if _build_arg := kwargs.pop("build_arg", None):
+            if _validate_tuple_types(_build_arg, (str, str | ParameterResource)):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["name"] = typing.cast(tuple[str, str | ParameterResource], _build_arg)[0]
+                rpc_args["value"] = typing.cast(tuple[str, str | ParameterResource], _build_arg)[1]
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerImageBuildArg', rpc_args))
+            else:
+                raise TypeError("Invalid type for option 'build_arg'. Expected: (str, str | ParameterResource)")
+        if _build_secret := kwargs.pop("build_secret", None):
+            if _validate_tuple_types(_build_secret, (str, ParameterResource)):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["name"] = typing.cast(tuple[str, ParameterResource], _build_secret)[0]
+                rpc_args["value"] = typing.cast(tuple[str, ParameterResource], _build_secret)[1]
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerImageBuildSecret', rpc_args))
+            else:
+                raise TypeError("Invalid type for option 'build_secret'. Expected: (str, ParameterResource)")
+        if _container_build_options := kwargs.pop("container_build_options", None):
+            if _validate_type(_container_build_options, typing.Callable[[ContainerBuildOptionsCallbackContext], None]):
+                rpc_args: dict[str, typing.Any] = {"builder": handle}
+                rpc_args["callback"] = client.register_callback(typing.cast(typing.Callable[[ContainerBuildOptionsCallbackContext], None], _container_build_options), ("Aspire.Hosting/Aspire.Hosting.ApplicationModel.ContainerBuildOptionsCallbackContext",))
+                handle = self._wrap_builder(client.invoke_capability('Aspire.Hosting/withContainerImageBuildOptions', rpc_args))
+            else:
+                raise TypeError("Invalid type for option 'container_build_options'. Expected: Callable[[ContainerBuildOptionsCallbackContext], None]")
         super().__init__(handle, client, **kwargs)
 
 

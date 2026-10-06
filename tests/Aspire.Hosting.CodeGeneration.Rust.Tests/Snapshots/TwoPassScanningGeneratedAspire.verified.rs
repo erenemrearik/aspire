@@ -4177,6 +4177,70 @@ impl ContainerImageResource {
         Ok(ContainerImageResource::new(handle, self.client.clone()))
     }
 
+    /// Configures a Dockerfile build as the source of an image artifact.
+    pub fn with_dockerfile(&self, context_path: &str, dockerfile_path: Option<&str>, stage: Option<&str>) -> Result<ContainerImageResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        args.insert("contextPath".to_string(), serde_json::to_value(&context_path).unwrap_or(Value::Null));
+        if let Some(ref v) = dockerfile_path {
+            args.insert("dockerfilePath".to_string(), serde_json::to_value(v).unwrap_or(Value::Null));
+        }
+        if let Some(ref v) = stage {
+            args.insert("stage".to_string(), serde_json::to_value(v).unwrap_or(Value::Null));
+        }
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerImageDockerfile", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(ContainerImageResource::new(handle, self.client.clone()))
+    }
+
+    /// Configures an image artifact's Dockerfile using an asynchronous builder callback.
+    pub fn with_dockerfile_builder(&self, context_path: &str, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static, stage: Option<&str>) -> Result<ContainerImageResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        args.insert("contextPath".to_string(), serde_json::to_value(&context_path).unwrap_or(Value::Null));
+        let callback_id = register_callback(callback);
+        args.insert("callback".to_string(), Value::String(callback_id));
+        if let Some(ref v) = stage {
+            args.insert("stage".to_string(), serde_json::to_value(v).unwrap_or(Value::Null));
+        }
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerImageDockerfileBuilder", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(ContainerImageResource::new(handle, self.client.clone()))
+    }
+
+    /// Adds an argument to an image artifact's Dockerfile build.
+    pub fn with_build_arg(&self, name: &str, value: Value) -> Result<ContainerImageResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        args.insert("name".to_string(), serde_json::to_value(&name).unwrap_or(Value::Null));
+        args.insert("value".to_string(), serde_json::to_value(&value).unwrap_or(Value::Null));
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerImageBuildArg", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(ContainerImageResource::new(handle, self.client.clone()))
+    }
+
+    /// Adds a parameter-backed secret to an image artifact's Dockerfile build.
+    pub fn with_build_secret(&self, name: &str, value: &ParameterResource) -> Result<ContainerImageResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        args.insert("name".to_string(), serde_json::to_value(&name).unwrap_or(Value::Null));
+        args.insert("value".to_string(), value.handle().to_json());
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerImageBuildSecret", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(ContainerImageResource::new(handle, self.client.clone()))
+    }
+
+    /// Configures an image artifact's container build options using an asynchronous callback.
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<ContainerImageResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        let callback_id = register_callback(callback);
+        args.insert("callback".to_string(), Value::String(callback_id));
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerImageBuildOptions", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(ContainerImageResource::new(handle, self.client.clone()))
+    }
+
     /// Configures the resource to use the specified container registry for container image operations.
     pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
@@ -4567,17 +4631,6 @@ impl ContainerImageResource {
         let result = self.client.invoke_capability("Aspire.Hosting/createExecutionConfiguration", args)?;
         let handle: Handle = serde_json::from_value(result)?;
         Ok(IExecutionConfigurationBuilder::new(handle, self.client.clone()))
-    }
-
-    /// Configures container build options for a compute resource using an async callback.
-    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
-        let mut args: HashMap<String, Value> = HashMap::new();
-        args.insert("builder".to_string(), self.handle.to_json());
-        let callback_id = register_callback(callback);
-        args.insert("callback".to_string(), Value::String(callback_id));
-        let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
-        let handle: Handle = serde_json::from_value(result)?;
-        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter

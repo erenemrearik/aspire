@@ -4,6 +4,7 @@
 #pragma warning disable ASPIREPIPELINES003
 #pragma warning disable ASPIRECONTAINERRUNTIME001
 
+using System.Text.Json;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Dcp.Process;
 using Aspire.Hosting.Utils;
@@ -12,7 +13,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Aspire.Hosting.Publishing;
 
-internal sealed class DockerContainerRuntime : ContainerRuntimeBase<DockerContainerRuntime>
+internal sealed class DockerContainerRuntime : ContainerRuntimeBase<DockerContainerRuntime>, IContainerImageArtifactRuntime
 {
     private const string LocalImageOciArchiveNotSupportedMessage =
         "Docker cannot export an OCI archive when container-file layering references locally built images. " +
@@ -26,6 +27,119 @@ internal sealed class DockerContainerRuntime : ContainerRuntimeBase<DockerContai
 
     protected override string RuntimeExecutable => KnownContainerRuntimes.Docker;
     public override string Name => "Docker";
+
+    public async Task<string> BuildImageArtifactAsync(
+        string contextPath, string dockerfilePath, ContainerImageBuildOptions options,
+        Dictionary<string, string?> buildArguments, Dictionary<string, BuildImageSecretValue> buildSecrets,
+        string? stage, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var imageName = $"{options.ImageName}:{options.Tag}";
+        _ = ContainerImageName.ParseSource(imageName);
+        if (options.ImageFormat == ContainerImageFormat.Oci)
+        {
+            throw new DistributedApplicationException(
+                "Docker image artifacts currently support the local containerd store and Docker archives, not OCI archive output.");
+        }
+
+        var status = await ExecuteContainerCommandForOutputAsync(
+            ["info", "--format", "{{json .DriverStatus}}"], "check lossless image store support", imageName,
+            cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Docker reports the store as [["driver-type","io.containerd.snapshotter.v1"]].
+            // Classic stores cannot retain multi-platform indexes or build attestations.
+            // https://docs.docker.com/desktop/features/containerd/
+            using var document = JsonDocument.Parse(status);
+            if (document.RootElement.ValueKind != JsonValueKind.Array ||
+                !document.RootElement.EnumerateArray().Any(entry =>
+                    entry.ValueKind == JsonValueKind.Array && entry.GetArrayLength() == 2 &&
+                    entry[0].ValueKind == JsonValueKind.String && entry[0].GetString() == "driver-type" &&
+                    entry[1].ValueKind == JsonValueKind.String && entry[1].GetString() == "io.containerd.snapshotter.v1"))
+            {
+                throw new DistributedApplicationException(
+                    "Dockerfile image artifact publication requires Docker's containerd image store to preserve all platforms and attestations. " +
+                    "Use a Docker environment with that store enabled. Existing compute image builds are unaffected.");
+            }
+        }
+        catch (JsonException ex)
+        {
+            throw new DistributedApplicationException("Docker returned invalid image-store information.", ex);
+        }
+
+        var directory = Directory.CreateTempSubdirectory("aspire-image-build-");
+        try
+        {
+            var metadataPath = Path.Combine(directory.FullName, "metadata.json");
+            var buildOptions = new ContainerImageBuildOptions
+            {
+                ImageName = options.ImageName,
+                Tag = options.Tag,
+                Destination = options.Destination,
+                OutputPath = options.OutputPath,
+                ImageFormat = options.ImageFormat,
+                TargetPlatform = options.TargetPlatform,
+                RequiresLocalImageStore = true,
+                ArtifactMetadataPath = metadataPath
+            };
+            await BuildImageAsync(contextPath, dockerfilePath, buildOptions, buildArguments, buildSecrets, stage, cancellationToken)
+                .ConfigureAwait(false);
+            using var metadata = JsonDocument.Parse(await File.ReadAllTextAsync(metadataPath, cancellationToken).ConfigureAwait(false));
+            // Buildx metadata records the exported root, not a platform config:
+            // {"containerimage.digest":"sha256:<64 hex characters>", ...}
+            if (metadata.RootElement.ValueKind != JsonValueKind.Object ||
+                !metadata.RootElement.TryGetProperty("containerimage.digest", out var value) ||
+                value.ValueKind != JsonValueKind.String || value.GetString() is not { } digest)
+            {
+                throw new DistributedApplicationException("Docker did not record the built image's root manifest digest.");
+            }
+            try
+            {
+                ContainerImageName.ValidateDigest(digest, nameof(metadata));
+            }
+            catch (ArgumentException ex)
+            {
+                throw new DistributedApplicationException("Docker returned an invalid built image root digest.", ex);
+            }
+            var localDigest = await ExecuteContainerCommandForOutputAsync(
+                ["image", "inspect", imageName, "--format", "{{.Descriptor.Digest}}"],
+                "verify local image artifact", imageName, cancellationToken).ConfigureAwait(false);
+            if (!StringComparer.Ordinal.Equals(digest, localDigest.Trim()))
+            {
+                throw new DistributedApplicationException($"Local image '{imageName}' does not match the built artifact's root digest.");
+            }
+
+            return digest;
+        }
+        catch (JsonException ex)
+        {
+            throw new DistributedApplicationException("Docker returned invalid image-build metadata.", ex);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    public async Task<string> PublishImageArtifactAsync(string digest, string destinationImageName, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ContainerImageName.ValidateDigest(digest, nameof(digest));
+        var (repository, reference) = ParsePublicationDestination(destinationImageName);
+        // The containerd store addresses the complete index by its root digest.
+        // Tag that immutable ID, never the build tag that another build could replace.
+        await ExecuteContainerCommandForOutputAsync(
+            ["tag", digest, reference], "tag image artifact", reference, cancellationToken).ConfigureAwait(false);
+        await ExecuteContainerCommandForOutputAsync(
+            ["push", reference], "push image artifact", reference, cancellationToken).ConfigureAwait(false);
+        var publishedDigest = await ReadRemoteImageDigestAsync(reference, cancellationToken).ConfigureAwait(false);
+        if (!StringComparer.Ordinal.Equals(digest, publishedDigest))
+        {
+            throw new DistributedApplicationException($"Destination image '{reference}' does not have the built artifact's root content digest.");
+        }
+
+        return $"{repository}@{digest}";
+    }
 
     public override async Task<string> ResolveRemoteImageAsync(string imageName, CancellationToken cancellationToken)
     {
@@ -55,16 +169,8 @@ internal sealed class DockerContainerRuntime : ContainerRuntimeBase<DockerContai
         {
             throw new ArgumentException("Resolve the source to an immutable digest before copying it.", nameof(sourceImageName));
         }
-        var destination = ContainerImageName.ParseSource(destinationImageName);
-        if (!ContainerReferenceParser.TryParse(destinationImageName, out var destinationInput) ||
-            destinationInput.Registry is null || destinationInput.Tag is null || destinationInput.Digest is not null)
-        {
-            throw new ArgumentException("The destination must specify a registry, repository, and publication tag, without a digest.", nameof(destinationImageName));
-        }
-
         var sourceReference = $"{source.Registry}/{source.Image}@{source.Digest}";
-        var destinationRepository = $"{destination.Registry}/{destination.Image}";
-        var destinationReference = $"{destinationRepository}:{destination.Tag}";
+        var (destinationRepository, destinationReference) = ParsePublicationDestination(destinationImageName);
         await EnsureRemoteImageCopySupportedAsync(cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         // --prefer-index=false carbon-copies a single source without wrapping a single-platform
@@ -104,6 +210,20 @@ internal sealed class DockerContainerRuntime : ContainerRuntimeBase<DockerContai
                 "Docker Buildx cannot preserve remote image manifests without --prefer-index=false. " +
                 "Install a Buildx version supporting that flag: https://docs.docker.com/build/install-buildx/.");
         }
+
+    }
+
+    private static (string Repository, string Reference) ParsePublicationDestination(string destinationImageName)
+    {
+        var destination = ContainerImageName.ParseSource(destinationImageName);
+        if (!ContainerReferenceParser.TryParse(destinationImageName, out var input) ||
+            input.Registry is null || input.Tag is null || input.Digest is not null)
+        {
+            throw new ArgumentException("The destination must specify a registry, repository, and publication tag, without a digest.", nameof(destinationImageName));
+        }
+        var repository = $"{destination.Registry}/{destination.Image}";
+
+        return (repository, $"{repository}:{destination.Tag}");
     }
 
     private async Task<string> ReadRemoteImageDigestAsync(string reference, CancellationToken cancellationToken)
@@ -176,6 +296,11 @@ internal sealed class DockerContainerRuntime : ContainerRuntimeBase<DockerContai
                 arguments += $" --builder \"{selectedBuilderName}\"";
             }
 
+            if (options?.ArtifactMetadataPath is { } metadataPath)
+            {
+                arguments += $" --metadata-file \"{metadataPath}\" --load";
+            }
+
             // Add platform support if specified
             if (options?.TargetPlatform is not null)
             {
@@ -183,7 +308,7 @@ internal sealed class DockerContainerRuntime : ContainerRuntimeBase<DockerContai
             }
 
             // Add output format support if specified
-            if (!exportsLocalImageArchive &&
+            if (options?.ArtifactMetadataPath is null && !exportsLocalImageArchive &&
                 (options?.ImageFormat is not null || !string.IsNullOrEmpty(options?.OutputPath)))
             {
                 var outputType = options?.ImageFormat switch
@@ -284,7 +409,7 @@ internal sealed class DockerContainerRuntime : ContainerRuntimeBase<DockerContai
         }
 
         // Normalize the context path to handle trailing slashes and relative paths
-        var normalizedContextPath = Path.GetFullPath(contextPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedContextPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(contextPath));
 
         await RunDockerBuildAsync(
             normalizedContextPath,

@@ -37,7 +37,11 @@ public class AtsTypeScriptCodeGeneratorTests
                 "Aspire.Hosting/addContainerImage" or "Aspire.Hosting/withContainerImageSource" or
                 "Aspire.Hosting/addContainerRegistry" or "Aspire.Hosting/addRegistryImage" or
                 "Aspire.Hosting/addContainer" or "Aspire.Hosting/withEnvironment" or
-                "Aspire.Hosting/withReference" ||
+                "Aspire.Hosting/withReference" or "Aspire.Hosting/withContainerBuildOptions" or
+                "Aspire.Hosting/withContainerImageDockerfile" or "Aspire.Hosting/withContainerImageDockerfileBuilder" or
+                "Aspire.Hosting/withContainerImageBuildArg" or "Aspire.Hosting/withContainerImageBuildSecret" or
+                "Aspire.Hosting/withContainerImageBuildOptions" ||
+                capability.CapabilityId.StartsWith("Aspire.Hosting.ApplicationModel/ContainerBuildOptionsCallbackContext.", StringComparison.Ordinal) ||
                 capability.CapabilityId.StartsWith("Aspire.Hosting.ApplicationModel/DestinationImageResource.", StringComparison.Ordinal)).ToList(),
             HandleTypes = scanned.HandleTypes,
             DtoTypes = scanned.DtoTypes.Where(dto => dto.Name is "AddContainerOptions" or "CreateBuilderOptions").ToList(),
@@ -58,6 +62,7 @@ public class AtsTypeScriptCodeGeneratorTests
                 """
                 import assert from 'node:assert/strict';
                 import type { DistributedApplicationBuilder } from './aspire.mjs';
+                import { ContainerTargetPlatform, type ParameterResource } from './aspire.mjs';
                 import { Handle, AspireClient, wrapIfHandle } from './transport.mjs';
                 import './aspire.mjs';
 
@@ -130,6 +135,36 @@ public class AtsTypeScriptCodeGeneratorTests
                         $handle: call.id.split('/').at(-1)!,
                         $type: 'Aspire.Hosting/Aspire.Hosting.ApplicationModel.ReferenceExpression'
                     })));
+
+                const buildStart = calls.length;
+                const token = wrapIfHandle({
+                    $handle: 'token',
+                    $type: 'Aspire.Hosting/Aspire.Hosting.ApplicationModel.ParameterResource'
+                }, client) as ParameterResource;
+                await builder.addContainerImage('dockerfile')
+                    .withDockerfile('./tools', { dockerfilePath: 'Tools.Dockerfile', stage: 'release' })
+                    .withBuildArg('VERSION', 'v1')
+                    .withBuildSecret('TOKEN', token)
+                    .withContainerBuildOptions(async context => {
+                        await context.targetPlatform.set(ContainerTargetPlatform.AllLinux);
+                    })
+                    .withDockerfileBuilder('./tools', async (_context) => {});
+                const buildCalls = JSON.parse(JSON.stringify(calls.slice(buildStart)));
+                assert.deepEqual(buildCalls.map((call: { id: string }) => call.id), [
+                    'Aspire.Hosting/addContainerImage',
+                    'Aspire.Hosting/withContainerImageDockerfile',
+                    'Aspire.Hosting/withContainerImageBuildArg',
+                    'Aspire.Hosting/withContainerImageBuildSecret',
+                    'Aspire.Hosting/withContainerImageBuildOptions',
+                    'Aspire.Hosting/withContainerImageDockerfileBuilder'
+                ]);
+                assert.equal(buildCalls[1].args.contextPath, './tools');
+                assert.equal(buildCalls[1].args.dockerfilePath, 'Tools.Dockerfile');
+                assert.equal(buildCalls[1].args.stage, 'release');
+                assert.equal(buildCalls[2].args.value, 'v1');
+                assert.equal(buildCalls[3].args.value.$handle, 'token');
+                assert.equal(typeof buildCalls[4].args.callback, 'string');
+                assert.equal(typeof buildCalls[5].args.callback, 'string');
                 """);
 
             // Restore the generated SDK's own dependency manifest, then compile a real consumer:

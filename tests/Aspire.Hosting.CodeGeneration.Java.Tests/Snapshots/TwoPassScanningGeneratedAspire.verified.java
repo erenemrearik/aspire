@@ -5276,6 +5276,104 @@ public class ContainerImageResource extends ResourceBuilderBase {
         return this;
     }
 
+    /** Configures a Dockerfile build as the source of an image artifact. */
+    public ContainerImageResource withDockerfile(String contextPath, WithDockerfileOptions optionsBag) {
+        var dockerfilePath = optionsBag == null ? null : optionsBag.getDockerfilePath();
+        var stage = optionsBag == null ? null : optionsBag.getStage();
+        return withDockerfileImpl(contextPath, dockerfilePath, stage);
+    }
+
+    public ContainerImageResource withDockerfile(String contextPath) {
+        return withDockerfile(contextPath, null);
+    }
+
+    /** Configures a Dockerfile build as the source of an image artifact. */
+    private ContainerImageResource withDockerfileImpl(String contextPath, String dockerfilePath, String stage) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        reqArgs.put("contextPath", AspireClient.serializeValue(contextPath));
+        if (dockerfilePath != null) {
+            reqArgs.put("dockerfilePath", AspireClient.serializeValue(dockerfilePath));
+        }
+        if (stage != null) {
+            reqArgs.put("stage", AspireClient.serializeValue(stage));
+        }
+        getClient().invokeCapability("Aspire.Hosting/withContainerImageDockerfile", reqArgs);
+        return this;
+    }
+
+    public ContainerImageResource withDockerfileBuilder(String contextPath, AspireAction1<DockerfileBuilderCallbackContext> callback) {
+        return withDockerfileBuilder(contextPath, callback, null);
+    }
+
+    /** Configures an image artifact's Dockerfile using an asynchronous builder callback. */
+    public ContainerImageResource withDockerfileBuilder(String contextPath, AspireAction1<DockerfileBuilderCallbackContext> callback, String stage) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        reqArgs.put("contextPath", AspireClient.serializeValue(contextPath));
+        var callbackId = getClient().registerCallback(args -> {
+            var arg = (DockerfileBuilderCallbackContext) args[0];
+            callback.invoke(arg);
+            var __aspireCallbackArguments = new HashMap<String, Object>();
+            __aspireCallbackArguments.put("p0", arg);
+            return __aspireCallbackArguments;
+        });
+        if (callbackId != null) {
+            reqArgs.put("callback", callbackId);
+        }
+        if (stage != null) {
+            reqArgs.put("stage", AspireClient.serializeValue(stage));
+        }
+        getClient().invokeCapability("Aspire.Hosting/withContainerImageDockerfileBuilder", reqArgs);
+        return this;
+    }
+
+    public ContainerImageResource withBuildArg(String name, String value) {
+        return withBuildArg(name, AspireUnion.of(value));
+    }
+
+    public ContainerImageResource withBuildArg(String name, ParameterResource value) {
+        return withBuildArg(name, AspireUnion.of(value));
+    }
+
+    /** Adds an argument to an image artifact's Dockerfile build. */
+    public ContainerImageResource withBuildArg(String name, AspireUnion value) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        reqArgs.put("name", AspireClient.serializeValue(name));
+        reqArgs.put("value", AspireClient.serializeValue(value));
+        getClient().invokeCapability("Aspire.Hosting/withContainerImageBuildArg", reqArgs);
+        return this;
+    }
+
+    /** Adds a parameter-backed secret to an image artifact's Dockerfile build. */
+    public ContainerImageResource withBuildSecret(String name, ParameterResource value) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        reqArgs.put("name", AspireClient.serializeValue(name));
+        reqArgs.put("value", AspireClient.serializeValue(value));
+        getClient().invokeCapability("Aspire.Hosting/withContainerImageBuildSecret", reqArgs);
+        return this;
+    }
+
+    /** Configures an image artifact's container build options using an asynchronous callback. */
+    public ContainerImageResource withContainerBuildOptions(AspireAction1<ContainerBuildOptionsCallbackContext> callback) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        var callbackId = getClient().registerCallback(args -> {
+            var arg = (ContainerBuildOptionsCallbackContext) args[0];
+            callback.invoke(arg);
+            var __aspireCallbackArguments = new HashMap<String, Object>();
+            __aspireCallbackArguments.put("p0", arg);
+            return __aspireCallbackArguments;
+        });
+        if (callbackId != null) {
+            reqArgs.put("callback", callbackId);
+        }
+        getClient().invokeCapability("Aspire.Hosting/withContainerImageBuildOptions", reqArgs);
+        return this;
+    }
+
     /** Configures the resource to use the specified container registry for container image operations. */
     public ContainerImageResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
@@ -5807,24 +5905,6 @@ public class ContainerImageResource extends ResourceBuilderBase {
         reqArgs.put("resource", AspireClient.serializeValue(getHandle()));
         var result = getClient().invokeCapability("Aspire.Hosting/createExecutionConfiguration", reqArgs);
         return (IExecutionConfigurationBuilder) result;
-    }
-
-    /** Configures container build options for a compute resource using an async callback. */
-    public ContainerImageResource withContainerBuildOptions(AspireAction1<ContainerBuildOptionsCallbackContext> callback) {
-        Map<String, Object> reqArgs = new HashMap<>();
-        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
-        var callbackId = getClient().registerCallback(args -> {
-            var arg = (ContainerBuildOptionsCallbackContext) args[0];
-            callback.invoke(arg);
-            var __aspireCallbackArguments = new HashMap<String, Object>();
-            __aspireCallbackArguments.put("p0", arg);
-            return __aspireCallbackArguments;
-        });
-        if (callbackId != null) {
-            reqArgs.put("callback", callbackId);
-        }
-        getClient().invokeCapability("Aspire.Hosting/withContainerBuildOptions", reqArgs);
-        return this;
     }
 
     /** Adds an optional string parameter */

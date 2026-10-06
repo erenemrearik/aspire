@@ -166,7 +166,7 @@ type ContainerImageReferenceHandle = Handle<'Aspire.Hosting/Aspire.Hosting.Appli
 /**
  * Represents a container image artifact independently of a runnable container or application.
  *
- * Configure the source with `WithImageSource` and create registry-scoped destinations with
+ * Configure the source with `WithImageSource`, `WithDockerfile`, or `WithDockerfileBuilder` and create registry-scoped destinations with
  * `registry.AddImage(name, image)`. This resource has no compute or runtime lifetime.
  * Construction does not pull, build, push, or run an image.
  */
@@ -1776,7 +1776,7 @@ export interface WithDockerfileBaseImageOptions {
 }
 
 export interface WithDockerfileBuilderOptions {
-    /** The stage representing the image to be published in a multi-stage Dockerfile. */
+    /** The optional target stage in a multi-stage Dockerfile. */
     stage?: string;
 }
 
@@ -1786,9 +1786,9 @@ export interface WithDockerfileFactoryOptions {
 }
 
 export interface WithDockerfileOptions {
-    /** Path to the Dockerfile relative to the `contextPath`. Defaults to "Dockerfile" if not specified. */
+    /** The Dockerfile path, relative to the build context unless absolute. Defaults to `Dockerfile`. */
     dockerfilePath?: string;
-    /** The stage representing the image to be published in a multi-stage Dockerfile. */
+    /** The optional target stage in a multi-stage Dockerfile. */
     stage?: string;
 }
 
@@ -9797,9 +9797,13 @@ export interface DistributedApplicationBuilder {
     /**
      * Adds a standalone image artifact whose source is configured separately.
      *
-     * Configure an existing registry image with `WithImageSource`. Sources are independent
+     * Configure an existing registry image with `WithImageSource`, or a build description with
+     * `WithDockerfile` or `WithDockerfileBuilder`. Sources are independent
      * of destinations and can be shared across registries. This experimental API registers
      * artifacts in publish mode only; local image preparation and registry emulation are not implemented.
+     * Build prepares Dockerfile artifacts without publishing them. Deployment builds each source once and
+     * publishes its complete image to every selected destination. Dockerfile artifacts require Docker's
+     * containerd image store to retain all platforms and attestations; Podman artifact publication is not implemented.
      * Deployment resolves each associated remote source once and publishes its complete referenced
      * content to each destination using Docker with Buildx. Separate OCI referrers are not copied.
      * @param name The source artifact resource name.
@@ -10043,9 +10047,13 @@ export interface DistributedApplicationBuilderPromise extends PromiseLike<Distri
     /**
      * Adds a standalone image artifact whose source is configured separately.
      *
-     * Configure an existing registry image with `WithImageSource`. Sources are independent
+     * Configure an existing registry image with `WithImageSource`, or a build description with
+     * `WithDockerfile` or `WithDockerfileBuilder`. Sources are independent
      * of destinations and can be shared across registries. This experimental API registers
      * artifacts in publish mode only; local image preparation and registry emulation are not implemented.
+     * Build prepares Dockerfile artifacts without publishing them. Deployment builds each source once and
+     * publishes its complete image to every selected destination. Dockerfile artifacts require Docker's
+     * containerd image store to retain all platforms and attestations; Podman artifact publication is not implemented.
      * Deployment resolves each associated remote source once and publishes its complete referenced
      * content to each destination using Docker with Buildx. Separate OCI referrers are not copied.
      * @param name The source artifact resource name.
@@ -10356,9 +10364,13 @@ class DistributedApplicationBuilderImpl implements DistributedApplicationBuilder
     /**
      * Adds a standalone image artifact whose source is configured separately.
      *
-     * Configure an existing registry image with `WithImageSource`. Sources are independent
+     * Configure an existing registry image with `WithImageSource`, or a build description with
+     * `WithDockerfile` or `WithDockerfileBuilder`. Sources are independent
      * of destinations and can be shared across registries. This experimental API registers
      * artifacts in publish mode only; local image preparation and registry emulation are not implemented.
+     * Build prepares Dockerfile artifacts without publishing them. Deployment builds each source once and
+     * publishes its complete image to every selected destination. Dockerfile artifacts require Docker's
+     * containerd image store to retain all platforms and attestations; Podman artifact publication is not implemented.
      * Deployment resolves each associated remote source once and publishes its complete referenced
      * content to each destination using Docker with Buildx. Separate OCI referrers are not copied.
      * @param name The source artifact resource name.
@@ -13128,7 +13140,7 @@ const UserSecretsManagerPromiseImpl = $aspireCreateFluentPromiseClass<UserSecret
 /**
  * Represents a container image artifact independently of a runnable container or application.
  *
- * Configure the source with `WithImageSource` and create registry-scoped destinations with
+ * Configure the source with `WithImageSource`, `WithDockerfile`, or `WithDockerfileBuilder` and create registry-scoped destinations with
  * `registry.AddImage(name, image)`. This resource has no compute or runtime lifetime.
  * Construction does not pull, build, push, or run an image.
  */
@@ -13145,6 +13157,65 @@ export interface ContainerImageResource {
      * @experimental
      */
     withImageSource(image: string): ContainerImageResourcePromise;
+    /**
+     * Configures a Dockerfile build as the source of an image artifact.
+     *
+     * Source configuration is last-wins. Replacing a source discards its build arguments, secrets, and generated
+     * Dockerfile callbacks, and invalidates publication evidence. Explicit container build options are retained.
+     * The resource remains an artifact, not a runnable container. This records a build description without building
+     * or publishing it during model construction. Build and deployment use Docker with its containerd image store;
+     * unsupported stores fail explicitly rather than discarding platforms or attestations. Local run-mode preparation is not implemented.
+     * @param contextPath The build context path, relative to the AppHost directory unless absolute.
+     * @param options Additional options.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withDockerfile(contextPath: string, options?: WithDockerfileOptions): ContainerImageResourcePromise;
+    /**
+     * Configures an image artifact's Dockerfile using an asynchronous builder callback.
+     *
+     * Repeated builder calls compose callbacks in registration order; the first call establishes the context and stage.
+     * Generation is deferred and uses UTF-8 without a BOM and LF line endings. Adding a callback invalidates generated
+     * content and publication evidence, while retaining build arguments and secrets. Selecting a different source
+     * discards the callbacks. Each pipeline execution rematerializes the callbacks and builds the source once.
+     * Publication requires Docker's containerd image store. Local run-mode preparation is not implemented.
+     * @param contextPath The build context path, relative to the AppHost directory unless absolute.
+     * @param callback The callback that constructs the Dockerfile.
+     * @param options Additional options.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withDockerfileBuilder(contextPath: string, callback: (arg: DockerfileBuilderCallbackContext) => Promise<void>, options?: WithDockerfileBuilderOptions): ContainerImageResourcePromise;
+    /**
+     * Adds an argument to an image artifact's Dockerfile build.
+     * @param name The build argument name.
+     * @param value A string or non-secret parameter builder.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withBuildArg(name: string, value: string | ParameterResource | Awaitable<ParameterResource>): ContainerImageResourcePromise;
+    /**
+     * Adds a parameter-backed secret to an image artifact's Dockerfile build.
+     *
+     * The value remains a parameter reference in manifests and is passed as a build secret, not an argument.
+     * @param name The build secret name.
+     * @param value The parameter builder belonging to the same application.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withBuildSecret(name: string, value: Awaitable<ParameterResource>): ContainerImageResourcePromise;
+    /**
+     * Configures an image artifact's container build options using an asynchronous callback.
+     *
+     * Explicit callbacks run after source defaults and survive source replacement.
+     * Use `ContainerTargetPlatform.AllLinux` to select both Linux AMD64 and ARM64.
+     * Docker archive output is supported; OCI archive output is not implemented for Dockerfile image artifacts.
+     * Adding options invalidates materialized Dockerfile content and publication evidence.
+     * @param callback The callback that configures build options.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerImageResourcePromise;
     /**
      * Configures the resource to use the specified container registry for container image operations.
      *
@@ -13411,13 +13482,6 @@ export interface ContainerImageResource {
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
-    /**
-     * Configures container build options for a compute resource using an async callback.
-     * @param callback An async callback to configure container build options.
-     * @returns A reference to the `IResourceBuilder`1`.
-     * @experimental
-     */
-    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerImageResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -13489,6 +13553,65 @@ export interface ContainerImageResourcePromise extends PromiseLike<ContainerImag
      */
     withImageSource(image: string): ContainerImageResourcePromise;
     /**
+     * Configures a Dockerfile build as the source of an image artifact.
+     *
+     * Source configuration is last-wins. Replacing a source discards its build arguments, secrets, and generated
+     * Dockerfile callbacks, and invalidates publication evidence. Explicit container build options are retained.
+     * The resource remains an artifact, not a runnable container. This records a build description without building
+     * or publishing it during model construction. Build and deployment use Docker with its containerd image store;
+     * unsupported stores fail explicitly rather than discarding platforms or attestations. Local run-mode preparation is not implemented.
+     * @param contextPath The build context path, relative to the AppHost directory unless absolute.
+     * @param options Additional options.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withDockerfile(contextPath: string, options?: WithDockerfileOptions): ContainerImageResourcePromise;
+    /**
+     * Configures an image artifact's Dockerfile using an asynchronous builder callback.
+     *
+     * Repeated builder calls compose callbacks in registration order; the first call establishes the context and stage.
+     * Generation is deferred and uses UTF-8 without a BOM and LF line endings. Adding a callback invalidates generated
+     * content and publication evidence, while retaining build arguments and secrets. Selecting a different source
+     * discards the callbacks. Each pipeline execution rematerializes the callbacks and builds the source once.
+     * Publication requires Docker's containerd image store. Local run-mode preparation is not implemented.
+     * @param contextPath The build context path, relative to the AppHost directory unless absolute.
+     * @param callback The callback that constructs the Dockerfile.
+     * @param options Additional options.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withDockerfileBuilder(contextPath: string, callback: (arg: DockerfileBuilderCallbackContext) => Promise<void>, options?: WithDockerfileBuilderOptions): ContainerImageResourcePromise;
+    /**
+     * Adds an argument to an image artifact's Dockerfile build.
+     * @param name The build argument name.
+     * @param value A string or non-secret parameter builder.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withBuildArg(name: string, value: string | ParameterResource | Awaitable<ParameterResource>): ContainerImageResourcePromise;
+    /**
+     * Adds a parameter-backed secret to an image artifact's Dockerfile build.
+     *
+     * The value remains a parameter reference in manifests and is passed as a build secret, not an argument.
+     * @param name The build secret name.
+     * @param value The parameter builder belonging to the same application.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withBuildSecret(name: string, value: Awaitable<ParameterResource>): ContainerImageResourcePromise;
+    /**
+     * Configures an image artifact's container build options using an asynchronous callback.
+     *
+     * Explicit callbacks run after source defaults and survive source replacement.
+     * Use `ContainerTargetPlatform.AllLinux` to select both Linux AMD64 and ARM64.
+     * Docker archive output is supported; OCI archive output is not implemented for Dockerfile image artifacts.
+     * Adding options invalidates materialized Dockerfile content and publication evidence.
+     * @param callback The callback that configures build options.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerImageResourcePromise;
+    /**
      * Configures the resource to use the specified container registry for container image operations.
      *
      * This method adds a `ContainerRegistryReferenceAnnotation` to the resource,
@@ -13755,13 +13878,6 @@ export interface ContainerImageResourcePromise extends PromiseLike<ContainerImag
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
     /**
-     * Configures container build options for a compute resource using an async callback.
-     * @param callback An async callback to configure container build options.
-     * @returns A reference to the `IResourceBuilder`1`.
-     * @experimental
-     */
-    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerImageResourcePromise;
-    /**
      * Adds an optional string parameter
      * @param options Additional options.
      */
@@ -13826,7 +13942,7 @@ export interface ContainerImageResourcePromise extends PromiseLike<ContainerImag
 /**
  * Represents a container image artifact independently of a runnable container or application.
  *
- * Configure the source with `WithImageSource` and create registry-scoped destinations with
+ * Configure the source with `WithImageSource`, `WithDockerfile`, or `WithDockerfileBuilder` and create registry-scoped destinations with
  * `registry.AddImage(name, image)`. This resource has no compute or runtime lifetime.
  * Construction does not pull, build, push, or run an image.
  */
@@ -13857,6 +13973,148 @@ class ContainerImageResourceImpl extends ResourceBuilderBase<ContainerImageResou
      */
     withImageSource(image: string): ContainerImageResourcePromise {
         return new ContainerImageResourcePromiseImpl(this._withImageSourceInternal(image), this._client);
+    }
+
+    /** @internal */
+    private async _withDockerfileInternal(contextPath: string, dockerfilePath?: string, stage?: string): Promise<ContainerImageResource> {
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, contextPath };
+        if (dockerfilePath !== undefined) rpcArgs.dockerfilePath = dockerfilePath;
+        if (stage !== undefined) rpcArgs.stage = stage;
+        const result = await this._client.invokeCapability<ContainerImageResourceHandle>(
+            'Aspire.Hosting/withContainerImageDockerfile',
+            rpcArgs
+        );
+        return new ContainerImageResourceImpl(result, this._client);
+    }
+
+    /**
+     * Configures a Dockerfile build as the source of an image artifact.
+     *
+     * Source configuration is last-wins. Replacing a source discards its build arguments, secrets, and generated
+     * Dockerfile callbacks, and invalidates publication evidence. Explicit container build options are retained.
+     * The resource remains an artifact, not a runnable container. This records a build description without building
+     * or publishing it during model construction. Build and deployment use Docker with its containerd image store;
+     * unsupported stores fail explicitly rather than discarding platforms or attestations. Local run-mode preparation is not implemented.
+     * @param contextPath The build context path, relative to the AppHost directory unless absolute.
+     * @param options Additional options.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withDockerfile(contextPath: string, options?: WithDockerfileOptions): ContainerImageResourcePromise {
+        const dockerfilePath = options?.dockerfilePath;
+        const stage = options?.stage;
+        return new ContainerImageResourcePromiseImpl(this._withDockerfileInternal(contextPath, dockerfilePath, stage), this._client);
+    }
+
+    /** @internal */
+    private async _withDockerfileBuilderInternal(contextPath: string, callback: (arg: DockerfileBuilderCallbackContext) => Promise<void>, stage?: string): Promise<ContainerImageResource> {
+        const callbackId = registerCallback(async (argData: unknown) => {
+            const argHandle = wrapIfHandle(argData) as DockerfileBuilderCallbackContextHandle;
+            const arg = new DockerfileBuilderCallbackContextImpl(argHandle, this._client);
+            await callback(arg);
+        });
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, contextPath, callback: callbackId };
+        if (stage !== undefined) rpcArgs.stage = stage;
+        const result = await this._client.invokeCapability<ContainerImageResourceHandle>(
+            'Aspire.Hosting/withContainerImageDockerfileBuilder',
+            rpcArgs
+        );
+        return new ContainerImageResourceImpl(result, this._client);
+    }
+
+    /**
+     * Configures an image artifact's Dockerfile using an asynchronous builder callback.
+     *
+     * Repeated builder calls compose callbacks in registration order; the first call establishes the context and stage.
+     * Generation is deferred and uses UTF-8 without a BOM and LF line endings. Adding a callback invalidates generated
+     * content and publication evidence, while retaining build arguments and secrets. Selecting a different source
+     * discards the callbacks. Each pipeline execution rematerializes the callbacks and builds the source once.
+     * Publication requires Docker's containerd image store. Local run-mode preparation is not implemented.
+     * @param contextPath The build context path, relative to the AppHost directory unless absolute.
+     * @param callback The callback that constructs the Dockerfile.
+     * @param options Additional options.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withDockerfileBuilder(contextPath: string, callback: (arg: DockerfileBuilderCallbackContext) => Promise<void>, options?: WithDockerfileBuilderOptions): ContainerImageResourcePromise {
+        const stage = options?.stage;
+        return new ContainerImageResourcePromiseImpl(this._withDockerfileBuilderInternal(contextPath, callback, stage), this._client);
+    }
+
+    /** @internal */
+    private async _withBuildArgInternal(name: string, value: string | ParameterResource | Awaitable<ParameterResource>): Promise<ContainerImageResource> {
+        value = isPromiseLike(value) ? await value : value;
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, name, value };
+        const result = await this._client.invokeCapability<ContainerImageResourceHandle>(
+            'Aspire.Hosting/withContainerImageBuildArg',
+            rpcArgs
+        );
+        return new ContainerImageResourceImpl(result, this._client);
+    }
+
+    /**
+     * Adds an argument to an image artifact's Dockerfile build.
+     * @param name The build argument name.
+     * @param value A string or non-secret parameter builder.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withBuildArg(name: string, value: string | ParameterResource | Awaitable<ParameterResource>): ContainerImageResourcePromise {
+        return new ContainerImageResourcePromiseImpl(this._withBuildArgInternal(name, value), this._client);
+    }
+
+    /** @internal */
+    private async _withBuildSecretInternal(name: string, value: Awaitable<ParameterResource>): Promise<ContainerImageResource> {
+        value = isPromiseLike(value) ? await value : value;
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, name, value };
+        const result = await this._client.invokeCapability<ContainerImageResourceHandle>(
+            'Aspire.Hosting/withContainerImageBuildSecret',
+            rpcArgs
+        );
+        return new ContainerImageResourceImpl(result, this._client);
+    }
+
+    /**
+     * Adds a parameter-backed secret to an image artifact's Dockerfile build.
+     *
+     * The value remains a parameter reference in manifests and is passed as a build secret, not an argument.
+     * @param name The build secret name.
+     * @param value The parameter builder belonging to the same application.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withBuildSecret(name: string, value: Awaitable<ParameterResource>): ContainerImageResourcePromise {
+        return new ContainerImageResourcePromiseImpl(this._withBuildSecretInternal(name, value), this._client);
+    }
+
+    /** @internal */
+    private async _withContainerBuildOptionsInternal(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): Promise<ContainerImageResource> {
+        const callbackId = registerCallback(async (argData: unknown) => {
+            const argHandle = wrapIfHandle(argData) as ContainerBuildOptionsCallbackContextHandle;
+            const arg = new ContainerBuildOptionsCallbackContextImpl(argHandle, this._client);
+            await callback(arg);
+        });
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, callback: callbackId };
+        const result = await this._client.invokeCapability<ContainerImageResourceHandle>(
+            'Aspire.Hosting/withContainerImageBuildOptions',
+            rpcArgs
+        );
+        return new ContainerImageResourceImpl(result, this._client);
+    }
+
+    /**
+     * Configures an image artifact's container build options using an asynchronous callback.
+     *
+     * Explicit callbacks run after source defaults and survive source replacement.
+     * Use `ContainerTargetPlatform.AllLinux` to select both Linux AMD64 and ARM64.
+     * Docker archive output is supported; OCI archive output is not implemented for Dockerfile image artifacts.
+     * Adding options invalidates materialized Dockerfile content and publication evidence.
+     * @param callback The callback that configures build options.
+     * @returns The original image artifact builder.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerImageResourcePromise {
+        return new ContainerImageResourcePromiseImpl(this._withContainerBuildOptionsInternal(callback), this._client);
     }
 
     /** @internal */
@@ -14738,31 +14996,6 @@ class ContainerImageResourceImpl extends ResourceBuilderBase<ContainerImageResou
     }
 
     /** @internal */
-    private async _withContainerBuildOptionsInternal(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): Promise<ContainerImageResource> {
-        const callbackId = registerCallback(async (argData: unknown) => {
-            const argHandle = wrapIfHandle(argData) as ContainerBuildOptionsCallbackContextHandle;
-            const arg = new ContainerBuildOptionsCallbackContextImpl(argHandle, this._client);
-            await callback(arg);
-        });
-        const rpcArgs: Record<string, unknown> = { builder: this._handle, callback: callbackId };
-        const result = await this._client.invokeCapability<ContainerImageResourceHandle>(
-            'Aspire.Hosting/withContainerBuildOptions',
-            rpcArgs
-        );
-        return new ContainerImageResourceImpl(result, this._client);
-    }
-
-    /**
-     * Configures container build options for a compute resource using an async callback.
-     * @param callback An async callback to configure container build options.
-     * @returns A reference to the `IResourceBuilder`1`.
-     * @experimental
-     */
-    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerImageResourcePromise {
-        return new ContainerImageResourcePromiseImpl(this._withContainerBuildOptionsInternal(callback), this._client);
-    }
-
-    /** @internal */
     private async _withOptionalStringInternal(value?: string, enabled?: boolean): Promise<ContainerImageResource> {
         const rpcArgs: Record<string, unknown> = { builder: this._handle };
         if (value !== undefined) rpcArgs.value = value;
@@ -15140,6 +15373,11 @@ class ContainerImageResourceImpl extends ResourceBuilderBase<ContainerImageResou
 /** @internal */
 const ContainerImageResourcePromiseImpl = $aspireCreateFluentPromiseClass<ContainerImageResource, ContainerImageResourcePromise>((): $aspireFluentPromiseTransitions => ({
     ["withImageSource"]: () => ContainerImageResourcePromiseImpl,
+    ["withDockerfile"]: () => ContainerImageResourcePromiseImpl,
+    ["withDockerfileBuilder"]: () => ContainerImageResourcePromiseImpl,
+    ["withBuildArg"]: () => ContainerImageResourcePromiseImpl,
+    ["withBuildSecret"]: () => ContainerImageResourcePromiseImpl,
+    ["withContainerBuildOptions"]: () => ContainerImageResourcePromiseImpl,
     ["withContainerRegistry"]: () => ContainerImageResourcePromiseImpl,
     ["withDockerfileBaseImage"]: () => ContainerImageResourcePromiseImpl,
     ["withRequiredCommand"]: () => ContainerImageResourcePromiseImpl,
@@ -15174,7 +15412,6 @@ const ContainerImageResourcePromiseImpl = $aspireCreateFluentPromiseClass<Contai
     ["onInitializeResource"]: () => ContainerImageResourcePromiseImpl,
     ["onResourceReady"]: () => ContainerImageResourcePromiseImpl,
     ["createExecutionConfiguration"]: () => ExecutionConfigurationBuilderPromiseImpl,
-    ["withContainerBuildOptions"]: () => ContainerImageResourcePromiseImpl,
     ["withOptionalString"]: () => ContainerImageResourcePromiseImpl,
     ["withConfig"]: () => ContainerImageResourcePromiseImpl,
     ["withCreatedAt"]: () => ContainerImageResourcePromiseImpl,

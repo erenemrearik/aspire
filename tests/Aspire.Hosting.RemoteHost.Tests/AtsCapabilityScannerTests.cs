@@ -15,6 +15,25 @@ namespace Aspire.Hosting.RemoteHost.Tests;
 public class AtsCapabilityScannerTests
 {
     [Theory]
+    [InlineData("withContainerImageDockerfile", "withDockerfile")]
+    [InlineData("withContainerImageDockerfileBuilder", "withDockerfileBuilder")]
+    [InlineData("withContainerImageBuildArg", "withBuildArg")]
+    [InlineData("withContainerImageBuildSecret", "withBuildSecret")]
+    [InlineData("withContainerImageBuildOptions", "withContainerBuildOptions")]
+    public void ScanAssembly_ImageBuildCapabilities_HaveDistinctIdsAndImageTargets(string id, string name)
+    {
+        var result = AtsCapabilityScanner.ScanAssembly(typeof(DistributedApplication).Assembly);
+        var capability = Assert.Single(result.Capabilities, capability => capability.CapabilityId == $"Aspire.Hosting/{id}");
+#pragma warning disable ASPIREPIPELINES003
+        var type = AtsTypeMapping.DeriveTypeId(typeof(ContainerImageResource));
+#pragma warning restore ASPIREPIPELINES003
+
+        Assert.Equal(type, capability.TargetTypeId);
+        Assert.Equal(type, capability.ReturnType.TypeId);
+        Assert.Equal(name, capability.MethodName);
+    }
+
+    [Theory]
     [InlineData(nameof(ResourceFirstRegistryConstraint), typeof(IResource))]
     [InlineData(nameof(RegistryFirstResourceConstraint), typeof(IContainerRegistry))]
     public void CreateTypeRef_ResourceBuilderWithMultipleConstraints_PreservesFirstConstraint(string methodName, Type expectedType)

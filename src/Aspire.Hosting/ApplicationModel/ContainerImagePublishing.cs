@@ -15,7 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aspire.Hosting.ApplicationModel;
 
 /// <summary>
-/// Registers remote source preparation and verified, registry-scoped image publication.
+/// Registers image source preparation and verified, registry-scoped image publication.
 /// </summary>
 internal static class ContainerImagePublishing
 {
@@ -39,7 +39,13 @@ internal static class ContainerImagePublishing
                 .Select(publication => publication.Destination)
                 .Where(destination => !destination.IsExcludedFromPublish())
                 .ToArray();
-            if (destinations.Length == 0)
+            if (destinations.Length == 0 && !source.TryGetLastAnnotation<DockerfileBuildAnnotation>(out _))
+            {
+                return [];
+            }
+            var configuration = source.GetSource();
+            var buildSource = configuration.Dockerfile is not null;
+            if (destinations.Length == 0 && !buildSource)
             {
                 return [];
             }
@@ -56,7 +62,6 @@ internal static class ContainerImagePublishing
                 }
             }
 
-            var configuration = source.GetSource();
             // A new closure is created on each pipeline resolution. Never reuse prepared content
             // across deployments: a mutable tag may move, or a previous preparation may have failed.
             PreparedImage? prepared = null;
@@ -66,11 +71,15 @@ internal static class ContainerImagePublishing
                 new()
                 {
                     Name = prepareName,
-                    Description = $"Resolves the remote image source for {source.Name}.",
+                    Description = $"Prepares the image source for {source.Name}.",
                     Resource = source,
-                    DependsOnSteps = [WellKnownPipelineSteps.DeployPrereq, WellKnownPipelineSteps.PushPrereq],
+                    DependsOnSteps = buildSource
+                        ? [WellKnownPipelineSteps.BuildPrereq]
+                        : [WellKnownPipelineSteps.DeployPrereq, WellKnownPipelineSteps.PushPrereq],
+                    RequiredBySteps = buildSource ? [WellKnownPipelineSteps.Build] : [],
                     Action = async context =>
                     {
+                        prepared = null;
                         foreach (var destination in destinations)
                         {
                             destination.ClearPublishedDigest();
@@ -82,6 +91,19 @@ internal static class ContainerImagePublishing
                         await using var taskLifetime = task.ConfigureAwait(false);
                         try
                         {
+                            var runtime = await context.Services.GetRequiredService<IContainerRuntimeResolver>()
+                                .ResolveAsync(context.CancellationToken).ConfigureAwait(false);
+                            if (configuration.Dockerfile is { } dockerfile)
+                            {
+                                var digest = await ContainerImageArtifactBuilder.BuildAsync(source, dockerfile, runtime, context)
+                                    .ConfigureAwait(false);
+                                context.CancellationToken.ThrowIfCancellationRequested();
+                                EnsureConfiguration(source, configuration);
+                                prepared = new(runtime, digest, digest, PublicationTag: null, LocalArtifact: true);
+                                await task.CompleteAsync(new MarkdownString($"Built **{source.Name}** at `{digest}`"),
+                                    CompletionState.Completed, context.CancellationToken).ConfigureAwait(false);
+                                return;
+                            }
                             var pushOptions = await source.ProcessImagePushOptionsCallbackAsync(context.CancellationToken).ConfigureAwait(false);
                             var publicationTag = pushOptions.RemoteImageTag;
                             if (string.IsNullOrWhiteSpace(publicationTag))
@@ -89,8 +111,6 @@ internal static class ContainerImagePublishing
                                 throw new DistributedApplicationException($"The publication tag for image source '{source.Name}' must not be empty.");
                             }
 
-                            var runtime = await context.Services.GetRequiredService<IContainerRuntimeResolver>()
-                                .ResolveAsync(context.CancellationToken).ConfigureAwait(false);
                             var reference = await runtime.ResolveRemoteImageAsync(configuration.Image, context.CancellationToken).ConfigureAwait(false);
                             var resolved = ContainerImageName.ParseSource(reference);
                             if (resolved.Digest is null ||
@@ -103,7 +123,7 @@ internal static class ContainerImagePublishing
                             EnsureConfiguration(source, configuration);
                             // Deploy prerequisites configure the same default label on compute and
                             // artifact sources. Consumers still use the verified content digest.
-                            prepared = new(runtime, reference, resolved.Digest, publicationTag);
+                            prepared = new(runtime, reference, resolved.Digest, publicationTag, LocalArtifact: false);
                             await task.CompleteAsync(new MarkdownString($"Prepared **{source.Name}** at `{reference}`"),
                                 CompletionState.Completed, context.CancellationToken).ConfigureAwait(false);
                         }
@@ -124,7 +144,9 @@ internal static class ContainerImagePublishing
                     Description = $"Publishes {source.Name} to the {destination.Parent.Name} registry as {destination.Name}.",
                     Resource = destination,
                     Tags = [WellKnownPipelineTags.PushContainerImage],
-                    DependsOnSteps = [prepareName],
+                    DependsOnSteps = buildSource
+                        ? [prepareName, WellKnownPipelineSteps.DeployPrereq, WellKnownPipelineSteps.PushPrereq]
+                        : [prepareName],
                     // Standalone images must be reachable even without a compute deployment target.
                     RequiredBySteps = [WellKnownPipelineSteps.Push, WellKnownPipelineSteps.Deploy],
                     Action = context => PublishAsync(destination, configuration,
@@ -162,9 +184,30 @@ internal static class ContainerImagePublishing
         {
             var repository = await destination.GetRepositoryAsync(
                 new ValueProviderContext { ExecutionContext = context.ExecutionContext }, context.CancellationToken).ConfigureAwait(false);
-            var taggedDestination = $"{repository}:{prepared.PublicationTag}";
-            var reference = await prepared.Runtime.CopyRemoteImageAsync(
-                prepared.Reference, taggedDestination, context.CancellationToken).ConfigureAwait(false);
+            // Build-only execution does not initialize deploy labels or log into registries.
+            // Read the artifact publication label only after those push prerequisites complete.
+            var publicationTag = prepared.PublicationTag ??
+                (await destination.Source.ProcessImagePushOptionsCallbackAsync(context.CancellationToken).ConfigureAwait(false)).RemoteImageTag;
+            if (string.IsNullOrWhiteSpace(publicationTag))
+            {
+                throw new DistributedApplicationException($"The publication tag for image source '{destination.Source.Name}' must not be empty.");
+            }
+            var taggedDestination = $"{repository}:{publicationTag}";
+            string reference;
+            if (prepared.LocalArtifact)
+            {
+                if (prepared.Runtime is not IContainerImageArtifactRuntime artifactRuntime)
+                {
+                    throw new DistributedApplicationException($"Container runtime '{prepared.Runtime.Name}' cannot publish the prepared image artifact.");
+                }
+                reference = await artifactRuntime.PublishImageArtifactAsync(
+                    prepared.Digest, taggedDestination, context.CancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                reference = await prepared.Runtime.CopyRemoteImageAsync(
+                    prepared.Reference, taggedDestination, context.CancellationToken).ConfigureAwait(false);
+            }
             if (!StringComparer.Ordinal.Equals(reference, $"{repository}@{prepared.Digest}"))
             {
                 throw new DistributedApplicationException($"Container runtime did not verify the expected content reference for destination image '{destination.Name}'.");
@@ -185,7 +228,7 @@ internal static class ContainerImagePublishing
             await state.SaveSectionAsync(section, context.CancellationToken).ConfigureAwait(false);
             context.CancellationToken.ThrowIfCancellationRequested();
             EnsureConfiguration(destination.Source, configuration);
-            destination.RecordPublishedImage(repository, prepared.Digest, prepared.PublicationTag);
+            destination.RecordPublishedImage(repository, prepared.Digest, publicationTag);
             context.Summary.Add($"Image {destination.Name}", reference);
             await task.CompleteAsync(new MarkdownString($"Published **{destination.Name}** as `{reference}`"),
                 CompletionState.Completed, context.CancellationToken).ConfigureAwait(false);
@@ -254,5 +297,6 @@ internal static class ContainerImagePublishing
         }
     }
 
-    private sealed record PreparedImage(IContainerRuntime Runtime, string Reference, string Digest, string PublicationTag);
+    private sealed record PreparedImage(
+        IContainerRuntime Runtime, string Reference, string Digest, string? PublicationTag, bool LocalArtifact);
 }

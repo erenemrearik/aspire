@@ -119,7 +119,8 @@ internal sealed class DistributedApplicationPipeline : IDistributedApplicationPi
                 context.Logger.LogInformation("Setting default deploy tag '{Tag}' for image publications.", uniqueDeployTag);
 
                 foreach (var resource in context.Model.GetBuildResources()
-                    .Concat(context.Model.Resources.OfType<ContainerImageResource>().Where(resource => !resource.IsExcludedFromPublish())))
+                    .Concat(context.Model.Resources.OfType<ContainerImageResource>().Where(resource => !resource.IsExcludedFromPublish()))
+                    .Distinct())
                 {
                     // Refresh only pipeline-generated defaults. User callbacks remain authoritative,
                     // including callbacks added after a previous execution.

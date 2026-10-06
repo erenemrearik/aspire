@@ -6445,6 +6445,8 @@ type ContainerImageResource interface {
 	OnResourceStopped(callback func(arg ResourceStoppedEvent)) ContainerImageResource
 	SubscribeHttpsEndpointsUpdate(callback func(obj HttpsEndpointUpdateCallbackContext)) ContainerImageResource
 	TestWaitFor(dependency Resource) ContainerImageResource
+	WithBuildArg(name string, value any) ContainerImageResource
+	WithBuildSecret(name string, value ParameterResource) ContainerImageResource
 	WithCancellableOperation(operation func(arg *CancellationToken)) ContainerImageResource
 	WithChildRelationship(child Resource) ContainerImageResource
 	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ContainerImageResource
@@ -6454,7 +6456,9 @@ type ContainerImageResource interface {
 	WithCorrelationId(correlationId string) ContainerImageResource
 	WithCreatedAt(createdAt string) ContainerImageResource
 	WithDependency(dependency ResourceWithConnectionString) ContainerImageResource
+	WithDockerfile(contextPath string, options ...*WithDockerfileOptions) ContainerImageResource
 	WithDockerfileBaseImage(options ...*WithDockerfileBaseImageOptions) ContainerImageResource
+	WithDockerfileBuilder(contextPath string, callback func(arg DockerfileBuilderCallbackContext), options ...*WithDockerfileBuilderOptions) ContainerImageResource
 	WithEndpoints(endpoints []string) ContainerImageResource
 	WithExplicitStart() ContainerImageResource
 	WithHealthCheck(key string) ContainerImageResource
@@ -6670,6 +6674,40 @@ func (s *containerImageResource) TestWaitFor(dependency Resource) ContainerImage
 	return s
 }
 
+// WithBuildArg adds an argument to an image artifact's Dockerfile build.
+// Allowed types for parameter value: string, ParameterResource.
+func (s *containerImageResource) WithBuildArg(name string, value any) ContainerImageResource {
+	if s.err != nil { return s }
+	switch value.(type) {
+	case string, ParameterResource:
+	default:
+		err := fmt.Errorf("aspire: WithBuildArg: parameter %q must be one of [string, ParameterResource], got %T", "value", value)
+		s.setErr(err); return s
+	}
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["name"] = serializeValue(name)
+	if !isNil(value) { reqArgs["value"] = serializeValue(value) }
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerImageBuildArg", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithBuildSecret adds a parameter-backed secret to an image artifact's Dockerfile build.
+func (s *containerImageResource) WithBuildSecret(name string, value ParameterResource) ContainerImageResource {
+	if s.err != nil { return s }
+	if value != nil { if err := value.Err(); err != nil { s.setErr(err); return s } }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["name"] = serializeValue(name)
+	reqArgs["value"] = serializeValue(value)
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerImageBuildSecret", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
 // WithCancellableOperation performs a cancellable operation
 func (s *containerImageResource) WithCancellableOperation(operation func(arg *CancellationToken)) ContainerImageResource {
 	if s.err != nil { return s }
@@ -6741,7 +6779,7 @@ func (s *containerImageResource) WithConfig(config *TestConfigDto) ContainerImag
 	return s
 }
 
-// WithContainerBuildOptions configures container build options for a compute resource using an async callback.
+// WithContainerBuildOptions configures an image artifact's container build options using an asynchronous callback.
 func (s *containerImageResource) WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ContainerImageResource {
 	if s.err != nil { return s }
 	ctx := context.Background()
@@ -6756,7 +6794,7 @@ func (s *containerImageResource) WithContainerBuildOptions(callback func(arg Con
 		}
 		reqArgs["callback"] = s.client.registerCallback(shim)
 	}
-	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerBuildOptions", reqArgs); err != nil { s.setErr(err) }
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerImageBuildOptions", reqArgs); err != nil { s.setErr(err) }
 	return s
 }
 
@@ -6810,6 +6848,25 @@ func (s *containerImageResource) WithDependency(dependency ResourceWithConnectio
 	return s
 }
 
+// WithDockerfile configures a Dockerfile build as the source of an image artifact.
+func (s *containerImageResource) WithDockerfile(contextPath string, options ...*WithDockerfileOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["contextPath"] = serializeValue(contextPath)
+	if len(options) > 0 {
+		merged := &WithDockerfileOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerImageDockerfile", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
 // WithDockerfileBaseImage configures custom base images for generated Dockerfiles.
 func (s *containerImageResource) WithDockerfileBaseImage(options ...*WithDockerfileBaseImageOptions) ContainerImageResource {
 	if s.err != nil { return s }
@@ -6825,6 +6882,33 @@ func (s *containerImageResource) WithDockerfileBaseImage(options ...*WithDockerf
 		for k, v := range merged.ToMap() { reqArgs[k] = v }
 	}
 	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withDockerfileBaseImage", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
+// WithDockerfileBuilder configures an image artifact's Dockerfile using an asynchronous builder callback.
+func (s *containerImageResource) WithDockerfileBuilder(contextPath string, callback func(arg DockerfileBuilderCallbackContext), options ...*WithDockerfileBuilderOptions) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	reqArgs["contextPath"] = serializeValue(contextPath)
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[DockerfileBuilderCallbackContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if len(options) > 0 {
+		merged := &WithDockerfileBuilderOptions{}
+		for _, opt := range options {
+			if opt != nil { merged = deepUpdate(merged, opt) }
+		}
+		for k, v := range merged.ToMap() { reqArgs[k] = v }
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerImageDockerfileBuilder", reqArgs); err != nil { s.setErr(err) }
 	return s
 }
 
@@ -30973,6 +31057,32 @@ func (s *userSecretsManager) TrySetSecret(name string, value string) (bool, erro
 // Options structs
 // ============================================================================
 
+// WithDockerfileOptions carries optional parameters for WithDockerfile.
+type WithDockerfileOptions struct {
+	DockerfilePath *string `json:"dockerfilePath,omitempty"`
+	Stage *string `json:"stage,omitempty"`
+}
+
+func (o *WithDockerfileOptions) ToMap() map[string]any {
+	m := map[string]any{}
+	if o == nil { return m }
+	if o.DockerfilePath != nil { m["dockerfilePath"] = serializeValue(o.DockerfilePath) }
+	if o.Stage != nil { m["stage"] = serializeValue(o.Stage) }
+	return m
+}
+
+// WithDockerfileBuilderOptions carries optional parameters for WithDockerfileBuilder.
+type WithDockerfileBuilderOptions struct {
+	Stage *string `json:"stage,omitempty"`
+}
+
+func (o *WithDockerfileBuilderOptions) ToMap() map[string]any {
+	m := map[string]any{}
+	if o == nil { return m }
+	if o.Stage != nil { m["stage"] = serializeValue(o.Stage) }
+	return m
+}
+
 // AddContainerRegistryOptions carries optional parameters for AddContainerRegistry.
 type AddContainerRegistryOptions struct {
 	Repository any `json:"repository,omitempty"`
@@ -31006,20 +31116,6 @@ func (o *WithImageOptions) ToMap() map[string]any {
 	m := map[string]any{}
 	if o == nil { return m }
 	if o.Tag != nil { m["tag"] = serializeValue(o.Tag) }
-	return m
-}
-
-// WithDockerfileOptions carries optional parameters for WithDockerfile.
-type WithDockerfileOptions struct {
-	DockerfilePath *string `json:"dockerfilePath,omitempty"`
-	Stage *string `json:"stage,omitempty"`
-}
-
-func (o *WithDockerfileOptions) ToMap() map[string]any {
-	m := map[string]any{}
-	if o == nil { return m }
-	if o.DockerfilePath != nil { m["dockerfilePath"] = serializeValue(o.DockerfilePath) }
-	if o.Stage != nil { m["stage"] = serializeValue(o.Stage) }
 	return m
 }
 
@@ -31086,18 +31182,6 @@ func (o *WithContainerCertificatePathsOptions) ToMap() map[string]any {
 	if o.CustomCertificatesDestination != nil { m["customCertificatesDestination"] = serializeValue(o.CustomCertificatesDestination) }
 	if o.DefaultCertificateBundlePaths != nil { m["defaultCertificateBundlePaths"] = serializeValue(o.DefaultCertificateBundlePaths) }
 	if o.DefaultCertificateDirectoryPaths != nil { m["defaultCertificateDirectoryPaths"] = serializeValue(o.DefaultCertificateDirectoryPaths) }
-	return m
-}
-
-// WithDockerfileBuilderOptions carries optional parameters for WithDockerfileBuilder.
-type WithDockerfileBuilderOptions struct {
-	Stage *string `json:"stage,omitempty"`
-}
-
-func (o *WithDockerfileBuilderOptions) ToMap() map[string]any {
-	m := map[string]any{}
-	if o == nil { return m }
-	if o.Stage != nil { m["stage"] = serializeValue(o.Stage) }
 	return m
 }
 

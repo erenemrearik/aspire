@@ -6,6 +6,7 @@
 #pragma warning disable ASPIREPIPELINES003
 #pragma warning disable ASPIRECONTAINERRUNTIME001
 #pragma warning disable ASPIRECOMPUTE003
+#pragma warning disable ASPIREDOCKERFILEBUILDER001
 
 using Aspire.Hosting.Pipelines;
 using Aspire.Hosting.Publishing;
@@ -25,6 +26,181 @@ public class ContainerImagePublishingTests(ITestOutputHelper outputHelper)
     private const string Digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private const string PinnedSource = "docker.io/library/busybox@" + Digest;
     private const string DefaultImageTag = "aspire-deploy-20261005040506";
+
+    [Theory]
+    [InlineData("build", false)]
+    [InlineData("deploy", false)]
+    [InlineData("push", true)]
+    [InlineData("push-first", true)]
+    public async Task DockerfileSourcesBuildOnceAndPublishOnlySelectedDestinations(string step, bool generated)
+    {
+        using var workspace = TemporaryWorkspace.Create(outputHelper);
+        await File.WriteAllTextAsync(Path.Combine(workspace.Path, "Dockerfile"), "FROM scratch\n");
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: step);
+        var runtime = AddRuntime(builder);
+        runtime.BuildImageArtifactAsyncCallback = _ => Task.FromResult(Digest);
+        runtime.PublishImageArtifactAsyncCallback = (digest, destination, _) =>
+            Task.FromResult(destination[..destination.LastIndexOf(':')] + "@" + digest);
+        var generatedCalls = 0;
+        var source = builder.AddContainerImage("tools");
+        if (generated)
+        {
+            source.WithDockerfileBuilder(workspace.Path, context =>
+            {
+                generatedCalls++;
+                context.Builder.From("scratch");
+            });
+        }
+        else
+        {
+            source.WithDockerfile(workspace.Path);
+        }
+        source.WithBuildArg("VERSION", builder.AddParameter("version", "v1"))
+            .WithBuildSecret("TOKEN", builder.AddParameter("token", "secret-value", secret: true))
+            .WithContainerBuildOptions(context =>
+            {
+                context.TargetPlatform = ContainerTargetPlatform.AllLinux;
+                context.LocalImageName = "custom-tools";
+                context.LocalImageTag = "build-tag";
+            });
+        var first = builder.AddContainerRegistry("one", "first.example.com").AddImage("first", source);
+        var second = builder.AddContainerRegistry("two", "second.example.com").AddImage("second", source);
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        await ExecuteAsync(app);
+
+        var build = Assert.Single(runtime.BuildImageCalls);
+        Assert.Equal(workspace.Path, build.contextPath);
+        Assert.Equal("custom-tools", build.options!.ImageName);
+        Assert.Equal("build-tag", build.options.Tag);
+        Assert.Equal(ContainerTargetPlatform.AllLinux, build.options.TargetPlatform);
+        Assert.Equal("v1", runtime.CapturedBuildArguments!["VERSION"]);
+        Assert.Equal("secret-value", runtime.CapturedBuildSecrets!["TOKEN"].Value);
+        Assert.Equal(generated ? 1 : 0, generatedCalls);
+        Assert.Empty(runtime.RemoteResolveCalls);
+        Assert.Empty(runtime.RemoteCopyCalls);
+        var publicationCount = step == "build" ? 0 : step == "push-first" ? 1 : 2;
+        Assert.Equal(publicationCount, runtime.ArtifactPublishCalls.Count);
+        Assert.All(runtime.ArtifactPublishCalls, publication =>
+        {
+            Assert.Equal(Digest, publication.Digest);
+            Assert.Equal(DefaultImageTag, publication.Destination[(publication.Destination.LastIndexOf(':') + 1)..]);
+        });
+        if (publicationCount == 0)
+        {
+            Assert.Throws<InvalidOperationException>(first.Resource.GetPublishedDigest);
+            Assert.Throws<InvalidOperationException>(second.Resource.GetPublishedDigest);
+        }
+        else
+        {
+            Assert.Equal(Digest, first.Resource.GetPublishedDigest());
+        }
+    }
+
+    [Fact]
+    public async Task UnassociatedDockerfileParticipatesInBuildWithoutRegistryWork()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "build");
+        var runtime = AddRuntime(builder);
+        runtime.BuildImageArtifactAsyncCallback = _ => Task.FromResult(Digest);
+        builder.AddContainerImage("tools").WithDockerfileBuilder(".", context => context.Builder.From("scratch"));
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        await ExecuteAsync(app);
+
+        Assert.Single(runtime.BuildImageCalls);
+        Assert.Empty(runtime.ArtifactPublishCalls);
+        Assert.Empty(runtime.RemoteResolveCalls);
+    }
+
+    [Theory]
+    [InlineData("build-failure")]
+    [InlineData("invalid-digest")]
+    [InlineData("changed-source")]
+    [InlineData("publication-mismatch")]
+    public async Task DockerfilePreparationAndPublicationFailuresDoNotApplyConsumers(string failure)
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "apply-consumer");
+        var runtime = AddRuntime(builder);
+        var source = builder.AddContainerImage("tools").WithDockerfileBuilder(".", context => context.Builder.From("scratch"));
+        runtime.BuildImageArtifactAsyncCallback = _ =>
+        {
+            if (failure == "build-failure")
+            {
+                throw new DistributedApplicationException("Build failed.");
+            }
+            if (failure == "changed-source")
+            {
+                source.WithImageSource("busybox");
+            }
+
+            return Task.FromResult(failure == "invalid-digest" ? "not-a-digest" : Digest);
+        };
+        runtime.PublishImageArtifactAsyncCallback = (_, _, _) => Task.FromResult("registry.example.com/published@" + new string('a', 64));
+        var image = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        var applied = false;
+        builder.AddContainer("consumer", "busybox").WithReference(image).WithPipelineStepFactory(_ => new PipelineStep
+        {
+            Name = "apply-consumer",
+            Tags = [WellKnownPipelineTags.DeployCompute],
+            Action = _ => { applied = true; return Task.CompletedTask; }
+        });
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        await Assert.ThrowsAsync<DistributedApplicationException>(() => ExecuteAsync(app));
+
+        Assert.False(applied);
+        Assert.Throws<InvalidOperationException>(image.Resource.GetPublishedDigest);
+        Assert.Equal(failure == "publication-mismatch" ? 1 : 0, runtime.ArtifactPublishCalls.Count);
+    }
+
+    [Fact]
+    public async Task RepeatedDockerfileBuildsRematerializeCallbacksAndDoNotReusePreparedResults()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "build");
+        var runtime = AddRuntime(builder);
+        runtime.BuildImageArtifactAsyncCallback = _ => Task.FromResult(Digest);
+        var calls = 0;
+        builder.AddContainerImage("tools").WithDockerfileBuilder(".", context =>
+        {
+            calls++;
+            context.Builder.From("scratch");
+        });
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        await ExecuteAsync(app);
+        await ExecuteAsync(app);
+
+        Assert.Equal(2, calls);
+        Assert.Equal(2, runtime.BuildImageCalls.Count);
+        Assert.Empty(runtime.ArtifactPublishCalls);
+    }
+
+    [Fact]
+    public async Task CancellationAfterArtifactBuildDoesNotPublishOrRecordEvidence()
+    {
+        using var builder = TestDistributedApplicationBuilder.Create(DistributedApplicationOperation.Publish, step: "deploy");
+        using var cancellation = new CancellationTokenSource();
+        var runtime = AddRuntime(builder);
+        runtime.BuildImageArtifactAsyncCallback = _ =>
+        {
+            cancellation.Cancel();
+            return Task.FromResult(Digest);
+        };
+        var source = builder.AddContainerImage("tools").WithDockerfileBuilder(".", context => context.Builder.From("scratch"));
+        var image = builder.AddContainerRegistry("registry", "registry.example.com").AddImage("published", source);
+        using var app = builder.Build();
+        await app.ExecuteBeforeStartHooksAsync(default);
+        var context = new PipelineContext(app.Services.GetRequiredService<DistributedApplicationModel>(),
+            app.Services.GetRequiredService<DistributedApplicationExecutionContext>(), app.Services,
+            NullLogger.Instance, cancellation.Token);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            app.Services.GetRequiredService<IDistributedApplicationPipeline>().ExecuteAsync(context));
+
+        Assert.IsAssignableFrom<OperationCanceledException>(exception.InnerException);
+        Assert.Empty(runtime.ArtifactPublishCalls);
+        Assert.Throws<InvalidOperationException>(image.Resource.GetPublishedDigest);
+    }
 
     [Theory]
     [InlineData("exclude-source")]

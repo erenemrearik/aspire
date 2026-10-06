@@ -4,6 +4,7 @@
 #pragma warning disable ASPIRECONTAINERRUNTIME001
 #pragma warning disable ASPIREPIPELINES003
 
+using System.Text.RegularExpressions;
 using Aspire.Hosting.Dcp.Process;
 using Aspire.Hosting.Publishing;
 using Aspire.Hosting.Tests.Utils;
@@ -16,6 +17,90 @@ public class RemoteContainerImageTransferTests
     private const string Digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private const string OtherDigest = "sha256:1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private const string CapabilityHelp = "      --prefer-index             When only a single source is specified";
+
+    [Theory]
+    [InlineData(Digest, Digest, true)]
+    [InlineData(OtherDigest, Digest, false)]
+    [InlineData(Digest, OtherDigest, false)]
+    public async Task ArtifactBuildVerifiesBuildMetadataAgainstTheCompleteLocalRoot(string metadataDigest, string localDigest, bool success)
+    {
+        var runner = new TestProcessRunner();
+        runner.EnqueueResult(output: ["""[["driver-type","io.containerd.snapshotter.v1"]]"""]);
+        runner.EnqueueResult(output: ["github.com/docker/buildx"]);
+        runner.EnqueueResult(output: ["default"]);
+        runner.EnqueueResult();
+        runner.EnqueueResult(output: [localDigest]);
+        string? metadataPath = null;
+        runner.RunCallback = spec =>
+        {
+            if (spec.Arguments?.StartsWith("buildx build ", StringComparison.Ordinal) == true)
+            {
+                // The builder uses: --metadata-file "/secure/temp/directory/metadata.json".
+                metadataPath = Regex.Match(spec.Arguments, "--metadata-file \"([^\"]+)\"").Groups[1].Value;
+                File.WriteAllText(metadataPath, $$"""{"containerimage.digest":"{{metadataDigest}}"}""");
+            }
+        };
+        IContainerImageArtifactRuntime runtime = new DockerContainerRuntime(NullLogger<DockerContainerRuntime>.Instance, runner);
+        var build = runtime.BuildImageArtifactAsync(
+            Path.GetFullPath("."), Path.GetFullPath("Dockerfile"),
+            new() { ImageName = "tools", Tag = "build", TargetPlatform = ContainerTargetPlatform.AllLinux },
+            [], [], "release", default);
+        if (success)
+        {
+            Assert.Equal(Digest, await build);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<DistributedApplicationException>(() => build);
+        }
+        Assert.NotNull(metadataPath);
+        Assert.False(Directory.Exists(Path.GetDirectoryName(metadataPath)));
+        var spec = runner.ProcessSpecs[3];
+        Assert.Contains("--load", spec.Arguments!);
+        Assert.Contains("--platform \"linux/amd64,linux/arm64\"", spec.Arguments!);
+        Assert.Contains("--target \"release\"", spec.Arguments!);
+        AssertCommand(runner.ProcessSpecs[4], ["image", "inspect", "tools:build", "--format", "{{.Descriptor.Digest}}"]);
+    }
+
+    [Theory]
+    [InlineData("""[["Backing Filesystem","extfs"]]""")]
+    [InlineData("null")]
+    [InlineData("not-json")]
+    public async Task ArtifactBuildRejectsStoresThatCannotRetainTheGraphBeforeBuilding(string status)
+    {
+        var runner = new TestProcessRunner();
+        runner.EnqueueResult(output: [status]);
+        IContainerImageArtifactRuntime runtime = new DockerContainerRuntime(NullLogger<DockerContainerRuntime>.Instance, runner);
+
+        await Assert.ThrowsAsync<DistributedApplicationException>(() => runtime.BuildImageArtifactAsync(
+            ".", "Dockerfile", new() { ImageName = "tools", Tag = "build" }, [], [], null, default));
+        AssertCommand(Assert.Single(runner.ProcessSpecs), ["info", "--format", "{{json .DriverStatus}}"]);
+    }
+
+    [Theory]
+    [InlineData(Digest, true)]
+    [InlineData(OtherDigest, false)]
+    public async Task ArtifactPublicationTagsTheImmutableIndexAndVerifiesItsDestination(string publishedDigest, bool success)
+    {
+        var runner = new TestProcessRunner();
+        runner.EnqueueResult();
+        runner.EnqueueResult();
+        runner.EnqueueResult(output: [publishedDigest]);
+        IContainerImageArtifactRuntime runtime = new DockerContainerRuntime(NullLogger<DockerContainerRuntime>.Instance, runner);
+        var publication = runtime.PublishImageArtifactAsync(Digest, "localhost:5000/tools:publication", default);
+        if (success)
+        {
+            Assert.Equal("localhost:5000/tools@" + Digest, await publication);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<DistributedApplicationException>(() => publication);
+        }
+        Assert.Collection(runner.ProcessSpecs,
+            spec => AssertCommand(spec, ["tag", Digest, "localhost:5000/tools:publication"]),
+            spec => AssertCommand(spec, ["push", "localhost:5000/tools:publication"]),
+            spec => AssertCommand(spec, ["buildx", "imagetools", "inspect", "localhost:5000/tools:publication", "--format", "{{.Manifest.Digest}}"]));
+    }
 
     [Theory]
     [InlineData("busybox", "docker.io/library/busybox:latest", "docker.io/library/busybox@" + Digest)]
@@ -240,6 +325,10 @@ public class RemoteContainerImageTransferTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runtime.ResolveRemoteImageAsync("busybox", cancellation.Token));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runtime.CopyRemoteImageAsync("busybox@" + Digest, "registry.example.com/tools:v1", cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runtime.BuildImageArtifactAsync(
+            ".", "Dockerfile", new() { ImageName = "tools", Tag = "build" }, [], [], null, cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            runtime.PublishImageArtifactAsync(Digest, "registry.example.com/tools:v1", cancellation.Token));
         Assert.Empty(runner.ProcessSpecs);
     }
 

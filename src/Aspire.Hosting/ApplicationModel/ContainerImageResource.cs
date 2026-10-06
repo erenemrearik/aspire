@@ -9,7 +9,7 @@ namespace Aspire.Hosting.ApplicationModel;
 /// Represents a container image artifact independently of a runnable container or application.
 /// </summary>
 /// <remarks>
-/// Configure the source with <c>WithImageSource</c> and create registry-scoped destinations with
+/// Configure the source with <c>WithImageSource</c>, <c>WithDockerfile</c>, or <c>WithDockerfileBuilder</c> and create registry-scoped destinations with
 /// <c>registry.AddImage(name, image)</c>. This resource has no compute or runtime lifetime.
 /// Construction does not pull, build, push, or run an image.
 /// </remarks>
@@ -25,10 +25,21 @@ public sealed class ContainerImageResource : Resource, IResourceWithoutLifetime
     {
     }
 
-    internal ContainerImageSourceAnnotation GetSource() =>
-        this.TryGetLastAnnotation<ContainerImageSourceAnnotation>(out var source)
-            ? source
-            : throw new InvalidOperationException($"Image artifact '{Name}' has no source. Configure it with WithImageSource.");
+    internal ContainerImageSourceAnnotation GetSource()
+    {
+        if (!this.TryGetLastAnnotation<ContainerImageSourceAnnotation>(out var source))
+        {
+            throw new InvalidOperationException(
+                $"Image artifact '{Name}' has no source. Configure it with WithImageSource, WithDockerfile, or WithDockerfileBuilder.");
+        }
+        if (source.Dockerfile is { } dockerfile &&
+            (!this.TryGetLastAnnotation<DockerfileBuildAnnotation>(out var active) || !ReferenceEquals(dockerfile, active)))
+        {
+            throw new InvalidOperationException($"Image artifact '{Name}' has a different Dockerfile build annotation than its configured source. Configure the source again.");
+        }
+
+        return source;
+    }
 
     internal bool HasExplicitRegistryAssociation =>
         Annotations.OfType<ContainerImageRegistryAssociationAnnotation>().Any(a => a.DefaultEnvironment is null);
