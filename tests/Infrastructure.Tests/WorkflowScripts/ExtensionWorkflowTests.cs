@@ -257,11 +257,11 @@ public sealed class ExtensionWorkflowTests
         var normalTests = Mapping(s_ciJobs, "tests");
         Assert.Equal("./.github/workflows/tests.yml", Scalar(normalTests, "uses"));
         Assert.Equal(
-            "${{ github.repository_owner == 'microsoft' && needs.prepare_for_ci.outputs.skip_workflow != 'true' }}",
+            "${{ github.repository == 'microsoft/aspire' && needs.prepare_for_ci.outputs.skip_workflow != 'true' }}",
             Scalar(normalTests, "if"));
 
         Assert.Equal(
-            "${{ github.repository_owner == 'microsoft' && needs.prepare_for_ci.outputs.skip_workflow != 'true' }}",
+            "${{ github.repository == 'microsoft/aspire' && needs.prepare_for_ci.outputs.skip_workflow != 'true' }}",
             Scalar(Mapping(s_ciJobs, "stabilization_check"), "if"));
     }
 
@@ -288,7 +288,7 @@ public sealed class ExtensionWorkflowTests
 
         Assert.Equal(["prepare_for_ci", "tests", "stabilization_check"], SequenceScalars(tracker, "needs"));
         Assert.Equal(
-            "${{ always() && github.event_name == 'push' && github.repository_owner == 'microsoft' }}",
+            "${{ always() && github.event_name == 'push' && github.repository == 'microsoft/aspire' }}",
             Scalar(tracker, "if"));
 
         var scriptStep = Assert.Single(Steps(tracker), step => Scalar(step, "name") == "File or close the red-main issue");
