@@ -230,7 +230,7 @@ internal sealed class DescribeCommand : BaseCommand
                 r => r.Name,
                 r => ResourceSnapshotMapper.GetResourceName(r, graphResources),
                 r => r.Relationships
-                    .Where(relationship => relationship.ResourceName != r.DisplayName)
+                    .Where(relationship => !string.Equals(relationship.ResourceName, r.DisplayName, StringComparisons.ResourceName))
                     .SelectMany(relationship => resourcesByDisplayName[relationship.ResourceName])
                     .Select(target => target.Name));
             InteractionService.DisplayRawText(diagram, ConsoleOutput.Standard);

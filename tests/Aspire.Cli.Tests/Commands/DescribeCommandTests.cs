@@ -945,6 +945,8 @@ public class DescribeCommandTests(ITestOutputHelper outputHelper)
                     new() { ResourceName = "API", Type = "Reference" },
                     new() { ResourceName = "api", Type = "WaitFor" },
                     new() { ResourceName = "frontend", Type = "Reference" },
+                    new() { ResourceName = "Frontend", Type = "Reference" },
+                    new() { ResourceName = "FRONTEND", Type = "WaitFor" },
                     new() { ResourceName = "cache", Type = "Reference" },
                     new() { ResourceName = "connection", Type = "Reference" },
                     new() { ResourceName = "missing", Type = "Reference" }
