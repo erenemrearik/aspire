@@ -521,6 +521,9 @@ path_rules:
   - paths: [src/Aspire.Tray/Windows/publish.ps1]
     targets: [CLI_BUNDLE, test:Infrastructure.Tests]
     reason: Windows native publishing and smoke invocation
+  - paths: [src/Aspire.Tray/Linux/smoke-test.py]
+    targets: [CLI_BUNDLE, test:Infrastructure.Tests]
+    reason: Linux native archive smoke and lifecycle validation
   - paths:
       - eng/scripts/generate-template-cgmanifest.ps1
       - src/Aspire.ProjectTemplates/Aspire.ProjectTemplates.csproj
@@ -536,10 +539,10 @@ path_rules:
 # triggers.
 # Project Name == the .csproj base name (what Layer 1 emits).
 affected_project_rules:
-  - projects: [Aspire.Tray.Mac, Aspire.Tray.Windows]
+  - projects: [Aspire.Tray.Linux, Aspire.Tray.Mac, Aspire.Tray.Windows]
     targets: [test:Aspire.Tray.Tests, test:Infrastructure.Tests]
     reason: native platform changes must retain shared tray contracts and the packaging/signing invariants; tests source-link common code rather than referencing the platform executables
-  - projects: [Aspire.Tray.Mac, Aspire.Tray.Windows]
+  - projects: [Aspire.Tray.Linux, Aspire.Tray.Mac, Aspire.Tray.Windows]
     targets: [CLI_BUNDLE]
     reason: native tray payloads are embedded in the CLI bundle
   - projects: [CreateLayout]

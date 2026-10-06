@@ -238,7 +238,7 @@ jobs:
               displayName: 🟣Ad-hoc codesign aspire-managed with JIT entitlements
 
           # Publish native tray payloads before signing and never republish afterward.
-          - ${{ if in(parameters.agentOs, 'macos', 'windows') }}:
+          - ${{ if or(in(parameters.agentOs, 'macos', 'windows'), in(targetRid, 'linux-x64', 'linux-arm64')) }}:
             - script: >-
                 $(Build.SourcesDirectory)/$(dotnetScript)
                 msbuild
