@@ -1,0 +1,135 @@
+{
+  "run_id": 37387294685,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/37387294685",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-06T00:08:40Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 20736,
+    "title": "Reduce dashboard CPU under sustained metric ingestion",
+    "author": "JamesNK",
+    "state": "closed",
+    "head_branch": "jamesnk/dashboard-metric-retention-cpu",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/20736",
+    "merged_at": "2026-10-05T23:13:54Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "b00cff093521bf5ff04f729a44a57b21d228f3a8",
+    "failed_sha": "833be629720d582a57118babf1423201aa4944e9",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "dcc203534f5d41bc03e831c9cc67ac09092da52d",
+        "message": "Add one-time Aspire usefulness feedback in VS Code (#20399) ## Description Add a lightweight way to measure whether Aspire improves users' development experience without sending them to a full survey. This measures a Yes/No perceived-benefit rate, not NSAT or an objective productivity improvement. **Draft: the campaign is disabled and its expiry is unset.** Classification/privacy approval and verified production ingestion/reporting are required before enabling it. ### User-facing usage Once the ",
+        "html_url": "https://github.com/microsoft/aspire/commit/dcc203534f5d41bc03e831c9cc67ac09092da52d",
+        "pull_request": {
+          "number": 20399,
+          "title": "Add one-time Aspire usefulness feedback in VS Code",
+          "url": "https://github.com/microsoft/aspire/pull/20399",
+          "merged_at": "2026-10-05T17:38:27Z"
+        }
+      },
+      {
+        "sha": "e5f8dc6b1194773458881b400b1e2c91f91a33d8",
+        "message": "Preserve child exception stacks in dashboard aggregate-error telemetry (#20732) ## Description Dashboard telemetry for Blazor circuit error 111 can contain an `AggregateException` with an empty stack trace. Blazor creates disposal aggregates and passes them directly to its error handler without throwing them, so the original stacks are on the child exceptions rather than the aggregate. Record the child exception types, messages, and stacks instead, so disposal failures can be traced to the affec",
+        "html_url": "https://github.com/microsoft/aspire/commit/e5f8dc6b1194773458881b400b1e2c91f91a33d8",
+        "pull_request": {
+          "number": 20732,
+          "title": "Preserve child exception stacks in dashboard aggregate-error telemetry",
+          "url": "https://github.com/microsoft/aspire/pull/20732",
+          "merged_at": "2026-10-05T19:08:21Z"
+        }
+      },
+      {
+        "sha": "34988cb0e05889a0501d075ffe15165e1f767f30",
+        "message": "Prepare repository metadata for Aspire 17.0 (#20569) ## Description Remove the disabled, temporary main-to-release/14.0 synchronization workflow, its harness/tests, watchdog entry, and obsolete operating instructions. That workflow served the advance integration branch while `main` developed 13.6 and is no longer needed. Restrict the `main` milestone rule to merged PRs so PRs closed without merging are not assigned milestone 17.0. Leave the existing `release/13.6` rule unchanged. Per review feed",
+        "html_url": "https://github.com/microsoft/aspire/commit/34988cb0e05889a0501d075ffe15165e1f767f30",
+        "pull_request": {
+          "number": 20569,
+          "title": "Prepare repository metadata for Aspire 17.0",
+          "url": "https://github.com/microsoft/aspire/pull/20569",
+          "merged_at": "2026-10-05T21:58:54Z"
+        }
+      },
+      {
+        "sha": "833be629720d582a57118babf1423201aa4944e9",
+        "message": "Reduce dashboard CPU under sustained metric ingestion (#20736)",
+        "html_url": "https://github.com/microsoft/aspire/commit/833be629720d582a57118babf1423201aa4944e9",
+        "pull_request": {
+          "number": 20736,
+          "title": "Reduce dashboard CPU under sustained metric ingestion",
+          "url": "https://github.com/microsoft/aspire/pull/20736",
+          "merged_at": "2026-10-05T23:13:54Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "id": 112024426931,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37387294685/job/112024426931",
+      "classification": "flaky-test",
+      "reason": "Single test ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput failed (Assert.True Expected:True Actual:False) out of 996; area unrelated to the merged dashboard CPU PR; a similar flaky failure in the same test was previously tracked.",
+      "failed_steps": [
+        "Run tests (Windows)"
+      ]
+    },
+    {
+      "name": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "id": 112024444682,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37387294685/job/112024444682",
+      "classification": "flaky-test",
+      "reason": "Single test TrayWatchStreamTests.RemovedHostCancelsItsResourceWatchAndReplacementDoesNotReuseHealth failed (Assert.Equal Expected:0 Actual:7) out of 6664; this backchannel watch-stream reconciliation-count race has a known sibling flaky test in the same class, unrelated to the merged dashboard CPU PR.",
+      "failed_steps": [
+        "Run tests (Linux/macOS)"
+      ]
+    },
+    {
+      "name": "Tests / Package tests - Windows (class, Aspire.Templates.Tests, Templates-BuildAndRunTemplateTests, Templ... / Templates-BuildAndRunTemplateTests (windows-latest)",
+      "id": 112029757703,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37387294685/job/112029757703",
+      "classification": "transient-infra",
+      "reason": "All 5 tests passed (Test run summary: Passed!); subsequent post-test steps (copy/upload CLI E2E recordings, generate test results summary, post checkout) failed with exit code -1073741502 (0xC0000142 STATUS_DLL_INIT_FAILED), a recurring Windows runner process-initialization failure.",
+      "failed_steps": [
+        "Copy CLI E2E recordings for upload",
+        "Upload CLI E2E recordings",
+        "Generate test results summary",
+        "Post Checkout code"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput",
+      "job": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "error": "Assert.True() Failure\nExpected: True\nActual:   False",
+      "stack_trace": "at Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput() in D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.Tests\\ResourceCommandServiceTests.cs:line 1767\n--- End of stack trace from previous location ---",
+      "standard_output": "Temporary workspace created at: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\Aspire.Hosting.TestUtilities\\Workspace\\ultmqbi0.inh\n| [2026-10-05T23:22:43] Aspire.Hosting.DistributedApplication Information: Aspire AppHost version: 17.0.0-ci\n| [2026-10-05T23:22:43] Aspire.Hosting.DistributedApplication Information: Distributed application starting.\n| [2026-10-05T23:22:43] Aspire.Hosting.DistributedApplication Information: Application host directory is: D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.TestUtilities\n| [2026-10-05T23:22:43] Aspire.Hosting.Cli.CliOrphanDetector Debug: No CLI process ID configured. Orphan detection disabled.\n| [2026-10-05T23:22:43] Aspire.Hosting.Cli.BackchannelService Debug: Backchannel socket path was not specified.\n| [2026-10-05T23:22:43] Aspire.Hosting.Devcontainers.Codespaces.CodespacesResourceUrlRewriterService Trace: Not running in Codespaces, skipping URL rewriting.\n| [2026-10-05T23:22:43] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Starting auxiliary backchannel service on socket path: C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFA9O35avI_.7948\n| [2026-10-05T23:22:43] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Auxiliary backchannel listening on C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFA9O35avI_.7948\n| [2026-10-05T23:22:43] Aspire.Hosting.Dcp.DcpHost Warning: No trusted Aspire development certificate was found. See https://aka.ms/aspire/devcerts for more information.\n| [2026-10-05T23:22:43] Aspire.Hosting.FileSystemService Debug: Allocated temporary directory: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcpxppdw4ia.wji\n| [2026-10-05T23:22:43] Aspire.Hosting.Dcp.DcpHost Information: Starting DCP with arguments: start-apiserver --monitor 7948 --detach --kubeconfig \"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcpxppdw4ia.wji\\kubeconfig\"\n| [2026-10-05T23:22:43] Aspire.Hosting.Dcp.DcpHost Debug: A complete bundled ConPTY provider was not found; DCP will use the inbox Windows provider.\n| [2026-10-05T23:22:43] Aspire.Hosting.Dcp.DcpExecutor Debug: Preparing services. Ports randomized: True\n| [2026-10-05T23:22:43] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject/myProject-abzxuetw update published: ResourceType = Project, CreationTimeStamp = (null), State = { Text = (null), Style = (null) }, IsHidden = False, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = {  }, HealthReports = {  }, Commands = { start (Start) = Disabled stop (Stop) = Hidden restart (Restart) = Disabled rebuild (Rebuild) = Disabled }\n| [2026-10-05T23:22:43] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject-rebuilder/myProject-rebuilder-nnbzdswh update published: ResourceType = Executable, CreationTimeStamp = (null), State = { Text = NotStarted, Style = (null) }, IsHidden = True, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = { resource.parentName = myProject-abzxuetw }, HealthReports = {  }, Commands = {  }\n| [2026-10-05T23:22:43] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Endpoint resources.\n| [2026-10-05T23:22:43] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Executable resources.\n| [2026-10-05T23:22:43] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Service resources.\n| [2026-10-05T23:22:43] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP ContainerExec resources.\n| [2026-10-05T23:22:43] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Container resources.\n| [2026-10-05T23:22:43] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Converting relative endpoint URLs to absolute URLs for resource 'myProject-rebuilder'.\n| [2026-10-05T23:22:43] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Added total of 0 URLs to resource 'myProject-rebuilder'\n| [2026-10-05T23:22:43] Aspire.Hosting.ApplicationModel.Res",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Test exercises resource rebuild command timing against DCP; failure is in an area unrelated to the merged dashboard metric-retention CPU PR, and a related flaky failure in the same test (different assertion) has been previously tracked."
+    },
+    {
+      "name": "Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.RemovedHostCancelsItsResourceWatchAndReplacementDoesNotReuseHealth",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "error": "Assert.Equal() Failure: Values differ\nExpected: 0\nActual:   7",
+      "stack_trace": "at Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.RemovedHostCancelsItsResourceWatchAndReplacementDoesNotReuseHealth() in /home/runner/work/aspire/aspire/tests/Aspire.Cli.Tests/Backchannel/TrayWatchStreamTests.cs:line 839\n--- End of stack trace from previous location ---",
+      "standard_output": "",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Reconciliation-count race in resource watch stream teardown; a sibling test in the same TrayWatchStreamTests class (StalledResourceWatchDoesNotBlockReconciliationOrQuit) has an identical Expected:0/Actual:7 flaky pattern previously tracked, indicating a shared timing race in this test area unrelated to the merged dashboard CPU PR."
+    }
+  ],
+  "causes": [
+    "aspire-hosting-resourcecommandservice-rebuild-asserttrue-flaky",
+    "aspire-cli-tests-traywatchstream-removedhostcancels-flaky",
+    "windows-process-init-failure-0xc0000142"
+  ]
+}

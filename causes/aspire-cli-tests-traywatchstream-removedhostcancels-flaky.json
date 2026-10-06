@@ -1,0 +1,16 @@
+{
+  "id": "aspire-cli-tests-traywatchstream-removedhostcancels-flaky",
+  "type": "flaky-test",
+  "title": "Flaky: TrayWatchStreamTests.RemovedHostCancelsItsResourceWatchAndReplacementDoesNotReuseHealth reconciliation count race",
+  "test_name": "Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.RemovedHostCancelsItsResourceWatchAndReplacementDoesNotReuseHealth",
+  "error_pattern": "Assert.Equal() Failure: Values differ\nExpected: 0\nActual:   7\n   at Aspire.Cli.Tests.Backchannel.TrayWatchStreamTests.RemovedHostCancelsItsResourceWatchAndReplacementDoesNotReuseHealth() in TrayWatchStreamTests.cs:line 839",
+  "occurrences": [
+    {
+      "run_id": 37387294685,
+      "run_url": "https://github.com/microsoft/aspire/actions/runs/37387294685",
+      "job": "Tests / No-package tests (regular, Aspire.Cli.Tests, Cli, Cli, tests/Aspire.Cli.Tests/Aspire.Cli.Tests.cs... / Cli (ubuntu-latest)",
+      "pr_number": 0,
+      "observed_at": "2026-10-06T00:08:40Z"
+    }
+  ]
+}
