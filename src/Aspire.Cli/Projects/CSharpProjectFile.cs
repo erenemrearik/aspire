@@ -110,7 +110,7 @@ internal sealed class CSharpProjectFile(string sdk = "Microsoft.NET.Sdk")
 
             if (integrationReference.Version is null)
             {
-                throw new InvalidOperationException($"NuGet integration '{integrationReference.Name}' has a null Version.");
+                throw new InvalidOperationException($"Integration '{integrationReference.Name}' has a null Version.");
             }
 
             PackageReferences.Add(new CSharpPackageReference(integrationReference.Name, integrationReference.Version, packageVersionAttributeName));
