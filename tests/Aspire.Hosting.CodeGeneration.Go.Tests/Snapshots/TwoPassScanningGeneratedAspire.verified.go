@@ -1478,7 +1478,7 @@ type Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource interface {
 	WithContainerFilesCallback(destinationPath string, callback func(arg1 ContainerFileSystemCallbackContext, arg2 *CancellationToken) []ContainerFileSystemItem, options ...*ContainerFilesOptions) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithContainerName(name string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithContainerNetworkAlias(alias string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
-	WithContainerRegistry(registry IContainerRegistry) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
+	WithContainerRegistry(registry Resource) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithContainerRuntimeArgs(args []string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithCorrelationId(correlationId string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
 	WithCreatedAt(createdAt string) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource
@@ -2177,7 +2177,7 @@ func (s *aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource) WithContainerN
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource) WithContainerRegistry(registry IContainerRegistry) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource {
+func (s *aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource) WithContainerRegistry(registry Resource) Aspire_Hosting_CodeGeneration_Go_TestsTestVaultResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -3698,7 +3698,7 @@ type CSharpAppResource interface {
 	WithComputeEnvironment(computeEnvironmentResource ComputeEnvironmentResource) CSharpAppResource
 	WithConfig(config *TestConfigDto) CSharpAppResource
 	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) CSharpAppResource
-	WithContainerRegistry(registry IContainerRegistry) CSharpAppResource
+	WithContainerRegistry(registry Resource) CSharpAppResource
 	WithCorrelationId(correlationId string) CSharpAppResource
 	WithCreatedAt(createdAt string) CSharpAppResource
 	WithDependency(dependency ResourceWithConnectionString) CSharpAppResource
@@ -4272,7 +4272,7 @@ func (s *cSharpAppResource) WithContainerBuildOptions(callback func(arg Containe
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *cSharpAppResource) WithContainerRegistry(registry IContainerRegistry) CSharpAppResource {
+func (s *cSharpAppResource) WithContainerRegistry(registry Resource) CSharpAppResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -6449,7 +6449,8 @@ type ContainerImageResource interface {
 	WithChildRelationship(child Resource) ContainerImageResource
 	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ContainerImageResource
 	WithConfig(config *TestConfigDto) ContainerImageResource
-	WithContainerRegistry(registry IContainerRegistry) ContainerImageResource
+	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ContainerImageResource
+	WithContainerRegistry(registry Resource) ContainerImageResource
 	WithCorrelationId(correlationId string) ContainerImageResource
 	WithCreatedAt(createdAt string) ContainerImageResource
 	WithDependency(dependency ResourceWithConnectionString) ContainerImageResource
@@ -6740,8 +6741,27 @@ func (s *containerImageResource) WithConfig(config *TestConfigDto) ContainerImag
 	return s
 }
 
+// WithContainerBuildOptions configures container build options for a compute resource using an async callback.
+func (s *containerImageResource) WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ContainerImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[ContainerBuildOptionsCallbackContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerBuildOptions", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *containerImageResource) WithContainerRegistry(registry IContainerRegistry) ContainerImageResource {
+func (s *containerImageResource) WithContainerRegistry(registry Resource) ContainerImageResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -7576,7 +7596,8 @@ type ContainerRegistryResource interface {
 	WithChildRelationship(child Resource) ContainerRegistryResource
 	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ContainerRegistryResource
 	WithConfig(config *TestConfigDto) ContainerRegistryResource
-	WithContainerRegistry(registry IContainerRegistry) ContainerRegistryResource
+	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ContainerRegistryResource
+	WithContainerRegistry(registry Resource) ContainerRegistryResource
 	WithCorrelationId(correlationId string) ContainerRegistryResource
 	WithCreatedAt(createdAt string) ContainerRegistryResource
 	WithDependency(dependency ResourceWithConnectionString) ContainerRegistryResource
@@ -7888,8 +7909,27 @@ func (s *containerRegistryResource) WithConfig(config *TestConfigDto) ContainerR
 	return s
 }
 
+// WithContainerBuildOptions configures container build options for a compute resource using an async callback.
+func (s *containerRegistryResource) WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ContainerRegistryResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[ContainerBuildOptionsCallbackContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerBuildOptions", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *containerRegistryResource) WithContainerRegistry(registry IContainerRegistry) ContainerRegistryResource {
+func (s *containerRegistryResource) WithContainerRegistry(registry Resource) ContainerRegistryResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -8603,7 +8643,7 @@ type ContainerResource interface {
 	WithContainerFilesCallback(destinationPath string, callback func(arg1 ContainerFileSystemCallbackContext, arg2 *CancellationToken) []ContainerFileSystemItem, options ...*ContainerFilesOptions) ContainerResource
 	WithContainerName(name string) ContainerResource
 	WithContainerNetworkAlias(alias string) ContainerResource
-	WithContainerRegistry(registry IContainerRegistry) ContainerResource
+	WithContainerRegistry(registry Resource) ContainerResource
 	WithContainerRuntimeArgs(args []string) ContainerResource
 	WithCorrelationId(correlationId string) ContainerResource
 	WithCreatedAt(createdAt string) ContainerResource
@@ -9301,7 +9341,7 @@ func (s *containerResource) WithContainerNetworkAlias(alias string) ContainerRes
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *containerResource) WithContainerRegistry(registry IContainerRegistry) ContainerResource {
+func (s *containerResource) WithContainerRegistry(registry Resource) ContainerResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -10634,7 +10674,8 @@ type DestinationImageResource interface {
 	WithChildRelationship(child Resource) DestinationImageResource
 	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) DestinationImageResource
 	WithConfig(config *TestConfigDto) DestinationImageResource
-	WithContainerRegistry(registry IContainerRegistry) DestinationImageResource
+	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) DestinationImageResource
+	WithContainerRegistry(registry Resource) DestinationImageResource
 	WithCorrelationId(correlationId string) DestinationImageResource
 	WithCreatedAt(createdAt string) DestinationImageResource
 	WithDependency(dependency ResourceWithConnectionString) DestinationImageResource
@@ -11009,8 +11050,27 @@ func (s *destinationImageResource) WithConfig(config *TestConfigDto) Destination
 	return s
 }
 
+// WithContainerBuildOptions configures container build options for a compute resource using an async callback.
+func (s *destinationImageResource) WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) DestinationImageResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[ContainerBuildOptionsCallbackContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerBuildOptions", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *destinationImageResource) WithContainerRegistry(registry IContainerRegistry) DestinationImageResource {
+func (s *destinationImageResource) WithContainerRegistry(registry Resource) DestinationImageResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -13356,7 +13416,7 @@ type DotnetToolResource interface {
 	WithComputeEnvironment(computeEnvironmentResource ComputeEnvironmentResource) DotnetToolResource
 	WithConfig(config *TestConfigDto) DotnetToolResource
 	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) DotnetToolResource
-	WithContainerRegistry(registry IContainerRegistry) DotnetToolResource
+	WithContainerRegistry(registry Resource) DotnetToolResource
 	WithCorrelationId(correlationId string) DotnetToolResource
 	WithCreatedAt(createdAt string) DotnetToolResource
 	WithDependency(dependency ResourceWithConnectionString) DotnetToolResource
@@ -13904,7 +13964,7 @@ func (s *dotnetToolResource) WithContainerBuildOptions(callback func(arg Contain
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *dotnetToolResource) WithContainerRegistry(registry IContainerRegistry) DotnetToolResource {
+func (s *dotnetToolResource) WithContainerRegistry(registry Resource) DotnetToolResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -16180,7 +16240,7 @@ type ExecutableResource interface {
 	WithComputeEnvironment(computeEnvironmentResource ComputeEnvironmentResource) ExecutableResource
 	WithConfig(config *TestConfigDto) ExecutableResource
 	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ExecutableResource
-	WithContainerRegistry(registry IContainerRegistry) ExecutableResource
+	WithContainerRegistry(registry Resource) ExecutableResource
 	WithCorrelationId(correlationId string) ExecutableResource
 	WithCreatedAt(createdAt string) ExecutableResource
 	WithDependency(dependency ResourceWithConnectionString) ExecutableResource
@@ -16722,7 +16782,7 @@ func (s *executableResource) WithContainerBuildOptions(callback func(arg Contain
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *executableResource) WithContainerRegistry(registry IContainerRegistry) ExecutableResource {
+func (s *executableResource) WithContainerRegistry(registry Resource) ExecutableResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -18170,7 +18230,8 @@ type ExternalServiceResource interface {
 	WithChildRelationship(child Resource) ExternalServiceResource
 	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ExternalServiceResource
 	WithConfig(config *TestConfigDto) ExternalServiceResource
-	WithContainerRegistry(registry IContainerRegistry) ExternalServiceResource
+	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ExternalServiceResource
+	WithContainerRegistry(registry Resource) ExternalServiceResource
 	WithCorrelationId(correlationId string) ExternalServiceResource
 	WithCreatedAt(createdAt string) ExternalServiceResource
 	WithDependency(dependency ResourceWithConnectionString) ExternalServiceResource
@@ -18461,8 +18522,27 @@ func (s *externalServiceResource) WithConfig(config *TestConfigDto) ExternalServ
 	return s
 }
 
+// WithContainerBuildOptions configures container build options for a compute resource using an async callback.
+func (s *externalServiceResource) WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ExternalServiceResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[ContainerBuildOptionsCallbackContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerBuildOptions", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *externalServiceResource) WithContainerRegistry(registry IContainerRegistry) ExternalServiceResource {
+func (s *externalServiceResource) WithContainerRegistry(registry Resource) ExternalServiceResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -20851,7 +20931,8 @@ type ParameterResource interface {
 	WithChildRelationship(child Resource) ParameterResource
 	WithCommand(name string, displayName string, executeCommand func(arg ExecuteCommandContext) *ExecuteCommandResult, options ...*WithCommandOptions) ParameterResource
 	WithConfig(config *TestConfigDto) ParameterResource
-	WithContainerRegistry(registry IContainerRegistry) ParameterResource
+	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ParameterResource
+	WithContainerRegistry(registry Resource) ParameterResource
 	WithCorrelationId(correlationId string) ParameterResource
 	WithCreatedAt(createdAt string) ParameterResource
 	WithCustomInput(options *ParameterCustomInputOptions) ParameterResource
@@ -21143,8 +21224,27 @@ func (s *parameterResource) WithConfig(config *TestConfigDto) ParameterResource 
 	return s
 }
 
+// WithContainerBuildOptions configures container build options for a compute resource using an async callback.
+func (s *parameterResource) WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ParameterResource {
+	if s.err != nil { return s }
+	ctx := context.Background()
+	reqArgs := map[string]any{
+		"builder": s.handle.ToJSON(),
+	}
+	if callback != nil {
+		cb := callback
+		shim := func(args ...any) any {
+			cb(callbackArg[ContainerBuildOptionsCallbackContext](args, 0))
+			return nil
+		}
+		reqArgs["callback"] = s.client.registerCallback(shim)
+	}
+	if _, err := s.client.invokeCapability(ctx, "Aspire.Hosting/withContainerBuildOptions", reqArgs); err != nil { s.setErr(err) }
+	return s
+}
+
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *parameterResource) WithContainerRegistry(registry IContainerRegistry) ParameterResource {
+func (s *parameterResource) WithContainerRegistry(registry Resource) ParameterResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -22580,7 +22680,7 @@ type ProjectResource interface {
 	WithComputeEnvironment(computeEnvironmentResource ComputeEnvironmentResource) ProjectResource
 	WithConfig(config *TestConfigDto) ProjectResource
 	WithContainerBuildOptions(callback func(arg ContainerBuildOptionsCallbackContext)) ProjectResource
-	WithContainerRegistry(registry IContainerRegistry) ProjectResource
+	WithContainerRegistry(registry Resource) ProjectResource
 	WithCorrelationId(correlationId string) ProjectResource
 	WithCreatedAt(createdAt string) ProjectResource
 	WithDependency(dependency ResourceWithConnectionString) ProjectResource
@@ -23154,7 +23254,7 @@ func (s *projectResource) WithContainerBuildOptions(callback func(arg ContainerB
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *projectResource) WithContainerRegistry(registry IContainerRegistry) ProjectResource {
+func (s *projectResource) WithContainerRegistry(registry Resource) ProjectResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -25979,7 +26079,7 @@ type TestDatabaseResource interface {
 	WithContainerFilesCallback(destinationPath string, callback func(arg1 ContainerFileSystemCallbackContext, arg2 *CancellationToken) []ContainerFileSystemItem, options ...*ContainerFilesOptions) TestDatabaseResource
 	WithContainerName(name string) TestDatabaseResource
 	WithContainerNetworkAlias(alias string) TestDatabaseResource
-	WithContainerRegistry(registry IContainerRegistry) TestDatabaseResource
+	WithContainerRegistry(registry Resource) TestDatabaseResource
 	WithContainerRuntimeArgs(args []string) TestDatabaseResource
 	WithCorrelationId(correlationId string) TestDatabaseResource
 	WithCreatedAt(createdAt string) TestDatabaseResource
@@ -26677,7 +26777,7 @@ func (s *testDatabaseResource) WithContainerNetworkAlias(alias string) TestDatab
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *testDatabaseResource) WithContainerRegistry(registry IContainerRegistry) TestDatabaseResource {
+func (s *testDatabaseResource) WithContainerRegistry(registry Resource) TestDatabaseResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()
@@ -28247,7 +28347,7 @@ type TestRedisResource interface {
 	WithContainerFilesCallback(destinationPath string, callback func(arg1 ContainerFileSystemCallbackContext, arg2 *CancellationToken) []ContainerFileSystemItem, options ...*ContainerFilesOptions) TestRedisResource
 	WithContainerName(name string) TestRedisResource
 	WithContainerNetworkAlias(alias string) TestRedisResource
-	WithContainerRegistry(registry IContainerRegistry) TestRedisResource
+	WithContainerRegistry(registry Resource) TestRedisResource
 	WithContainerRuntimeArgs(args []string) TestRedisResource
 	WithCorrelationId(correlationId string) TestRedisResource
 	WithCreatedAt(createdAt string) TestRedisResource
@@ -29165,7 +29265,7 @@ func (s *testRedisResource) WithContainerNetworkAlias(alias string) TestRedisRes
 }
 
 // WithContainerRegistry configures the resource to use the specified container registry for container image operations.
-func (s *testRedisResource) WithContainerRegistry(registry IContainerRegistry) TestRedisResource {
+func (s *testRedisResource) WithContainerRegistry(registry Resource) TestRedisResource {
 	if s.err != nil { return s }
 	if registry != nil { if err := registry.Err(); err != nil { s.setErr(err); return s } }
 	ctx := context.Background()

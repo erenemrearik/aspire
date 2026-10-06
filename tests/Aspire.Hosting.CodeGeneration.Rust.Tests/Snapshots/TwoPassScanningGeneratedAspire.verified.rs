@@ -2302,7 +2302,7 @@ impl CSharpAppResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -3233,14 +3233,14 @@ impl CSharpAppResource {
     }
 
     /// Configures container build options for a compute resource using an async callback.
-    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IComputeResource, Box<dyn std::error::Error>> {
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         let callback_id = register_callback(callback);
         args.insert("callback".to_string(), Value::String(callback_id));
         let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
         let handle: Handle = serde_json::from_value(result)?;
-        Ok(IComputeResource::new(handle, self.client.clone()))
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -4178,7 +4178,7 @@ impl ContainerImageResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -4567,6 +4567,17 @@ impl ContainerImageResource {
         let result = self.client.invoke_capability("Aspire.Hosting/createExecutionConfiguration", args)?;
         let handle: Handle = serde_json::from_value(result)?;
         Ok(IExecutionConfigurationBuilder::new(handle, self.client.clone()))
+    }
+
+    /// Configures container build options for a compute resource using an async callback.
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        let callback_id = register_callback(callback);
+        args.insert("callback".to_string(), Value::String(callback_id));
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -4960,7 +4971,7 @@ impl ContainerRegistryResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -5351,6 +5362,17 @@ impl ContainerRegistryResource {
         Ok(IExecutionConfigurationBuilder::new(handle, self.client.clone()))
     }
 
+    /// Configures container build options for a compute resource using an async callback.
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        let callback_id = register_callback(callback);
+        args.insert("callback".to_string(), Value::String(callback_id));
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(IResource::new(handle, self.client.clone()))
+    }
+
     /// Adds an optional string parameter
     pub fn with_optional_string(&self, value: Option<&str>, enabled: Option<bool>) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
@@ -5630,7 +5652,7 @@ impl ContainerResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -6761,14 +6783,14 @@ impl ContainerResource {
     }
 
     /// Configures container build options for a compute resource using an async callback.
-    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IComputeResource, Box<dyn std::error::Error>> {
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         let callback_id = register_callback(callback);
         args.insert("callback".to_string(), Value::String(callback_id));
         let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
         let handle: Handle = serde_json::from_value(result)?;
-        Ok(IComputeResource::new(handle, self.client.clone()))
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -7071,7 +7093,7 @@ impl DestinationImageResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -7500,6 +7522,17 @@ impl DestinationImageResource {
         args.insert("context".to_string(), self.handle.to_json());
         let result = self.client.invoke_capability("Aspire.Hosting.ApplicationModel/DestinationImageResource.repositoryExpression", args)?;
         Ok(serde_json::from_value(result)?)
+    }
+
+    /// Configures container build options for a compute resource using an async callback.
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        let callback_id = register_callback(callback);
+        args.insert("callback".to_string(), Value::String(callback_id));
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -8381,7 +8414,7 @@ impl DotnetToolResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -9349,14 +9382,14 @@ impl DotnetToolResource {
     }
 
     /// Configures container build options for a compute resource using an async callback.
-    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IComputeResource, Box<dyn std::error::Error>> {
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         let callback_id = register_callback(callback);
         args.insert("callback".to_string(), Value::String(callback_id));
         let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
         let handle: Handle = serde_json::from_value(result)?;
-        Ok(IComputeResource::new(handle, self.client.clone()))
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -10289,7 +10322,7 @@ impl ExecutableResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -11200,14 +11233,14 @@ impl ExecutableResource {
     }
 
     /// Configures container build options for a compute resource using an async callback.
-    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IComputeResource, Box<dyn std::error::Error>> {
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         let callback_id = register_callback(callback);
         args.insert("callback".to_string(), Value::String(callback_id));
         let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
         let handle: Handle = serde_json::from_value(result)?;
-        Ok(IComputeResource::new(handle, self.client.clone()))
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -11580,7 +11613,7 @@ impl ExternalServiceResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -11987,6 +12020,17 @@ impl ExternalServiceResource {
         let result = self.client.invoke_capability("Aspire.Hosting/createExecutionConfiguration", args)?;
         let handle: Handle = serde_json::from_value(result)?;
         Ok(IExecutionConfigurationBuilder::new(handle, self.client.clone()))
+    }
+
+    /// Configures container build options for a compute resource using an async callback.
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        let callback_id = register_callback(callback);
+        args.insert("callback".to_string(), Value::String(callback_id));
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -15142,7 +15186,7 @@ impl ParameterResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -15554,6 +15598,17 @@ impl ParameterResource {
         let result = self.client.invoke_capability("Aspire.Hosting/createExecutionConfiguration", args)?;
         let handle: Handle = serde_json::from_value(result)?;
         Ok(IExecutionConfigurationBuilder::new(handle, self.client.clone()))
+    }
+
+    /// Configures container build options for a compute resource using an async callback.
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
+        let mut args: HashMap<String, Value> = HashMap::new();
+        args.insert("builder".to_string(), self.handle.to_json());
+        let callback_id = register_callback(callback);
+        args.insert("callback".to_string(), Value::String(callback_id));
+        let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
+        let handle: Handle = serde_json::from_value(result)?;
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -16334,7 +16389,7 @@ impl ProjectResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -17265,14 +17320,14 @@ impl ProjectResource {
     }
 
     /// Configures container build options for a compute resource using an async callback.
-    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IComputeResource, Box<dyn std::error::Error>> {
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         let callback_id = register_callback(callback);
         args.insert("callback".to_string(), Value::String(callback_id));
         let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
         let handle: Handle = serde_json::from_value(result)?;
-        Ok(IComputeResource::new(handle, self.client.clone()))
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -18404,7 +18459,7 @@ impl TestDatabaseResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -19535,14 +19590,14 @@ impl TestDatabaseResource {
     }
 
     /// Configures container build options for a compute resource using an async callback.
-    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IComputeResource, Box<dyn std::error::Error>> {
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         let callback_id = register_callback(callback);
         args.insert("callback".to_string(), Value::String(callback_id));
         let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
         let handle: Handle = serde_json::from_value(result)?;
-        Ok(IComputeResource::new(handle, self.client.clone()))
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter
@@ -19981,7 +20036,7 @@ impl TestRedisResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -21143,14 +21198,14 @@ impl TestRedisResource {
     }
 
     /// Configures container build options for a compute resource using an async callback.
-    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IComputeResource, Box<dyn std::error::Error>> {
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         let callback_id = register_callback(callback);
         args.insert("callback".to_string(), Value::String(callback_id));
         let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
         let handle: Handle = serde_json::from_value(result)?;
-        Ok(IComputeResource::new(handle, self.client.clone()))
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Configures a Redis resource with parameter-only resources whose generated names collide.
@@ -21696,7 +21751,7 @@ impl TestVaultResource {
     }
 
     /// Configures the resource to use the specified container registry for container image operations.
-    pub fn with_container_registry(&self, registry: &IContainerRegistry) -> Result<IResource, Box<dyn std::error::Error>> {
+    pub fn with_container_registry(&self, registry: &IResource) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         args.insert("registry".to_string(), registry.handle().to_json());
@@ -22827,14 +22882,14 @@ impl TestVaultResource {
     }
 
     /// Configures container build options for a compute resource using an async callback.
-    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IComputeResource, Box<dyn std::error::Error>> {
+    pub fn with_container_build_options(&self, callback: impl Fn(Vec<Value>) -> Value + Send + Sync + 'static) -> Result<IResource, Box<dyn std::error::Error>> {
         let mut args: HashMap<String, Value> = HashMap::new();
         args.insert("builder".to_string(), self.handle.to_json());
         let callback_id = register_callback(callback);
         args.insert("callback".to_string(), Value::String(callback_id));
         let result = self.client.invoke_capability("Aspire.Hosting/withContainerBuildOptions", args)?;
         let handle: Handle = serde_json::from_value(result)?;
-        Ok(IComputeResource::new(handle, self.client.clone()))
+        Ok(IResource::new(handle, self.client.clone()))
     }
 
     /// Adds an optional string parameter

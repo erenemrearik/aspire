@@ -100,7 +100,8 @@ public static class ContainerImageResourceBuilderExtensions
     [AspireExport("addRegistryImage", MethodName = "addImage")]
     public static IResourceBuilder<DestinationImageResource> AddImage<TRegistry>(
         this IResourceBuilder<TRegistry> builder, [ResourceName] string name, IResourceBuilder<ContainerImageResource> image)
-        where TRegistry : IResource, IContainerRegistry
+        // ATS projects the first constraint, so registry eligibility must precede IResource.
+        where TRegistry : IContainerRegistry, IResource
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(image);

@@ -2260,7 +2260,7 @@ public class CSharpAppResource extends ProjectResource {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public CSharpAppResource withContainerRegistry(IContainerRegistry registry) {
+    public CSharpAppResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -2268,8 +2268,8 @@ public class CSharpAppResource extends ProjectResource {
         return this;
     }
 
-    public CSharpAppResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public CSharpAppResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     /** Configures custom base images for generated Dockerfiles. */
@@ -5277,7 +5277,7 @@ public class ContainerImageResource extends ResourceBuilderBase {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public ContainerImageResource withContainerRegistry(IContainerRegistry registry) {
+    public ContainerImageResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -5285,8 +5285,8 @@ public class ContainerImageResource extends ResourceBuilderBase {
         return this;
     }
 
-    public ContainerImageResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public ContainerImageResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     /** Configures custom base images for generated Dockerfiles. */
@@ -5809,6 +5809,24 @@ public class ContainerImageResource extends ResourceBuilderBase {
         return (IExecutionConfigurationBuilder) result;
     }
 
+    /** Configures container build options for a compute resource using an async callback. */
+    public ContainerImageResource withContainerBuildOptions(AspireAction1<ContainerBuildOptionsCallbackContext> callback) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        var callbackId = getClient().registerCallback(args -> {
+            var arg = (ContainerBuildOptionsCallbackContext) args[0];
+            callback.invoke(arg);
+            var __aspireCallbackArguments = new HashMap<String, Object>();
+            __aspireCallbackArguments.put("p0", arg);
+            return __aspireCallbackArguments;
+        });
+        if (callbackId != null) {
+            reqArgs.put("callback", callbackId);
+        }
+        getClient().invokeCapability("Aspire.Hosting/withContainerBuildOptions", reqArgs);
+        return this;
+    }
+
     /** Adds an optional string parameter */
     public ContainerImageResource withOptionalString(WithOptionalStringOptions optionsBag) {
         var value = optionsBag == null ? null : optionsBag.getValue();
@@ -6281,7 +6299,7 @@ public class ContainerRegistryResource extends ResourceBuilderBase {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public ContainerRegistryResource withContainerRegistry(IContainerRegistry registry) {
+    public ContainerRegistryResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -6289,8 +6307,8 @@ public class ContainerRegistryResource extends ResourceBuilderBase {
         return this;
     }
 
-    public ContainerRegistryResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public ContainerRegistryResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     /** Configures custom base images for generated Dockerfiles. */
@@ -6813,6 +6831,24 @@ public class ContainerRegistryResource extends ResourceBuilderBase {
         return (IExecutionConfigurationBuilder) result;
     }
 
+    /** Configures container build options for a compute resource using an async callback. */
+    public ContainerRegistryResource withContainerBuildOptions(AspireAction1<ContainerBuildOptionsCallbackContext> callback) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        var callbackId = getClient().registerCallback(args -> {
+            var arg = (ContainerBuildOptionsCallbackContext) args[0];
+            callback.invoke(arg);
+            var __aspireCallbackArguments = new HashMap<String, Object>();
+            __aspireCallbackArguments.put("p0", arg);
+            return __aspireCallbackArguments;
+        });
+        if (callbackId != null) {
+            reqArgs.put("callback", callbackId);
+        }
+        getClient().invokeCapability("Aspire.Hosting/withContainerBuildOptions", reqArgs);
+        return this;
+    }
+
     /** Adds an optional string parameter */
     public ContainerRegistryResource withOptionalString(WithOptionalStringOptions optionsBag) {
         var value = optionsBag == null ? null : optionsBag.getValue();
@@ -7140,7 +7176,7 @@ public class ContainerResource extends ResourceBuilderBase {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public ContainerResource withContainerRegistry(IContainerRegistry registry) {
+    public ContainerResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -7148,8 +7184,8 @@ public class ContainerResource extends ResourceBuilderBase {
         return this;
     }
 
-    public ContainerResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public ContainerResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     public ContainerResource withBindMount(String source, String target) {
@@ -9486,7 +9522,7 @@ public class DestinationImageResource extends ResourceBuilderBase {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public DestinationImageResource withContainerRegistry(IContainerRegistry registry) {
+    public DestinationImageResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -9494,8 +9530,8 @@ public class DestinationImageResource extends ResourceBuilderBase {
         return this;
     }
 
-    public DestinationImageResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public DestinationImageResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     /** Configures custom base images for generated Dockerfiles. */
@@ -10056,6 +10092,24 @@ public class DestinationImageResource extends ResourceBuilderBase {
         reqArgs.put("context", AspireClient.serializeValue(getHandle()));
         var result = getClient().invokeCapability("Aspire.Hosting.ApplicationModel/DestinationImageResource.repositoryExpression", reqArgs);
         return (ReferenceExpression) result;
+    }
+
+    /** Configures container build options for a compute resource using an async callback. */
+    public DestinationImageResource withContainerBuildOptions(AspireAction1<ContainerBuildOptionsCallbackContext> callback) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        var callbackId = getClient().registerCallback(args -> {
+            var arg = (ContainerBuildOptionsCallbackContext) args[0];
+            callback.invoke(arg);
+            var __aspireCallbackArguments = new HashMap<String, Object>();
+            __aspireCallbackArguments.put("p0", arg);
+            return __aspireCallbackArguments;
+        });
+        if (callbackId != null) {
+            reqArgs.put("callback", callbackId);
+        }
+        getClient().invokeCapability("Aspire.Hosting/withContainerBuildOptions", reqArgs);
+        return this;
     }
 
     /** Adds an optional string parameter */
@@ -10967,7 +11021,7 @@ public class DotnetToolResource extends ExecutableResource {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public DotnetToolResource withContainerRegistry(IContainerRegistry registry) {
+    public DotnetToolResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -10975,8 +11029,8 @@ public class DotnetToolResource extends ExecutableResource {
         return this;
     }
 
-    public DotnetToolResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public DotnetToolResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     /** Configures custom base images for generated Dockerfiles. */
@@ -13414,7 +13468,7 @@ public class ExecutableResource extends ResourceBuilderBase {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public ExecutableResource withContainerRegistry(IContainerRegistry registry) {
+    public ExecutableResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -13422,8 +13476,8 @@ public class ExecutableResource extends ResourceBuilderBase {
         return this;
     }
 
-    public ExecutableResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public ExecutableResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     /** Configures custom base images for generated Dockerfiles. */
@@ -15259,7 +15313,7 @@ public class ExternalServiceResource extends ResourceBuilderBase {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public ExternalServiceResource withContainerRegistry(IContainerRegistry registry) {
+    public ExternalServiceResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -15267,8 +15321,8 @@ public class ExternalServiceResource extends ResourceBuilderBase {
         return this;
     }
 
-    public ExternalServiceResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public ExternalServiceResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     /** Configures custom base images for generated Dockerfiles. */
@@ -15818,6 +15872,24 @@ public class ExternalServiceResource extends ResourceBuilderBase {
         reqArgs.put("resource", AspireClient.serializeValue(getHandle()));
         var result = getClient().invokeCapability("Aspire.Hosting/createExecutionConfiguration", reqArgs);
         return (IExecutionConfigurationBuilder) result;
+    }
+
+    /** Configures container build options for a compute resource using an async callback. */
+    public ExternalServiceResource withContainerBuildOptions(AspireAction1<ContainerBuildOptionsCallbackContext> callback) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        var callbackId = getClient().registerCallback(args -> {
+            var arg = (ContainerBuildOptionsCallbackContext) args[0];
+            callback.invoke(arg);
+            var __aspireCallbackArguments = new HashMap<String, Object>();
+            __aspireCallbackArguments.put("p0", arg);
+            return __aspireCallbackArguments;
+        });
+        if (callbackId != null) {
+            reqArgs.put("callback", callbackId);
+        }
+        getClient().invokeCapability("Aspire.Hosting/withContainerBuildOptions", reqArgs);
+        return this;
     }
 
     /** Adds an optional string parameter */
@@ -20076,7 +20148,7 @@ public class ParameterResource extends ResourceBuilderBase {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public ParameterResource withContainerRegistry(IContainerRegistry registry) {
+    public ParameterResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -20084,8 +20156,8 @@ public class ParameterResource extends ResourceBuilderBase {
         return this;
     }
 
-    public ParameterResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public ParameterResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     /** Configures custom base images for generated Dockerfiles. */
@@ -20631,6 +20703,24 @@ public class ParameterResource extends ResourceBuilderBase {
         reqArgs.put("resource", AspireClient.serializeValue(getHandle()));
         var result = getClient().invokeCapability("Aspire.Hosting/createExecutionConfiguration", reqArgs);
         return (IExecutionConfigurationBuilder) result;
+    }
+
+    /** Configures container build options for a compute resource using an async callback. */
+    public ParameterResource withContainerBuildOptions(AspireAction1<ContainerBuildOptionsCallbackContext> callback) {
+        Map<String, Object> reqArgs = new HashMap<>();
+        reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
+        var callbackId = getClient().registerCallback(args -> {
+            var arg = (ContainerBuildOptionsCallbackContext) args[0];
+            callback.invoke(arg);
+            var __aspireCallbackArguments = new HashMap<String, Object>();
+            __aspireCallbackArguments.put("p0", arg);
+            return __aspireCallbackArguments;
+        });
+        if (callbackId != null) {
+            reqArgs.put("callback", callbackId);
+        }
+        getClient().invokeCapability("Aspire.Hosting/withContainerBuildOptions", reqArgs);
+        return this;
     }
 
     /** Adds an optional string parameter */
@@ -21613,7 +21703,7 @@ public class ProjectResource extends ResourceBuilderBase {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public ProjectResource withContainerRegistry(IContainerRegistry registry) {
+    public ProjectResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -21621,8 +21711,8 @@ public class ProjectResource extends ResourceBuilderBase {
         return this;
     }
 
-    public ProjectResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public ProjectResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     /** Configures custom base images for generated Dockerfiles. */
@@ -24816,7 +24906,7 @@ public class TestDatabaseResource extends ContainerResource {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public TestDatabaseResource withContainerRegistry(IContainerRegistry registry) {
+    public TestDatabaseResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -24824,8 +24914,8 @@ public class TestDatabaseResource extends ContainerResource {
         return this;
     }
 
-    public TestDatabaseResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public TestDatabaseResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     public TestDatabaseResource withBindMount(String source, String target) {
@@ -27035,7 +27125,7 @@ public class TestRedisResource extends ContainerResource {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public TestRedisResource withContainerRegistry(IContainerRegistry registry) {
+    public TestRedisResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -27043,8 +27133,8 @@ public class TestRedisResource extends ContainerResource {
         return this;
     }
 
-    public TestRedisResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public TestRedisResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     public TestRedisResource withBindMount(String source, String target) {
@@ -29379,7 +29469,7 @@ public class TestVaultResource extends ContainerResource {
     }
 
     /** Configures the resource to use the specified container registry for container image operations. */
-    public TestVaultResource withContainerRegistry(IContainerRegistry registry) {
+    public TestVaultResource withContainerRegistry(IResource registry) {
         Map<String, Object> reqArgs = new HashMap<>();
         reqArgs.put("builder", AspireClient.serializeValue(getHandle()));
         reqArgs.put("registry", AspireClient.serializeValue(registry));
@@ -29387,8 +29477,8 @@ public class TestVaultResource extends ContainerResource {
         return this;
     }
 
-    public TestVaultResource withContainerRegistry(HandleWrapperBase registry) {
-        return withContainerRegistry(new IContainerRegistry(registry.getHandle(), registry.getClient()));
+    public TestVaultResource withContainerRegistry(ResourceBuilderBase registry) {
+        return withContainerRegistry(new IResource(registry.getHandle(), registry.getClient()));
     }
 
     public TestVaultResource withBindMount(String source, String target) {

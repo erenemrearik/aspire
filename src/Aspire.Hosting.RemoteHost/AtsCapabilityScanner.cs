@@ -2538,7 +2538,7 @@ public static class AtsCapabilityScanner
                         var constraints = resourceType.GetGenericParameterConstraints();
                         if (constraints.Length > 0)
                         {
-                            return AtsTypeMapping.DeriveTypeId(GetResourceBuilderConstraint(constraints));
+                            return AtsTypeMapping.DeriveTypeId(constraints[0]);
                         }
                     }
 
@@ -2914,7 +2914,7 @@ public static class AtsCapabilityScanner
                         var constraints = resourceType.GetGenericParameterConstraints();
                         if (constraints.Length > 0)
                         {
-                            var constraintType = GetResourceBuilderConstraint(constraints);
+                            var constraintType = constraints[0];
                             return CreateHandleTypeRef(constraintType);
                         }
                     }
@@ -3035,7 +3035,7 @@ public static class AtsCapabilityScanner
         // T is a generic parameter - check if it has any constraints
         var constraints = resourceType.GetGenericParameterConstraints();
 
-        // If T has constraints, use the resource builder constraint selected by MapToAtsTypeId.
+        // If T has constraints, use them (MapToAtsTypeId will pick the first constraint)
         // Expansion will handle mapping interface constraints to concrete types
         return constraints.Length == 0;
     }
@@ -3109,29 +3109,6 @@ public static class AtsCapabilityScanner
         }
 
         return baseTypes;
-    }
-
-    /// <summary>
-    /// Selects the constraint used to project a resource builder's generic type.
-    /// </summary>
-    private static Type GetResourceBuilderConstraint(Type[] constraints)
-    {
-        // IResourceBuilder<T> already requires IResource. When the only additional constraint
-        // is an interface such as IContainerRegistry, that interface defines eligibility;
-        // projecting IResource instead exposes the method on unrelated resource builders.
-        if (constraints.Length == 2)
-        {
-            if (constraints[0].FullName == HostingTypeNames.ResourceInterface)
-            {
-                return constraints[1];
-            }
-            if (constraints[1].FullName == HostingTypeNames.ResourceInterface)
-            {
-                return constraints[0];
-            }
-        }
-
-        return constraints[0];
     }
 
     /// <summary>

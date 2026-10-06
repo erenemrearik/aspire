@@ -13154,7 +13154,7 @@ export interface ContainerImageResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ContainerImageResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ContainerImageResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -13411,6 +13411,13 @@ export interface ContainerImageResource {
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerImageResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -13490,7 +13497,7 @@ export interface ContainerImageResourcePromise extends PromiseLike<ContainerImag
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ContainerImageResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ContainerImageResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -13747,6 +13754,13 @@ export interface ContainerImageResourcePromise extends PromiseLike<ContainerImag
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerImageResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -13846,7 +13860,7 @@ class ContainerImageResourceImpl extends ResourceBuilderBase<ContainerImageResou
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<ContainerImageResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<ContainerImageResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<ContainerImageResourceHandle>(
@@ -13865,7 +13879,7 @@ class ContainerImageResourceImpl extends ResourceBuilderBase<ContainerImageResou
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ContainerImageResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ContainerImageResourcePromise {
         return new ContainerImageResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -14724,6 +14738,31 @@ class ContainerImageResourceImpl extends ResourceBuilderBase<ContainerImageResou
     }
 
     /** @internal */
+    private async _withContainerBuildOptionsInternal(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): Promise<ContainerImageResource> {
+        const callbackId = registerCallback(async (argData: unknown) => {
+            const argHandle = wrapIfHandle(argData) as ContainerBuildOptionsCallbackContextHandle;
+            const arg = new ContainerBuildOptionsCallbackContextImpl(argHandle, this._client);
+            await callback(arg);
+        });
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, callback: callbackId };
+        const result = await this._client.invokeCapability<ContainerImageResourceHandle>(
+            'Aspire.Hosting/withContainerBuildOptions',
+            rpcArgs
+        );
+        return new ContainerImageResourceImpl(result, this._client);
+    }
+
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerImageResourcePromise {
+        return new ContainerImageResourcePromiseImpl(this._withContainerBuildOptionsInternal(callback), this._client);
+    }
+
+    /** @internal */
     private async _withOptionalStringInternal(value?: string, enabled?: boolean): Promise<ContainerImageResource> {
         const rpcArgs: Record<string, unknown> = { builder: this._handle };
         if (value !== undefined) rpcArgs.value = value;
@@ -15135,6 +15174,7 @@ const ContainerImageResourcePromiseImpl = $aspireCreateFluentPromiseClass<Contai
     ["onInitializeResource"]: () => ContainerImageResourcePromiseImpl,
     ["onResourceReady"]: () => ContainerImageResourcePromiseImpl,
     ["createExecutionConfiguration"]: () => ExecutionConfigurationBuilderPromiseImpl,
+    ["withContainerBuildOptions"]: () => ContainerImageResourcePromiseImpl,
     ["withOptionalString"]: () => ContainerImageResourcePromiseImpl,
     ["withConfig"]: () => ContainerImageResourcePromiseImpl,
     ["withCreatedAt"]: () => ContainerImageResourcePromiseImpl,
@@ -15189,7 +15229,7 @@ export interface ContainerRegistryResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ContainerRegistryResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ContainerRegistryResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -15446,6 +15486,13 @@ export interface ContainerRegistryResource {
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerRegistryResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -15529,7 +15576,7 @@ export interface ContainerRegistryResourcePromise extends PromiseLike<ContainerR
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ContainerRegistryResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ContainerRegistryResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -15786,6 +15833,13 @@ export interface ContainerRegistryResourcePromise extends PromiseLike<ContainerR
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerRegistryResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -15883,7 +15937,7 @@ class ContainerRegistryResourceImpl extends ResourceBuilderBase<ContainerRegistr
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<ContainerRegistryResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<ContainerRegistryResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<ContainerRegistryResourceHandle>(
@@ -15902,7 +15956,7 @@ class ContainerRegistryResourceImpl extends ResourceBuilderBase<ContainerRegistr
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ContainerRegistryResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ContainerRegistryResourcePromise {
         return new ContainerRegistryResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -16761,6 +16815,31 @@ class ContainerRegistryResourceImpl extends ResourceBuilderBase<ContainerRegistr
     }
 
     /** @internal */
+    private async _withContainerBuildOptionsInternal(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): Promise<ContainerRegistryResource> {
+        const callbackId = registerCallback(async (argData: unknown) => {
+            const argHandle = wrapIfHandle(argData) as ContainerBuildOptionsCallbackContextHandle;
+            const arg = new ContainerBuildOptionsCallbackContextImpl(argHandle, this._client);
+            await callback(arg);
+        });
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, callback: callbackId };
+        const result = await this._client.invokeCapability<ContainerRegistryResourceHandle>(
+            'Aspire.Hosting/withContainerBuildOptions',
+            rpcArgs
+        );
+        return new ContainerRegistryResourceImpl(result, this._client);
+    }
+
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ContainerRegistryResourcePromise {
+        return new ContainerRegistryResourcePromiseImpl(this._withContainerBuildOptionsInternal(callback), this._client);
+    }
+
+    /** @internal */
     private async _withOptionalStringInternal(value?: string, enabled?: boolean): Promise<ContainerRegistryResource> {
         const rpcArgs: Record<string, unknown> = { builder: this._handle };
         if (value !== undefined) rpcArgs.value = value;
@@ -17172,6 +17251,7 @@ const ContainerRegistryResourcePromiseImpl = $aspireCreateFluentPromiseClass<Con
     ["onInitializeResource"]: () => ContainerRegistryResourcePromiseImpl,
     ["onResourceReady"]: () => ContainerRegistryResourcePromiseImpl,
     ["createExecutionConfiguration"]: () => ExecutionConfigurationBuilderPromiseImpl,
+    ["withContainerBuildOptions"]: () => ContainerRegistryResourcePromiseImpl,
     ["withOptionalString"]: () => ContainerRegistryResourcePromiseImpl,
     ["withConfig"]: () => ContainerRegistryResourcePromiseImpl,
     ["withCreatedAt"]: () => ContainerRegistryResourcePromiseImpl,
@@ -17212,7 +17292,7 @@ export interface ContainerResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ContainerResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ContainerResourcePromise;
     /**
      * Adds a bind mount to a container resource.
      * @param source The source path of the mount. This is the path to the file or directory on the host, relative to the app host project directory.
@@ -18045,7 +18125,7 @@ export interface ContainerResourcePromise extends PromiseLike<ContainerResource>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ContainerResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ContainerResourcePromise;
     /**
      * Adds a bind mount to a container resource.
      * @param source The source path of the mount. This is the path to the file or directory on the host, relative to the app host project directory.
@@ -18879,7 +18959,7 @@ class ContainerResourceImpl extends ResourceBuilderBase<ContainerResourceHandle>
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<ContainerResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<ContainerResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<ContainerResourceHandle>(
@@ -18898,7 +18978,7 @@ class ContainerResourceImpl extends ResourceBuilderBase<ContainerResourceHandle>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ContainerResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ContainerResourcePromise {
         return new ContainerResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -21761,7 +21841,7 @@ export interface CSharpAppResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): CSharpAppResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): CSharpAppResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -22417,7 +22497,7 @@ export interface CSharpAppResourcePromise extends PromiseLike<CSharpAppResource>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): CSharpAppResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): CSharpAppResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -23073,7 +23153,7 @@ class CSharpAppResourceImpl extends ResourceBuilderBase<CSharpAppResourceHandle>
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<CSharpAppResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<CSharpAppResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<CSharpAppResourceHandle>(
@@ -23092,7 +23172,7 @@ class CSharpAppResourceImpl extends ResourceBuilderBase<CSharpAppResourceHandle>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): CSharpAppResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): CSharpAppResourcePromise {
         return new CSharpAppResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -25565,7 +25645,7 @@ export interface DestinationImageResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): DestinationImageResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): DestinationImageResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -25822,6 +25902,13 @@ export interface DestinationImageResource {
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): DestinationImageResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -25926,7 +26013,7 @@ export interface DestinationImageResourcePromise extends PromiseLike<Destination
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): DestinationImageResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): DestinationImageResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -26183,6 +26270,13 @@ export interface DestinationImageResourcePromise extends PromiseLike<Destination
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): DestinationImageResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -26293,7 +26387,7 @@ class DestinationImageResourceImpl extends ResourceBuilderBase<DestinationImageR
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<DestinationImageResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<DestinationImageResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<DestinationImageResourceHandle>(
@@ -26312,7 +26406,7 @@ class DestinationImageResourceImpl extends ResourceBuilderBase<DestinationImageR
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): DestinationImageResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): DestinationImageResourcePromise {
         return new DestinationImageResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -27171,6 +27265,31 @@ class DestinationImageResourceImpl extends ResourceBuilderBase<DestinationImageR
     }
 
     /** @internal */
+    private async _withContainerBuildOptionsInternal(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): Promise<DestinationImageResource> {
+        const callbackId = registerCallback(async (argData: unknown) => {
+            const argHandle = wrapIfHandle(argData) as ContainerBuildOptionsCallbackContextHandle;
+            const arg = new ContainerBuildOptionsCallbackContextImpl(argHandle, this._client);
+            await callback(arg);
+        });
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, callback: callbackId };
+        const result = await this._client.invokeCapability<DestinationImageResourceHandle>(
+            'Aspire.Hosting/withContainerBuildOptions',
+            rpcArgs
+        );
+        return new DestinationImageResourceImpl(result, this._client);
+    }
+
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): DestinationImageResourcePromise {
+        return new DestinationImageResourcePromiseImpl(this._withContainerBuildOptionsInternal(callback), this._client);
+    }
+
+    /** @internal */
     private async _withOptionalStringInternal(value?: string, enabled?: boolean): Promise<DestinationImageResource> {
         const rpcArgs: Record<string, unknown> = { builder: this._handle };
         if (value !== undefined) rpcArgs.value = value;
@@ -27586,6 +27705,7 @@ const DestinationImageResourcePromiseImpl = $aspireCreateFluentPromiseClass<Dest
     ["onInitializeResource"]: () => DestinationImageResourcePromiseImpl,
     ["onResourceReady"]: () => DestinationImageResourcePromiseImpl,
     ["createExecutionConfiguration"]: () => ExecutionConfigurationBuilderPromiseImpl,
+    ["withContainerBuildOptions"]: () => DestinationImageResourcePromiseImpl,
     ["withOptionalString"]: () => DestinationImageResourcePromiseImpl,
     ["withConfig"]: () => DestinationImageResourcePromiseImpl,
     ["withCreatedAt"]: () => DestinationImageResourcePromiseImpl,
@@ -27625,7 +27745,7 @@ export interface DotnetToolResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): DotnetToolResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): DotnetToolResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -28309,7 +28429,7 @@ export interface DotnetToolResourcePromise extends PromiseLike<DotnetToolResourc
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): DotnetToolResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): DotnetToolResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -28993,7 +29113,7 @@ class DotnetToolResourceImpl extends ResourceBuilderBase<DotnetToolResourceHandl
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<DotnetToolResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<DotnetToolResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<DotnetToolResourceHandle>(
@@ -29012,7 +29132,7 @@ class DotnetToolResourceImpl extends ResourceBuilderBase<DotnetToolResourceHandl
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): DotnetToolResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): DotnetToolResourcePromise {
         return new DotnetToolResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -31530,7 +31650,7 @@ export interface ExecutableResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ExecutableResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ExecutableResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -32175,7 +32295,7 @@ export interface ExecutableResourcePromise extends PromiseLike<ExecutableResourc
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ExecutableResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ExecutableResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -32827,7 +32947,7 @@ class ExecutableResourceImpl extends ResourceBuilderBase<ExecutableResourceHandl
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<ExecutableResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<ExecutableResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<ExecutableResourceHandle>(
@@ -32846,7 +32966,7 @@ class ExecutableResourceImpl extends ResourceBuilderBase<ExecutableResourceHandl
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ExecutableResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ExecutableResourcePromise {
         return new ExecutableResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -35234,7 +35354,7 @@ export interface ExternalServiceResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ExternalServiceResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ExternalServiceResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -35496,6 +35616,13 @@ export interface ExternalServiceResource {
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ExternalServiceResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -35564,7 +35691,7 @@ export interface ExternalServiceResourcePromise extends PromiseLike<ExternalServ
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ExternalServiceResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ExternalServiceResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -35827,6 +35954,13 @@ export interface ExternalServiceResourcePromise extends PromiseLike<ExternalServ
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
     /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ExternalServiceResourcePromise;
+    /**
      * Adds an optional string parameter
      * @param options Additional options.
      */
@@ -35894,7 +36028,7 @@ class ExternalServiceResourceImpl extends ResourceBuilderBase<ExternalServiceRes
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<ExternalServiceResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<ExternalServiceResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<ExternalServiceResourceHandle>(
@@ -35913,7 +36047,7 @@ class ExternalServiceResourceImpl extends ResourceBuilderBase<ExternalServiceRes
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ExternalServiceResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ExternalServiceResourcePromise {
         return new ExternalServiceResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -36796,6 +36930,31 @@ class ExternalServiceResourceImpl extends ResourceBuilderBase<ExternalServiceRes
     }
 
     /** @internal */
+    private async _withContainerBuildOptionsInternal(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): Promise<ExternalServiceResource> {
+        const callbackId = registerCallback(async (argData: unknown) => {
+            const argHandle = wrapIfHandle(argData) as ContainerBuildOptionsCallbackContextHandle;
+            const arg = new ContainerBuildOptionsCallbackContextImpl(argHandle, this._client);
+            await callback(arg);
+        });
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, callback: callbackId };
+        const result = await this._client.invokeCapability<ExternalServiceResourceHandle>(
+            'Aspire.Hosting/withContainerBuildOptions',
+            rpcArgs
+        );
+        return new ExternalServiceResourceImpl(result, this._client);
+    }
+
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ExternalServiceResourcePromise {
+        return new ExternalServiceResourcePromiseImpl(this._withContainerBuildOptionsInternal(callback), this._client);
+    }
+
+    /** @internal */
     private async _withOptionalStringInternal(value?: string, enabled?: boolean): Promise<ExternalServiceResource> {
         const rpcArgs: Record<string, unknown> = { builder: this._handle };
         if (value !== undefined) rpcArgs.value = value;
@@ -37207,6 +37366,7 @@ const ExternalServiceResourcePromiseImpl = $aspireCreateFluentPromiseClass<Exter
     ["onInitializeResource"]: () => ExternalServiceResourcePromiseImpl,
     ["onResourceReady"]: () => ExternalServiceResourcePromiseImpl,
     ["createExecutionConfiguration"]: () => ExecutionConfigurationBuilderPromiseImpl,
+    ["withContainerBuildOptions"]: () => ExternalServiceResourcePromiseImpl,
     ["withOptionalString"]: () => ExternalServiceResourcePromiseImpl,
     ["withConfig"]: () => ExternalServiceResourcePromiseImpl,
     ["withCreatedAt"]: () => ExternalServiceResourcePromiseImpl,
@@ -37247,7 +37407,7 @@ export interface ParameterResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ParameterResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ParameterResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -37517,6 +37677,13 @@ export interface ParameterResource {
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ParameterResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -37585,7 +37752,7 @@ export interface ParameterResourcePromise extends PromiseLike<ParameterResource>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ParameterResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ParameterResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -37855,6 +38022,13 @@ export interface ParameterResourcePromise extends PromiseLike<ParameterResource>
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ParameterResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -37924,7 +38098,7 @@ class ParameterResourceImpl extends ResourceBuilderBase<ParameterResourceHandle>
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<ParameterResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<ParameterResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<ParameterResourceHandle>(
@@ -37943,7 +38117,7 @@ class ParameterResourceImpl extends ResourceBuilderBase<ParameterResourceHandle>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ParameterResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ParameterResourcePromise {
         return new ParameterResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -38843,6 +39017,31 @@ class ParameterResourceImpl extends ResourceBuilderBase<ParameterResourceHandle>
     }
 
     /** @internal */
+    private async _withContainerBuildOptionsInternal(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): Promise<ParameterResource> {
+        const callbackId = registerCallback(async (argData: unknown) => {
+            const argHandle = wrapIfHandle(argData) as ContainerBuildOptionsCallbackContextHandle;
+            const arg = new ContainerBuildOptionsCallbackContextImpl(argHandle, this._client);
+            await callback(arg);
+        });
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, callback: callbackId };
+        const result = await this._client.invokeCapability<ParameterResourceHandle>(
+            'Aspire.Hosting/withContainerBuildOptions',
+            rpcArgs
+        );
+        return new ParameterResourceImpl(result, this._client);
+    }
+
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ParameterResourcePromise {
+        return new ParameterResourcePromiseImpl(this._withContainerBuildOptionsInternal(callback), this._client);
+    }
+
+    /** @internal */
     private async _withOptionalStringInternal(value?: string, enabled?: boolean): Promise<ParameterResource> {
         const rpcArgs: Record<string, unknown> = { builder: this._handle };
         if (value !== undefined) rpcArgs.value = value;
@@ -39255,6 +39454,7 @@ const ParameterResourcePromiseImpl = $aspireCreateFluentPromiseClass<ParameterRe
     ["onInitializeResource"]: () => ParameterResourcePromiseImpl,
     ["onResourceReady"]: () => ParameterResourcePromiseImpl,
     ["createExecutionConfiguration"]: () => ExecutionConfigurationBuilderPromiseImpl,
+    ["withContainerBuildOptions"]: () => ParameterResourcePromiseImpl,
     ["withOptionalString"]: () => ParameterResourcePromiseImpl,
     ["withConfig"]: () => ParameterResourcePromiseImpl,
     ["withCreatedAt"]: () => ParameterResourcePromiseImpl,
@@ -39295,7 +39495,7 @@ export interface ProjectResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ProjectResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ProjectResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -39951,7 +40151,7 @@ export interface ProjectResourcePromise extends PromiseLike<ProjectResource> {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ProjectResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ProjectResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -40608,7 +40808,7 @@ class ProjectResourceImpl extends ResourceBuilderBase<ProjectResourceHandle> imp
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<ProjectResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<ProjectResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<ProjectResourceHandle>(
@@ -40627,7 +40827,7 @@ class ProjectResourceImpl extends ResourceBuilderBase<ProjectResourceHandle> imp
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ProjectResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ProjectResourcePromise {
         return new ProjectResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -43057,7 +43257,7 @@ export interface TestDatabaseResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): TestDatabaseResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): TestDatabaseResourcePromise;
     /**
      * Adds a bind mount to a container resource.
      * @param source The source path of the mount. This is the path to the file or directory on the host, relative to the app host project directory.
@@ -43890,7 +44090,7 @@ export interface TestDatabaseResourcePromise extends PromiseLike<TestDatabaseRes
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): TestDatabaseResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): TestDatabaseResourcePromise;
     /**
      * Adds a bind mount to a container resource.
      * @param source The source path of the mount. This is the path to the file or directory on the host, relative to the app host project directory.
@@ -44723,7 +44923,7 @@ class TestDatabaseResourceImpl extends ResourceBuilderBase<TestDatabaseResourceH
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<TestDatabaseResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<TestDatabaseResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<TestDatabaseResourceHandle>(
@@ -44742,7 +44942,7 @@ class TestDatabaseResourceImpl extends ResourceBuilderBase<TestDatabaseResourceH
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): TestDatabaseResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): TestDatabaseResourcePromise {
         return new TestDatabaseResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -47605,7 +47805,7 @@ export interface TestRedisResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): TestRedisResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): TestRedisResourcePromise;
     /**
      * Adds a bind mount to a container resource.
      * @param source The source path of the mount. This is the path to the file or directory on the host, relative to the app host project directory.
@@ -48522,7 +48722,7 @@ export interface TestRedisResourcePromise extends PromiseLike<TestRedisResource>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): TestRedisResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): TestRedisResourcePromise;
     /**
      * Adds a bind mount to a container resource.
      * @param source The source path of the mount. This is the path to the file or directory on the host, relative to the app host project directory.
@@ -49439,7 +49639,7 @@ class TestRedisResourceImpl extends ResourceBuilderBase<TestRedisResourceHandle>
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<TestRedisResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<TestRedisResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<TestRedisResourceHandle>(
@@ -49458,7 +49658,7 @@ class TestRedisResourceImpl extends ResourceBuilderBase<TestRedisResourceHandle>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): TestRedisResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): TestRedisResourcePromise {
         return new TestRedisResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -52650,7 +52850,7 @@ export interface TestVaultResource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): TestVaultResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): TestVaultResourcePromise;
     /**
      * Adds a bind mount to a container resource.
      * @param source The source path of the mount. This is the path to the file or directory on the host, relative to the app host project directory.
@@ -53485,7 +53685,7 @@ export interface TestVaultResourcePromise extends PromiseLike<TestVaultResource>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): TestVaultResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): TestVaultResourcePromise;
     /**
      * Adds a bind mount to a container resource.
      * @param source The source path of the mount. This is the path to the file or directory on the host, relative to the app host project directory.
@@ -54320,7 +54520,7 @@ class TestVaultResourceImpl extends ResourceBuilderBase<TestVaultResourceHandle>
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<TestVaultResource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<TestVaultResource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<TestVaultResourceHandle>(
@@ -54339,7 +54539,7 @@ class TestVaultResourceImpl extends ResourceBuilderBase<TestVaultResourceHandle>
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): TestVaultResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): TestVaultResourcePromise {
         return new TestVaultResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -57267,13 +57467,6 @@ export interface ComputeResource {
      * @experimental
      */
     withRemoteImageTag(remoteImageTag: string): ComputeResourcePromise;
-    /**
-     * Configures container build options for a compute resource using an async callback.
-     * @param callback An async callback to configure container build options.
-     * @returns A reference to the `IResourceBuilder`1`.
-     * @experimental
-     */
-    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ComputeResourcePromise;
 }
 
 export interface ComputeResourcePromise extends PromiseLike<ComputeResource> {
@@ -57316,13 +57509,6 @@ export interface ComputeResourcePromise extends PromiseLike<ComputeResource> {
      * @experimental
      */
     withRemoteImageTag(remoteImageTag: string): ComputeResourcePromise;
-    /**
-     * Configures container build options for a compute resource using an async callback.
-     * @param callback An async callback to configure container build options.
-     * @returns A reference to the `IResourceBuilder`1`.
-     * @experimental
-     */
-    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ComputeResourcePromise;
 }
 
 // ============================================================================
@@ -57431,31 +57617,6 @@ class ComputeResourceImpl extends ResourceBuilderBase<IComputeResourceHandle> im
         return new ComputeResourcePromiseImpl(this._withRemoteImageTagInternal(remoteImageTag), this._client);
     }
 
-    /** @internal */
-    private async _withContainerBuildOptionsInternal(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): Promise<ComputeResource> {
-        const callbackId = registerCallback(async (argData: unknown) => {
-            const argHandle = wrapIfHandle(argData) as ContainerBuildOptionsCallbackContextHandle;
-            const arg = new ContainerBuildOptionsCallbackContextImpl(argHandle, this._client);
-            await callback(arg);
-        });
-        const rpcArgs: Record<string, unknown> = { builder: this._handle, callback: callbackId };
-        const result = await this._client.invokeCapability<IComputeResourceHandle>(
-            'Aspire.Hosting/withContainerBuildOptions',
-            rpcArgs
-        );
-        return new ComputeResourceImpl(result, this._client);
-    }
-
-    /**
-     * Configures container build options for a compute resource using an async callback.
-     * @param callback An async callback to configure container build options.
-     * @returns A reference to the `IResourceBuilder`1`.
-     * @experimental
-     */
-    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ComputeResourcePromise {
-        return new ComputeResourcePromiseImpl(this._withContainerBuildOptionsInternal(callback), this._client);
-    }
-
 }
 
 /** @internal */
@@ -57464,7 +57625,6 @@ const ComputeResourcePromiseImpl = $aspireCreateFluentPromiseClass<ComputeResour
     ["withImagePushOptions"]: () => ComputeResourcePromiseImpl,
     ["withRemoteImageName"]: () => ComputeResourcePromiseImpl,
     ["withRemoteImageTag"]: () => ComputeResourcePromiseImpl,
-    ["withContainerBuildOptions"]: () => ComputeResourcePromiseImpl,
 }));
 
 // ============================================================================
@@ -57542,7 +57702,7 @@ export interface Resource {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -57799,6 +57959,13 @@ export interface Resource {
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -57867,7 +58034,7 @@ export interface ResourcePromise extends PromiseLike<Resource> {
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ResourcePromise;
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ResourcePromise;
     /**
      * Configures custom base images for generated Dockerfiles.
      *
@@ -58124,6 +58291,13 @@ export interface ResourcePromise extends PromiseLike<Resource> {
      * @returns The execution configuration builder.
      */
     createExecutionConfiguration(): ExecutionConfigurationBuilderPromise;
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ResourcePromise;
     /**
      * Adds an optional string parameter
      * @param options Additional options.
@@ -58193,7 +58367,7 @@ class ResourceImpl extends ResourceBuilderBase<IResourceHandle> implements Resou
     }
 
     /** @internal */
-    private async _withContainerRegistryInternal(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): Promise<Resource> {
+    private async _withContainerRegistryInternal(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): Promise<Resource> {
         registry = isPromiseLike(registry) ? await registry : registry;
         const rpcArgs: Record<string, unknown> = { builder: this._handle, registry };
         const result = await this._client.invokeCapability<IResourceHandle>(
@@ -58212,7 +58386,7 @@ class ResourceImpl extends ResourceBuilderBase<IResourceHandle> implements Resou
      * @returns The resource builder for chaining.
      * @experimental
      */
-    withContainerRegistry(registry: Awaitable<ContainerRegistry | ContainerRegistryResource>): ResourcePromise {
+    withContainerRegistry(registry: Awaitable<CSharpAppResource | ComputeEnvironmentResource | ComputeResource | ContainerFilesDestinationResource | ContainerImageResource | ContainerRegistryResource | ContainerResource | DestinationImageResource | DotnetToolResource | ExecutableResource | ExternalServiceResource | ParameterResource | ProjectResource | Resource | ResourceWithArgs | ResourceWithConnectionString | ResourceWithContainerFiles | ResourceWithEndpoints | ResourceWithEnvironment | ResourceWithWaitSupport | TestDatabaseResource | TestMarkerResource | TestMutablePromiseCollisionResource | TestMutablePromiseCollisionResourcePromise | TestPromiseCollisionResource | TestPromiseCollisionResourcePromise | TestRedisResource | TestVaultResource>): ResourcePromise {
         return new ResourcePromiseImpl(this._withContainerRegistryInternal(registry), this._client);
     }
 
@@ -59071,6 +59245,31 @@ class ResourceImpl extends ResourceBuilderBase<IResourceHandle> implements Resou
     }
 
     /** @internal */
+    private async _withContainerBuildOptionsInternal(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): Promise<Resource> {
+        const callbackId = registerCallback(async (argData: unknown) => {
+            const argHandle = wrapIfHandle(argData) as ContainerBuildOptionsCallbackContextHandle;
+            const arg = new ContainerBuildOptionsCallbackContextImpl(argHandle, this._client);
+            await callback(arg);
+        });
+        const rpcArgs: Record<string, unknown> = { builder: this._handle, callback: callbackId };
+        const result = await this._client.invokeCapability<IResourceHandle>(
+            'Aspire.Hosting/withContainerBuildOptions',
+            rpcArgs
+        );
+        return new ResourceImpl(result, this._client);
+    }
+
+    /**
+     * Configures container build options for a compute resource using an async callback.
+     * @param callback An async callback to configure container build options.
+     * @returns A reference to the `IResourceBuilder`1`.
+     * @experimental
+     */
+    withContainerBuildOptions(callback: (arg: ContainerBuildOptionsCallbackContext) => Promise<void>): ResourcePromise {
+        return new ResourcePromiseImpl(this._withContainerBuildOptionsInternal(callback), this._client);
+    }
+
+    /** @internal */
     private async _withOptionalStringInternal(value?: string, enabled?: boolean): Promise<Resource> {
         const rpcArgs: Record<string, unknown> = { builder: this._handle };
         if (value !== undefined) rpcArgs.value = value;
@@ -59481,6 +59680,7 @@ const ResourcePromiseImpl = $aspireCreateFluentPromiseClass<Resource, ResourcePr
     ["onInitializeResource"]: () => ResourcePromiseImpl,
     ["onResourceReady"]: () => ResourcePromiseImpl,
     ["createExecutionConfiguration"]: () => ExecutionConfigurationBuilderPromiseImpl,
+    ["withContainerBuildOptions"]: () => ResourcePromiseImpl,
     ["withOptionalString"]: () => ResourcePromiseImpl,
     ["withConfig"]: () => ResourcePromiseImpl,
     ["withCreatedAt"]: () => ResourcePromiseImpl,
