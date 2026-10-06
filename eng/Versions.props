@@ -60,7 +60,8 @@
     <!-- MicroBuild.Core version for VS Code extension signing -->
     <MicrosoftVisualStudioEngMicroBuildCoreVersion>1.0.0</MicrosoftVisualStudioEngMicroBuildCoreVersion>
   </PropertyGroup>
-  <!-- .NET 10.0 Package Versions -->
+  <!-- .NET 10 servicing pins are maintained manually. Darc tracks the canonical .NET 11
+       properties below; update these Net10 properties together when servicing .NET 10. -->
   <PropertyGroup Label="Net10">
     <!-- EF -->
     <MicrosoftEntityFrameworkCoreCosmosNet10Version>10.0.12</MicrosoftEntityFrameworkCoreCosmosNet10Version>
@@ -99,45 +100,46 @@
     <SystemSecurityCryptographyPkcsNet10Version>10.0.12</SystemSecurityCryptographyPkcsNet10Version>
     <SystemTextJsonNet10Version>10.0.12</SystemTextJsonNet10Version>
   </PropertyGroup>
-  <!-- .NET 11.0 Package Versions -->
+  <!-- .NET 11 package versions use Darc's package-name-without-punctuation + Version convention. -->
   <PropertyGroup Label="Net11">
     <!-- EF -->
-    <MicrosoftEntityFrameworkCoreCosmosNet11Version>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreCosmosNet11Version>
-    <MicrosoftEntityFrameworkCoreDesignNet11Version>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreDesignNet11Version>
-    <MicrosoftEntityFrameworkCoreSqlServerNet11Version>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreSqlServerNet11Version>
-    <MicrosoftEntityFrameworkCoreToolsNet11Version>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreToolsNet11Version>
+    <MicrosoftEntityFrameworkCoreCosmosVersion>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreCosmosVersion>
+    <MicrosoftEntityFrameworkCoreDesignVersion>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreDesignVersion>
+    <MicrosoftEntityFrameworkCoreSqlServerVersion>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreSqlServerVersion>
+    <MicrosoftEntityFrameworkCoreToolsVersion>11.0.0-rc.1.26425.128</MicrosoftEntityFrameworkCoreToolsVersion>
     <!-- ASP.NET Core -->
-    <MicrosoftAspNetCoreComponentsGatewayCliNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreComponentsGatewayCliNet11Version>
-    <MicrosoftAspNetCoreComponentsWebAssemblyNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreComponentsWebAssemblyNet11Version>
-    <MicrosoftAspNetCoreAuthenticationCertificateNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationCertificateNet11Version>
-    <MicrosoftAspNetCoreAuthenticationJwtBearerNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationJwtBearerNet11Version>
-    <MicrosoftAspNetCoreAuthenticationOpenIdConnectNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationOpenIdConnectNet11Version>
-    <MicrosoftAspNetCoreOpenApiNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreOpenApiNet11Version>
-    <MicrosoftAspNetCoreOutputCachingStackExchangeRedisNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreOutputCachingStackExchangeRedisNet11Version>
-    <MicrosoftAspNetCoreTestHostNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreTestHostNet11Version>
-    <MicrosoftExtensionsCachingStackExchangeRedisNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsCachingStackExchangeRedisNet11Version>
-    <MicrosoftExtensionsDiagnosticsHealthChecksEntityFrameworkCoreNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsDiagnosticsHealthChecksEntityFrameworkCoreNet11Version>
-    <MicrosoftExtensionsDiagnosticsHealthChecksNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsDiagnosticsHealthChecksNet11Version>
-    <MicrosoftExtensionsFeaturesNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsFeaturesNet11Version>
-    <MicrosoftAspNetCoreSignalRClientNet11Version>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreSignalRClientNet11Version>
+    <MicrosoftAspNetCoreComponentsGatewayCliVersion>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreComponentsGatewayCliVersion>
+    <MicrosoftAspNetCoreComponentsWebAssemblyVersion>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreComponentsWebAssemblyVersion>
+    <MicrosoftAspNetCoreAuthenticationCertificateVersion>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationCertificateVersion>
+    <MicrosoftAspNetCoreAuthenticationJwtBearerVersion>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationJwtBearerVersion>
+    <MicrosoftAspNetCoreAuthenticationOpenIdConnectVersion>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreAuthenticationOpenIdConnectVersion>
+    <MicrosoftAspNetCoreOpenApiVersion>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreOpenApiVersion>
+    <MicrosoftAspNetCoreOutputCachingStackExchangeRedisVersion>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreOutputCachingStackExchangeRedisVersion>
+    <MicrosoftAspNetCoreTestHostVersion>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreTestHostVersion>
+    <MicrosoftExtensionsCachingStackExchangeRedisVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsCachingStackExchangeRedisVersion>
+    <MicrosoftExtensionsDiagnosticsHealthChecksEntityFrameworkCoreVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsDiagnosticsHealthChecksEntityFrameworkCoreVersion>
+    <MicrosoftExtensionsDiagnosticsHealthChecksVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsDiagnosticsHealthChecksVersion>
+    <MicrosoftExtensionsFeaturesVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsFeaturesVersion>
+    <MicrosoftAspNetCoreSignalRClientVersion>11.0.0-rc.1.26425.128</MicrosoftAspNetCoreSignalRClientVersion>
     <!-- Runtime -->
-    <MicrosoftBclMemoryNet11Version>11.0.0-rc.1.26425.128</MicrosoftBclMemoryNet11Version>
-    <MicrosoftExtensionsHostingAbstractionsNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsHostingAbstractionsNet11Version>
-    <MicrosoftExtensionsHostingNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsHostingNet11Version>
-    <MicrosoftExtensionsCachingMemoryNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsCachingMemoryNet11Version>
-    <MicrosoftExtensionsConfigurationAbstractionsNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsConfigurationAbstractionsNet11Version>
-    <MicrosoftExtensionsConfigurationBinderNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsConfigurationBinderNet11Version>
-    <MicrosoftExtensionsConfigurationEnvironmentVariablesNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsConfigurationEnvironmentVariablesNet11Version>
-    <MicrosoftExtensionsDependencyInjectionAbstractionsNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsDependencyInjectionAbstractionsNet11Version>
-    <MicrosoftExtensionsFileSystemGlobbingNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsFileSystemGlobbingNet11Version>
-    <MicrosoftExtensionsLoggingAbstractionsNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsLoggingAbstractionsNet11Version>
-    <MicrosoftExtensionsLoggingNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsLoggingNet11Version>
-    <MicrosoftExtensionsOptionsNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsOptionsNet11Version>
-    <MicrosoftExtensionsPrimitivesNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsPrimitivesNet11Version>
-    <MicrosoftExtensionsHttpNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsHttpNet11Version>
-    <SystemFormatsAsn1Net11Version>11.0.0-rc.1.26425.128</SystemFormatsAsn1Net11Version>
-    <SystemSecurityCryptographyPkcsNet11Version>11.0.0-rc.1.26425.128</SystemSecurityCryptographyPkcsNet11Version>
-    <SystemTextJsonNet11Version>11.0.0-rc.1.26425.128</SystemTextJsonNet11Version>
-    <MicrosoftExtensionsFileProvidersEmbeddedNet11Version>11.0.0-rc.1.26425.128</MicrosoftExtensionsFileProvidersEmbeddedNet11Version>
+    <MicrosoftBclMemoryVersion>11.0.0-rc.1.26425.128</MicrosoftBclMemoryVersion>
+    <MicrosoftExtensionsHostingVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsHostingVersion>
+    <MicrosoftExtensionsCachingMemoryVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsCachingMemoryVersion>
+    <MicrosoftExtensionsConfigurationBinderVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsConfigurationBinderVersion>
+    <MicrosoftExtensionsConfigurationEnvironmentVariablesVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsConfigurationEnvironmentVariablesVersion>
+    <MicrosoftExtensionsFileSystemGlobbingVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsFileSystemGlobbingVersion>
+    <MicrosoftExtensionsLoggingVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsLoggingVersion>
+    <MicrosoftExtensionsHttpVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsHttpVersion>
+    <SystemFormatsAsn1Version>11.0.0-rc.1.26425.128</SystemFormatsAsn1Version>
+    <SystemSecurityCryptographyPkcsVersion>11.0.0-rc.1.26425.128</SystemSecurityCryptographyPkcsVersion>
+    <SystemTextJsonVersion>11.0.0-rc.1.26425.128</SystemTextJsonVersion>
+    <MicrosoftExtensionsFileProvidersEmbeddedVersion>11.0.0-rc.1.26425.128</MicrosoftExtensionsFileProvidersEmbeddedVersion>
+  </PropertyGroup>
+  <PropertyGroup>
+    <!-- Compatibility aliases for Blazor hosting/playground and template replacement consumers.
+         Keep these derived from the canonical properties so dependency flow updates reach them. -->
+    <MicrosoftAspNetCoreComponentsGatewayCliNet11Version>$(MicrosoftAspNetCoreComponentsGatewayCliVersion)</MicrosoftAspNetCoreComponentsGatewayCliNet11Version>
+    <MicrosoftAspNetCoreComponentsWebAssemblyNet11Version>$(MicrosoftAspNetCoreComponentsWebAssemblyVersion)</MicrosoftAspNetCoreComponentsWebAssemblyNet11Version>
+    <MicrosoftAspNetCoreOpenApiNet11Version>$(MicrosoftAspNetCoreOpenApiVersion)</MicrosoftAspNetCoreOpenApiNet11Version>
   </PropertyGroup>
 </Project>

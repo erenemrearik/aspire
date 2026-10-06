@@ -214,8 +214,8 @@
     <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 
-  <!-- This group is for packages that are common between net10 and net11.
-       The dependencies on this group should not be updated manually and should instead use arcade's dependency flow to get updated.-->
+  <!-- Common dotnet/extensions dependencies use Arcade dependency flow.
+       Framework packages use manual .NET 10 servicing pins and Darc-managed .NET 11 overrides. -->
   <ItemGroup>
     <!-- dotnet/extensions dependencies ** Common between net10 and net11 ** -->
     <PackageVersion Include="Microsoft.Extensions.AI" Version="$(MicrosoftExtensionsAIVersion)" />
@@ -229,18 +229,20 @@
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="$(MicrosoftExtensionsTimeProviderTestingVersion)" />
     <!-- Runtime dependencies use the .NET 10 baseline, with .NET 11 overrides below. -->
     <PackageVersion Include="Microsoft.Bcl.Memory" Version="$(MicrosoftBclMemoryNet10Version)" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="$(MicrosoftExtensionsHostingAbstractionsNet10Version)" />
+    <!-- .NET 11 supplies these abstractions in Microsoft.NETCore.App. Do not transitively
+         pin packages for that target; retain the package versions needed by .NET 10. -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="$(MicrosoftExtensionsHostingAbstractionsNet10Version)" Condition="'$(TargetFramework)' != 'net11.0'" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="$(MicrosoftExtensionsHostingNet10Version)" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="$(MicrosoftExtensionsConfigurationAbstractionsNet10Version)" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="$(MicrosoftExtensionsConfigurationAbstractionsNet10Version)" Condition="'$(TargetFramework)' != 'net11.0'" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="$(MicrosoftExtensionsConfigurationBinderNet10Version)" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="$(MicrosoftExtensionsConfigurationEnvironmentVariablesNet10Version)" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="$(MicrosoftExtensionsCachingMemoryNet10Version)" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(MicrosoftExtensionsDependencyInjectionAbstractionsNet10Version)" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(MicrosoftExtensionsDependencyInjectionAbstractionsNet10Version)" Condition="'$(TargetFramework)' != 'net11.0'" />
     <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="$(MicrosoftExtensionsFileSystemGlobbingNet10Version)" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsLoggingAbstractionsNet10Version)" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsLoggingAbstractionsNet10Version)" Condition="'$(TargetFramework)' != 'net11.0'" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="$(MicrosoftExtensionsLoggingNet10Version)" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="$(MicrosoftExtensionsOptionsNet10Version)" />
-    <PackageVersion Include="Microsoft.Extensions.Primitives" Version="$(MicrosoftExtensionsPrimitivesNet10Version)" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="$(MicrosoftExtensionsOptionsNet10Version)" Condition="'$(TargetFramework)' != 'net11.0'" />
+    <PackageVersion Include="Microsoft.Extensions.Primitives" Version="$(MicrosoftExtensionsPrimitivesNet10Version)" Condition="'$(TargetFramework)' != 'net11.0'" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="$(MicrosoftExtensionsHttpNet10Version)" />
     <PackageVersion Include="System.Formats.Asn1" Version="$(SystemFormatsAsn1Net10Version)" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="$(SystemSecurityCryptographyPkcsNet10Version)" />
@@ -275,40 +277,34 @@
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="$(MicrosoftAspNetCoreSignalRClientNet10Version)" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net11.0'">
-    <PackageVersion Update="Microsoft.Bcl.Memory" Version="$(MicrosoftBclMemoryNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Hosting.Abstractions" Version="$(MicrosoftExtensionsHostingAbstractionsNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Hosting" Version="$(MicrosoftExtensionsHostingNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Configuration.Abstractions" Version="$(MicrosoftExtensionsConfigurationAbstractionsNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Configuration.Binder" Version="$(MicrosoftExtensionsConfigurationBinderNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="$(MicrosoftExtensionsConfigurationEnvironmentVariablesNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Caching.Memory" Version="$(MicrosoftExtensionsCachingMemoryNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(MicrosoftExtensionsDependencyInjectionAbstractionsNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.FileSystemGlobbing" Version="$(MicrosoftExtensionsFileSystemGlobbingNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Logging.Abstractions" Version="$(MicrosoftExtensionsLoggingAbstractionsNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Logging" Version="$(MicrosoftExtensionsLoggingNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Options" Version="$(MicrosoftExtensionsOptionsNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Primitives" Version="$(MicrosoftExtensionsPrimitivesNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Http" Version="$(MicrosoftExtensionsHttpNet11Version)" />
-    <PackageVersion Update="System.Formats.Asn1" Version="$(SystemFormatsAsn1Net11Version)" />
-    <PackageVersion Update="System.Security.Cryptography.Pkcs" Version="$(SystemSecurityCryptographyPkcsNet11Version)" />
-    <PackageVersion Update="Microsoft.Bcl.Cryptography" Version="$(SystemSecurityCryptographyPkcsNet11Version)" />
-    <PackageVersion Update="System.Text.Json" Version="$(SystemTextJsonNet11Version)" />
-    <PackageVersion Update="Microsoft.EntityFrameworkCore.Cosmos" Version="$(MicrosoftEntityFrameworkCoreCosmosNet11Version)" />
-    <PackageVersion Update="Microsoft.EntityFrameworkCore.Design" Version="$(MicrosoftEntityFrameworkCoreDesignNet11Version)" />
-    <PackageVersion Update="Microsoft.EntityFrameworkCore.SqlServer" Version="$(MicrosoftEntityFrameworkCoreSqlServerNet11Version)" />
-    <PackageVersion Update="Microsoft.EntityFrameworkCore.Tools" Version="$(MicrosoftEntityFrameworkCoreToolsNet11Version)" />
-    <PackageVersion Update="Microsoft.AspNetCore.Authentication.Certificate" Version="$(MicrosoftAspNetCoreAuthenticationCertificateNet11Version)" />
-    <PackageVersion Update="Microsoft.AspNetCore.Authentication.JwtBearer" Version="$(MicrosoftAspNetCoreAuthenticationJwtBearerNet11Version)" />
-    <PackageVersion Update="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="$(MicrosoftAspNetCoreAuthenticationOpenIdConnectNet11Version)" />
-    <PackageVersion Update="Microsoft.AspNetCore.OpenApi" Version="$(MicrosoftAspNetCoreOpenApiNet11Version)" />
-    <PackageVersion Update="Microsoft.AspNetCore.OutputCaching.StackExchangeRedis" Version="$(MicrosoftAspNetCoreOutputCachingStackExchangeRedisNet11Version)" />
-    <PackageVersion Update="Microsoft.AspNetCore.TestHost" Version="$(MicrosoftAspNetCoreTestHostNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Caching.StackExchangeRedis" Version="$(MicrosoftExtensionsCachingStackExchangeRedisNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="$(MicrosoftExtensionsDiagnosticsHealthChecksEntityFrameworkCoreNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Diagnostics.HealthChecks" Version="$(MicrosoftExtensionsDiagnosticsHealthChecksNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.Features" Version="$(MicrosoftExtensionsFeaturesNet11Version)" />
-    <PackageVersion Update="Microsoft.Extensions.FileProviders.Embedded" Version="$(MicrosoftExtensionsFileProvidersEmbeddedNet11Version)" />
-    <PackageVersion Update="Microsoft.AspNetCore.SignalR.Client" Version="$(MicrosoftAspNetCoreSignalRClientNet11Version)" />
+    <PackageVersion Update="Microsoft.Bcl.Memory" Version="$(MicrosoftBclMemoryVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Hosting" Version="$(MicrosoftExtensionsHostingVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Configuration.Binder" Version="$(MicrosoftExtensionsConfigurationBinderVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="$(MicrosoftExtensionsConfigurationEnvironmentVariablesVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Caching.Memory" Version="$(MicrosoftExtensionsCachingMemoryVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.FileSystemGlobbing" Version="$(MicrosoftExtensionsFileSystemGlobbingVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Logging" Version="$(MicrosoftExtensionsLoggingVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Http" Version="$(MicrosoftExtensionsHttpVersion)" />
+    <PackageVersion Update="System.Formats.Asn1" Version="$(SystemFormatsAsn1Version)" />
+    <PackageVersion Update="System.Security.Cryptography.Pkcs" Version="$(SystemSecurityCryptographyPkcsVersion)" />
+    <PackageVersion Update="Microsoft.Bcl.Cryptography" Version="$(SystemSecurityCryptographyPkcsVersion)" />
+    <PackageVersion Update="System.Text.Json" Version="$(SystemTextJsonVersion)" />
+    <PackageVersion Update="Microsoft.EntityFrameworkCore.Cosmos" Version="$(MicrosoftEntityFrameworkCoreCosmosVersion)" />
+    <PackageVersion Update="Microsoft.EntityFrameworkCore.Design" Version="$(MicrosoftEntityFrameworkCoreDesignVersion)" />
+    <PackageVersion Update="Microsoft.EntityFrameworkCore.SqlServer" Version="$(MicrosoftEntityFrameworkCoreSqlServerVersion)" />
+    <PackageVersion Update="Microsoft.EntityFrameworkCore.Tools" Version="$(MicrosoftEntityFrameworkCoreToolsVersion)" />
+    <PackageVersion Update="Microsoft.AspNetCore.Authentication.Certificate" Version="$(MicrosoftAspNetCoreAuthenticationCertificateVersion)" />
+    <PackageVersion Update="Microsoft.AspNetCore.Authentication.JwtBearer" Version="$(MicrosoftAspNetCoreAuthenticationJwtBearerVersion)" />
+    <PackageVersion Update="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="$(MicrosoftAspNetCoreAuthenticationOpenIdConnectVersion)" />
+    <PackageVersion Update="Microsoft.AspNetCore.OpenApi" Version="$(MicrosoftAspNetCoreOpenApiVersion)" />
+    <PackageVersion Update="Microsoft.AspNetCore.OutputCaching.StackExchangeRedis" Version="$(MicrosoftAspNetCoreOutputCachingStackExchangeRedisVersion)" />
+    <PackageVersion Update="Microsoft.AspNetCore.TestHost" Version="$(MicrosoftAspNetCoreTestHostVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Caching.StackExchangeRedis" Version="$(MicrosoftExtensionsCachingStackExchangeRedisVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="$(MicrosoftExtensionsDiagnosticsHealthChecksEntityFrameworkCoreVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Diagnostics.HealthChecks" Version="$(MicrosoftExtensionsDiagnosticsHealthChecksVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.Features" Version="$(MicrosoftExtensionsFeaturesVersion)" />
+    <PackageVersion Update="Microsoft.Extensions.FileProviders.Embedded" Version="$(MicrosoftExtensionsFileProvidersEmbeddedVersion)" />
+    <PackageVersion Update="Microsoft.AspNetCore.SignalR.Client" Version="$(MicrosoftAspNetCoreSignalRClientVersion)" />
     <PackageVersion Update="System.IO.Hashing" Version="11.0.0-rc.1.26425.128" />
     <PackageVersion Update="Microsoft.Data.Sqlite.Core" Version="11.0.0-rc.1.26425.128" />
     <PackageVersion Update="Npgsql.EntityFrameworkCore.PostgreSQL" Version="11.0.0-rc.1.1" />
@@ -323,6 +319,6 @@
     <PackageVersion Include="NuGet.Credentials" Version="$(NuGetPackageVersionForCli)" />
     <PackageVersion Include="NuGet.Versioning" Version="$(NuGetPackageVersionForCli)" />
     <PackageVersion Update="NuGet.Protocol" Version="$(NuGetPackageVersionForCli)" />
-    <PackageVersion Update="System.Security.Cryptography.Pkcs" Version="11.0.0-rc.1.26425.128" />
+    <PackageVersion Update="System.Security.Cryptography.Pkcs" Version="$(SystemSecurityCryptographyPkcsVersion)" />
   </ItemGroup>
 </Project>
