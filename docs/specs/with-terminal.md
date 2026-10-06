@@ -21,6 +21,11 @@ exposes the same session as `aspire terminal agent --replica 0`.
 All terminal APIs share the experimental diagnostic `ASPIRETERMINAL001`,
 including `WithTerminal()`, AppHost-owned terminals, and terminal interactions.
 
+Per-replica terminal host resources are hidden by default. Use **Show hidden
+resources** in the dashboard to inspect their state and console logs. They
+export diagnostic logs, metrics, and traces to the configured dashboard OTLP
+endpoint independently of their visibility.
+
 ## AppHost-owned terminals
 
 For processes that the AppHost launches directly rather than as resources, use
