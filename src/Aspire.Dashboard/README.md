@@ -8,33 +8,6 @@ The dashboard shows:
 - Live console logs of resources.
 - Live telemetry, such as structured logs, traces and metrics.
 
-## SQL visualization
-
-The text visualizer highlights recognized query fields in structured logs and spans as SQL.
-It recognizes `db.query.text` and the legacy `db.statement` semantic conventions,
-as well as field names such as `commandText`, `queryText`, `sql`, `sqlQuery`,
-`sqlStatement`, `sql.query`, and `sql.statement`, ignoring case for these additional names.
-For fields that can contain non-SQL queries, `db.system.name` or legacy `db.system`
-is used when present to restrict automatic SQL highlighting to known SQL databases.
-Structured-log attribute detection requires either a nonempty `db.system.name` or
-legacy `db.system` attribute, or a logger category starting with
-`Microsoft.EntityFrameworkCore`, `Npgsql`, or `MySqlConnector`. Custom logger sources
-are supported when database-system metadata is present. Recognized query fields
-are still required, and database-system validation applies as described above.
-Span attribute detection does not require a logger category.
-
-Entire command-log messages are also automatically highlighted as SQL for logger
-categories starting with `Microsoft.EntityFrameworkCore.Database.Command`,
-`Npgsql.Command`, `MySqlConnector.MySqlCommand`, or `NHibernate.SQL`. This applies
-to the Message property in log details and the View message action. The full message,
-including any timing, parameter, or other metadata, is preserved rather than extracting SQL.
-
-An explicit initial SQL format takes precedence over automatic JSON/XML detection.
-Users can still change the format in the visualizer's dropdown. Without an explicit
-format, existing JSON/XML detection applies, and SQL and Markdown can be selected
-manually for content that is not detected as JSON or XML. SQL highlighting preserves
-the original text and does not reformat it.
-
 ## Security considerations
 
 The dashboard can display sensitive information, including resource configuration, environment variables, console logs, and telemetry. Secure the dashboard and its endpoints whenever they are accessible beyond a trusted local development environment.
