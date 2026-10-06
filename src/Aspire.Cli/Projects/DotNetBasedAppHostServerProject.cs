@@ -623,7 +623,7 @@ internal sealed class DotNetBasedAppHostServerProject : IAppHostServerProject
 
         void OnStderr(string line)
         {
-            _logger.LogInformation("AppHostServer({ProcessId}) stderr: {Line}", execution.ProcessId, line);
+            _logger.LogDebug("AppHostServer({ProcessId}) stderr: {Line}", execution.ProcessId, line);
             outputCollector.AppendError(line);
         }
 

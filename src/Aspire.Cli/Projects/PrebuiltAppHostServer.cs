@@ -1331,23 +1331,17 @@ internal sealed partial class PrebuiltAppHostServer : IAppHostServerProject, IDi
 
         void OnStdout(string line)
         {
-            // Promoted from LogTrace to LogDebug so that apphost-server stdout reaches the
-            // CLI's on-disk log under the default file-logger filter (Debug). Previously
-            // these lines were dropped entirely, which made apphost-side warnings
-            // (for example, "LoaderExceptions" from the type-discovery path) invisible to
-            // anyone diagnosing a "no code generator found" / "no language support found"
-            // error. See https://github.com/microsoft/aspire/issues/16729.
+            // Debug retains raw server output in the default CLI file log without
+            // printing routine diagnostics during normal usage.
             _logger.LogDebug("PrebuiltAppHostServer({ProcessId}) stdout: {Line}", execution.ProcessId, line);
             outputCollector.AppendOutput(line);
         }
 
         void OnStderr(string line)
         {
-            // Promoted from LogTrace to LogInformation so that apphost-server stderr is
-            // visible at the default console log level (Information). Stderr is reserved
-            // for genuine problems in well-behaved server processes, so surfacing it
-            // by default is appropriate. See https://github.com/microsoft/aspire/issues/16729.
-            _logger.LogInformation("PrebuiltAppHostServer({ProcessId}) stderr: {Line}", execution.ProcessId, line);
+            // The stream does not establish severity. Startup failures surface the
+            // collected output separately at Error.
+            _logger.LogDebug("PrebuiltAppHostServer({ProcessId}) stderr: {Line}", execution.ProcessId, line);
             outputCollector.AppendError(line);
         }
 
