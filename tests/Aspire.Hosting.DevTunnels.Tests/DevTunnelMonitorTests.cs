@@ -286,6 +286,30 @@ public class DevTunnelMonitorTests
     }
 
     [Fact]
+    public async Task ColoredCombinedMessagesCannotHideHostTakeover()
+    {
+        using var test = new TestDevTunnelMonitor();
+        await test.StartAsync();
+        await test.ReadyAsync();
+        await test.App.ResourceNotifications.PublishUpdateAsync(test.Port, s => s with
+        {
+            Urls = [new("tunnel", "https://original-3000.usw2.devtunnels.ms/", false)]
+        });
+
+        await test.LogAsync("Connection to host tunnel relay restored.; \u001b[31mConnection to host tunnel relay closed.\u001b[0m");
+        Assert.Equal(HealthStatus.Unhealthy, test.Snapshot(test.Port).HealthStatus);
+        Assert.True(Assert.Single(test.Snapshot(test.Port).Urls).IsInactive);
+        Assert.Equal(HealthStatus.Unhealthy, Assert.Single(test.Snapshot(test.Tunnel).HealthReports, r => r.Name == "tunnel-connection").Status);
+
+        await test.Monitor.CheckHealthAsync(CancellationToken.None).DefaultTimeout();
+        Assert.Equal(HealthStatus.Unhealthy, test.Snapshot(test.Port).HealthStatus);
+        Assert.True(Assert.Single(test.Snapshot(test.Port).Urls).IsInactive);
+        await test.LogAsync("\u001b[32mConnection to host tunnel relay restored.\u001b[0m");
+        Assert.Equal(HealthStatus.Healthy, test.Snapshot(test.Port).HealthStatus);
+        Assert.False(Assert.Single(test.Snapshot(test.Port).Urls).IsInactive);
+    }
+
+    [Fact]
     public async Task OlderReconciliationCannotUndoNewerLogObservations()
     {
         using var test = new TestDevTunnelMonitor();

@@ -17,7 +17,10 @@ internal sealed partial class DevTunnelOutputParser(string tunnelId)
     private bool _inspectUrl;
     private bool _readyWithoutId;
 
-    internal static string[] SplitOutput(string content) => MessageBoundaryRegex().Split(content);
+    // Color sequences can sit between a separator and the next message, such as:
+    //   Connection ... restored.; \x1b[31mConnection ... closed.\x1b[0m
+    // Remove them before detecting boundaries, not only when parsing each resulting message.
+    internal static string[] SplitOutput(string content) => MessageBoundaryRegex().Split(AnsiRegex().Replace(content, ""));
 
     public Output Parse(string line)
     {

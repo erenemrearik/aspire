@@ -6,6 +6,27 @@ namespace Aspire.Hosting.DevTunnels.Tests;
 public class DevTunnelOutputParserTests
 {
     [Theory]
+    [InlineData("; ")]
+    [InlineData(" | ")]
+    [InlineData("\n")]
+    public void SplitsColoredLifecycleMessagesBeforeParsing(string separator)
+    {
+        var content = "\u001b[32mConnection to host tunnel relay restored.\u001b[0m"
+            + separator + "\u001b[31mConnection to host tunnel relay closed.\u001b[0m";
+        var parser = new DevTunnelOutputParser("mytunnel");
+        var messages = DevTunnelOutputParser.SplitOutput(content).Where(m => !string.IsNullOrWhiteSpace(m)).ToArray();
+
+        Assert.Equal([
+            "Connection to host tunnel relay restored." + (separator.Contains('\n') ? "" : separator),
+            "Connection to host tunnel relay closed."
+        ], messages);
+        Assert.Equal([
+            new DevTunnelOutputParser.Output(DevTunnelOutputParser.OutputKind.Connected),
+            new DevTunnelOutputParser.Output(DevTunnelOutputParser.OutputKind.Disconnected)
+        ], messages.Select(parser.Parse));
+    }
+
+    [Theory]
     [InlineData("Hosting port: 3000", "Connect via browser: https://abc-3000.usw2.devtunnels.ms")]
     [InlineData(" Hosting\t port = 3000 ", "Connect  via browser -> https://abc-3000.usw2.devtunnels.ms/")]
     [InlineData("HOSTING PORT | 3000", "CONNECT VIA BROWSER : <https://abc-3000.usw2.devtunnels.ms/>")]
