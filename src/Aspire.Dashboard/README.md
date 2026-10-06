@@ -8,6 +8,19 @@ The dashboard shows:
 - Live console logs of resources.
 - Live telemetry, such as structured logs, traces and metrics.
 
+## SQL visualization
+
+The text visualizer highlights query-only fields in structured logs and spans as SQL.
+It recognizes `db.query.text` and the legacy `db.statement` semantic conventions,
+using `db.system.name` or `db.system` to avoid highlighting queries for non-SQL databases.
+It also recognizes field names such as `commandText`, `queryText`, `sql`, `sqlQuery`,
+`sqlStatement`, `sql.query`, and `sql.statement`, ignoring case.
+Entire log messages are not automatically highlighted as SQL.
+
+SQL can also be selected manually in the visualizer's format dropdown. Like Markdown,
+it is available when the content is not detected as JSON or XML. SQL highlighting
+preserves the original query text and does not reformat it.
+
 ## Security considerations
 
 The dashboard can display sensitive information, including resource configuration, environment variables, console logs, and telemetry. Secure the dashboard and its endpoints whenever they are accessible beyond a trusted local development environment.
