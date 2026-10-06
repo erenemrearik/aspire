@@ -34,7 +34,7 @@ internal class ChildProcess : IChildProcess
     private DateTimeOffset? _startTime;
     private Task _outputDrained = Task.CompletedTask;
     private bool _disposed;
-    private long _lastActivityTimestamp = Stopwatch.GetTimestamp();
+    private long _lastActivityTimestamp;
 
     internal ChildProcess(
         ProcessStartInfo startInfo,
@@ -46,6 +46,7 @@ internal class ChildProcess : IChildProcess
         _logger = logger;
         _options = options;
         _isWindows = isWindows;
+        _lastActivityTimestamp = options.TimeProvider.GetTimestamp();
         EnvironmentVariables = new ReadOnlyDictionary<string, string?>(startInfo.Environment);
     }
 
@@ -255,7 +256,7 @@ internal class ChildProcess : IChildProcess
         // Reset the idle window at exit so the drain budget is measured from "process gone", not
         // from the last line read. A consumer can block in a callback right up to exit and still
         // get the full tail — see
-        // ProcessExecutionTests.WaitForExitAsync_AllowsBufferedTailOutputAfterLongIdlePeriod.
+        // ChildProcessTests.WaitForExitAsync_DrainsBufferedTailAfterLongIdlePeriod.
         RecordActivity();
         await DrainOutputAsync(cancellationToken).ConfigureAwait(false);
 
@@ -441,7 +442,7 @@ internal class ChildProcess : IChildProcess
             // RecordActivity, so only a genuinely stalled reader (no output for the whole window)
             // gives up. The reader keeps running in the background until DisposeAsync releases the
             // pipes — this method never closes streams while callbacks may still be processing data.
-            if (Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastActivityTimestamp)) >= s_drainIdleTimeout)
+            if (_options.TimeProvider.GetElapsedTime(Interlocked.Read(ref _lastActivityTimestamp)) >= s_drainIdleTimeout)
             {
                 _logger.LogWarning("{FileName}({ProcessId}) stdout/stderr did not drain within idle timeout after exit", FileName, _processId);
                 return;
@@ -449,16 +450,25 @@ internal class ChildProcess : IChildProcess
 
             try
             {
-                await Task.Delay(s_drainPollInterval, cancellationToken).ConfigureAwait(false);
+                // Completion wakes the waiter immediately, including when a test clock is frozen.
+                await drained.WaitAsync(s_drainPollInterval, _options.TimeProvider, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Recheck the idle budget; a completed reader's failure is observed above.
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return;
             }
+            catch (Exception) when (drained.IsCompleted)
+            {
+                // Observe and log the reader failure on the next iteration.
+            }
         }
     }
 
-    private void RecordActivity() => Interlocked.Exchange(ref _lastActivityTimestamp, Stopwatch.GetTimestamp());
+    private void RecordActivity() => Interlocked.Exchange(ref _lastActivityTimestamp, _options.TimeProvider.GetTimestamp());
 
 #if !NET11_0_OR_GREATER
     private static async IAsyncEnumerable<OutputLine> ReadAllLinesAsync(Process process, [EnumeratorCancellation] CancellationToken cancellationToken = default)

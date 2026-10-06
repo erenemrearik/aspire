@@ -293,12 +293,6 @@ The guardian's server-liveness monitor runs in a separate process, so a blocked 
 
 Application executables and containers created through the hosting model belong to DCP, not to the integration host's process scope. Container deletion is performed through the container runtime. Explicitly persistent containers can intentionally survive a session and are not accidental orphans.
 
-CLI end-to-end coverage in `IntegrationHostLifetimeTests` kills the runtime, the guardian, the AppHost server, and the owning CLI, and separately kills the CLI during a blocked dependency-install lifecycle script. It records kernel process identities, checks that old scopes and workers are reaped, preserves diagnostics, and invokes resource commands after recovery or explicit restart. Runtime records assert that Node's direct parent is the guardian, ruling out accidental wrapper reintroduction. Guardian and owner-death cases block the runtime's event loop to rule out cooperative shutdown as the only cleanup mechanism. The install case verifies stdout/stderr capture, cleanup of npm and script workers, then successful explicit restore and resource invocation. Callback-free runtime-scope failures recover automatically; callback-owner failure, server death, or CLI death ends the session and requires an explicit `aspire start`. Callback-owner coverage invokes an integration-owned resource command before the crash, verifies that no misleading host-only recovery occurs, and invokes the reconstructed command after explicit restart.
-
-Additional scenarios retain a guest callback across export return and invoke it through a deferred resource command before and after explicit restart. Real generated fluent calls are deliberately left unawaited to prove export completion drains them. A stalled capability produces a user-visible command failure, matching server/runtime invocation diagnostics, worker cleanup, and callback-free recovery without repeating its side effect. Cross-platform server-process tests also wedge the runtime event loop and prove the same deadline-driven scope cleanup.
-
-Crash-loop coverage verifies the three-attempt budget, original runtime diagnostics, a nonzero CLI exit, and explicit restart after the fault is removed. Each scenario retains its own terminal recording, process ledger, session log, and resource-command output under `TestResults/recordings/aspire-cli-e2e/`, including successful runs.
-
 ---
 
 ## Architecture

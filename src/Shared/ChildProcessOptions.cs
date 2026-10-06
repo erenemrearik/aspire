@@ -8,6 +8,11 @@ namespace Aspire.Shared;
 /// </summary>
 internal sealed class ChildProcessOptions
 {
+    /// <summary>
+    /// Gets the clock used for output-drain deadlines.
+    /// </summary>
+    public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
     public Action<string>? StandardOutputCallback { get; init; }
     public Action<string>? StandardErrorCallback { get; init; }
     public bool Detached { get; init; }

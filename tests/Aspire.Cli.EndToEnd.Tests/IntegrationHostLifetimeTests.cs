@@ -67,8 +67,7 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
             await auto.RunCommandAsync(
                 "aspire restore --non-interactive --log-file \"$PWD/install-session.log\" > install.log 2>&1 & echo $! > install-cli.pid",
                 counter);
-            await auto.ExecuteCommandUntilOutputAsync(counter, "node process-control.mjs install-ready", "INSTALL_READY",
-                timeout: TimeSpan.FromMinutes(3));
+            await auto.RunCommandAsync("node process-control.mjs install-ready", counter, TimeSpan.FromMinutes(3));
             await auto.RunCommandAsync("node process-control.mjs install-kill", counter);
             await auto.RunCommandAsync("node process-control.mjs install-stopped", counter, TimeSpan.FromSeconds(75));
             await auto.RunCommandAsync("grep 'INSTALL_LIFETIME' install-session.log", counter);
@@ -82,11 +81,7 @@ public sealed class IntegrationHostLifetimeTests(ITestOutputHelper output)
         await auto.RunCommandAsync(
             $"{timeoutOverride}aspire run --non-interactive --log-file \"$PWD/session.log\" > run.log 2>&1 & echo $! > cli.pid",
             counter);
-        await auto.ExecuteCommandUntilOutputAsync(
-            counter,
-            "node process-control.mjs ready",
-            "PROBE_READY",
-            timeout: TimeSpan.FromMinutes(3));
+        await auto.RunCommandAsync("node process-control.mjs ready", counter, TimeSpan.FromMinutes(3));
         await auto.RunCommandAsync("aspire resource probe probe > probe-before.log 2>&1", counter);
         await auto.RunCommandAsync("node process-control.mjs probe && node process-control.mjs snapshot", counter);
 

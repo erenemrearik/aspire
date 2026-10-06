@@ -14,7 +14,7 @@ internal static class IntegrationHostLifetimeTestHelper
         foreach (var file in new[]
         {
             "session.log", "run.log", "probe-before.log", "probe-after.log",
-            "recovered-resource.json", "stop.log", "before.json"
+            "recovered-resource.json", "stop.log", "before.json", "stop-guest.json"
         })
         {
             File.Copy(Path.Combine(directory, file), Path.Combine(evidence.FullName, file), overwrite: true);
@@ -147,7 +147,9 @@ internal static class IntegrationHostLifetimeTestHelper
         const cli = identity(ancestor.parent);
         console.log(`INSTALL_LIFETIME_READY guardian=${ancestor.pid} cli=${cli.pid}`);
         console.error('INSTALL_LIFETIME_STDERR');
-        fs.writeFileSync('install-processes.json', JSON.stringify({ cli, owned }));
+        // Publish atomically so readiness cannot observe a partially written PID record.
+        fs.writeFileSync('install-processes.json.tmp', JSON.stringify({ cli, owned }));
+        fs.renameSync('install-processes.json.tmp', 'install-processes.json');
         // Block the lifecycle script's event loop so cleanup cannot rely on its signal handlers.
         while (true) {}
         """;
@@ -303,9 +305,9 @@ internal static class IntegrationHostLifetimeTestHelper
         }
         const exists = original => identity(original.pid)?.started === original.started;
         async function until(predicate, description) {
-            const deadline = Date.now() + 60000;
+            const deadline = performance.now() + 60000;
             while (!predicate()) {
-                if (Date.now() >= deadline) throw new Error(`Timed out: ${description}`);
+                if (performance.now() >= deadline) throw new Error(`Timed out: ${description}`);
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
         }
@@ -316,13 +318,14 @@ internal static class IntegrationHostLifetimeTestHelper
 
         switch (operation) {
             case 'install-ready': {
-                assert.ok(fs.existsSync('integration/install-processes.json'));
+                await until(() => {
+                    if (!fs.existsSync('integration/install-processes.json')) return false;
+                    const log = fs.readFileSync('install-session.log', 'utf8');
+                    return log.includes('INSTALL_LIFETIME_READY') && log.includes('INSTALL_LIFETIME_STDERR');
+                }, 'dependency-install workers and captured stdout/stderr ready');
                 const record = JSON.parse(fs.readFileSync('integration/install-processes.json', 'utf8'));
                 assert.equal(record.cli.pid, Number(fs.readFileSync('install-cli.pid', 'utf8')));
                 assert.ok(record.owned.every(exists));
-                const log = fs.readFileSync('install-session.log', 'utf8');
-                assert.ok(log.includes('INSTALL_LIFETIME_READY'));
-                assert.ok(log.includes('INSTALL_LIFETIME_STDERR'));
                 console.log('INSTALL_READY');
                 break;
             }
@@ -337,14 +340,24 @@ internal static class IntegrationHostLifetimeTestHelper
                 break;
             }
             case 'ready':
-                assert.equal(JSON.parse(execFileSync('aspire', ['describe', 'probe', '--format', 'json'], {
-                    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
-                })).resources[0].name, 'probe');
+                await until(() => {
+                    const output = execFileSync('aspire', ['describe', 'probe', '--format', 'json'], {
+                        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+                    });
+                    // Before an AppHost is discoverable, describe exits successfully with empty
+                    // stdout. Keep one readiness command alive rather than retrying terminal prompts.
+                    return output.trim().length > 0 && JSON.parse(output).resources.some(resource => resource.name === 'probe');
+                }, 'probe resource registered');
                 console.log('PROBE_READY');
                 break;
-            case 'describe':
+            case 'describe': {
                 assert.equal(JSON.parse(fs.readFileSync('recovered-resource.json', 'utf8')).resources[0].name, 'probe');
+                // Capture the guest before stop, including a replacement created by explicit restart.
+                const guest = identity(Number(fs.readFileSync('guest.pid', 'utf8')));
+                assert.ok(guest);
+                fs.writeFileSync('stop-guest.json', JSON.stringify(guest));
                 break;
+            }
             case 'snapshot': {
                 const current = records().at(-1);
                 assert.equal(current.runtime.parent, current.supervisor.pid,
@@ -424,10 +437,13 @@ internal static class IntegrationHostLifetimeTestHelper
             case 'probe':
                 assert.equal(fs.readFileSync('probe-result', 'utf8'), `generation-${records().at(-1).generation}`);
                 break;
-            case 'clean':
+            case 'clean': {
+                const guest = JSON.parse(fs.readFileSync('stop-guest.json', 'utf8'));
                 await until(() => records().flatMap(record => [...record.owned, record.server, record.cli])
-                    .every(original => !exists(original)), 'all recorded integration scopes and owners reaped');
+                    .every(original => !exists(original)) && !exists(guest),
+                    'all recorded integration scopes, owners, and guest reaped');
                 break;
+            }
             default:
                 throw new Error(`Unknown operation: ${operation}`);
         }
