@@ -1,0 +1,9 @@
+{
+  "author": "alistairmatthews",
+  "comment": "Internal repository doc-writer skill reorganization; not related to any user-facing Aspire changelog entry",
+  "mergedAt": "2026-10-06T01:29:38Z",
+  "number": 1816,
+  "runDate": "2026-10-06T06:05:24Z",
+  "status": "excluded",
+  "title": "Split four sections of the doc-writer skill into reference files"
+}
