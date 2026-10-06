@@ -1,0 +1,65 @@
+{
+  "run_id": 37493630486,
+  "run_attempt": 1,
+  "run_url": "https://github.com/microsoft/aspire/actions/runs/37493630486",
+  "run_scope": "main",
+  "analyzed_at": "2026-10-06T17:01:57Z",
+  "verdict": "flaky-test",
+  "pr": null,
+  "triggering_merge_pr": {
+    "number": 19414,
+    "title": "Add Aspire editor assistance language model tools",
+    "author": "adamint",
+    "state": "closed",
+    "head_branch": "feature/track-b-editor-assistance",
+    "base_branch": "main",
+    "url": "https://github.com/microsoft/aspire/pull/19414",
+    "merged_at": "2026-10-06T16:10:41Z"
+  },
+  "main_context": {
+    "last_successful_main_sha": "f733f6f57fa539dd6c31a6313376d723ecc492a9",
+    "failed_sha": "f2528c5248e8b3fa0d1ec6675cb00bb7a4222f9f",
+    "candidate_merge_history_state": "available",
+    "candidate_merges": [
+      {
+        "sha": "f2528c5248e8b3fa0d1ec6675cb00bb7a4222f9f",
+        "message": "Add Aspire editor assistance language model tools (#19414) ## What changed Adds **six new editor-assistance language-model tools** and hardens the existing `aspire_apphost_start` and `aspire_apphost_stop` tools, which already landed in microsoft/aspire#19134. Eight tools are covered here; only six are introduced by this PR. Enable the Aspire tools in Copilot Chat's tool picker in a trusted workspace. Replace `apphost.cs` with an exact discovered AppHost path. Multi-root workspaces require the fo",
+        "html_url": "https://github.com/microsoft/aspire/commit/f2528c5248e8b3fa0d1ec6675cb00bb7a4222f9f",
+        "pull_request": {
+          "number": 19414,
+          "title": "Add Aspire editor assistance language model tools",
+          "url": "https://github.com/microsoft/aspire/pull/19414",
+          "merged_at": "2026-10-06T16:10:41Z"
+        }
+      }
+    ]
+  },
+  "failed_jobs": [
+    {
+      "name": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "id": 112374905861,
+      "conclusion": "failure",
+      "url": "https://github.com/microsoft/aspire/actions/runs/37493630486/job/112374905861",
+      "classification": "flaky-test",
+      "reason": "Single test Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput failed with Assert.True() Failure during 'Run tests (Windows)'; matches a prior recorded flaky-test cause with identical test name and error pattern.",
+      "failed_steps": [
+        "Run tests (Windows)"
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput",
+      "job": "Tests / No-package tests (collection, Aspire.Hosting.Tests, Hosting-2, Hosting-2, tests/Aspire.Hosting.Te... / Hosting-2 (windows-latest)",
+      "error": "Assert.True() Failure\nExpected: True\nActual:   False",
+      "stack_trace": "at Aspire.Hosting.Tests.ResourceCommandServiceTests.ExecuteCommandAsync_RebuildCommand_ReturnsBuildOutput() in D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.Tests\\ResourceCommandServiceTests.cs:line 1767\n--- End of stack trace from previous location ---",
+      "standard_output": "Temporary workspace created at: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\Aspire.Hosting.TestUtilities\\Workspace\\bukpjtpt.aex\n| [2026-10-06T16:23:24] Aspire.Hosting.DistributedApplication Information: Aspire AppHost version: 17.0.0-ci\n| [2026-10-06T16:23:24] Aspire.Hosting.DistributedApplication Information: Distributed application starting.\n| [2026-10-06T16:23:24] Aspire.Hosting.DistributedApplication Information: Application host directory is: D:\\a\\aspire\\aspire\\tests\\Aspire.Hosting.TestUtilities\n| [2026-10-06T16:23:24] Aspire.Hosting.Cli.CliOrphanDetector Debug: No CLI process ID configured. Orphan detection disabled.\n| [2026-10-06T16:23:24] Aspire.Hosting.Cli.BackchannelService Debug: Backchannel socket path was not specified.\n| [2026-10-06T16:23:24] Aspire.Hosting.Devcontainers.Codespaces.CodespacesResourceUrlRewriterService Trace: Not running in Codespaces, skipping URL rewriting.\n| [2026-10-06T16:23:24] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Starting auxiliary backchannel service on socket path: C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFARd3tdGwd.7784\n| [2026-10-06T16:23:24] Aspire.Hosting.Backchannel.AuxiliaryBackchannelService Debug: Auxiliary backchannel listening on C:\\Users\\runneradmin\\.aspire\\cli\\bch\\vygPxKePKFARd3tdGwd.7784\n| [2026-10-06T16:23:25] Aspire.Hosting.Dcp.DcpHost Warning: No trusted Aspire development certificate was found. See https://aka.ms/aspire/devcerts for more information.\n| [2026-10-06T16:23:25] Aspire.Hosting.FileSystemService Debug: Allocated temporary directory: C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcpkgewret1.h4x\n| [2026-10-06T16:23:25] Aspire.Hosting.Dcp.DcpHost Information: Starting DCP with arguments: start-apiserver --monitor 7784 --detach --kubeconfig \"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\aspire-dcpkgewret1.h4x\\kubeconfig\"\n| [2026-10-06T16:23:25] Aspire.Hosting.Dcp.DcpHost Debug: A complete bundled ConPTY provider was not found; DCP will use the inbox Windows provider.\n| [2026-10-06T16:23:25] Aspire.Hosting.Dcp.DcpExecutor Debug: Preparing services. Ports randomized: True\n| [2026-10-06T16:23:25] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject/myProject-jenaxqxa update published: ResourceType = Project, CreationTimeStamp = (null), State = { Text = (null), Style = (null) }, IsHidden = False, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = {  }, HealthReports = {  }, Commands = { start (Start) = Disabled stop (Stop) = Hidden restart (Restart) = Disabled rebuild (Rebuild) = Disabled }\n| [2026-10-06T16:23:25] Aspire.Hosting.ApplicationModel.ResourceNotificationService Trace: Version: 1 Resource myProject-rebuilder/myProject-rebuilder-vecyktst update published: ResourceType = Executable, CreationTimeStamp = (null), State = { Text = NotStarted, Style = (null) }, IsHidden = True, HeathStatus = (null), ResourceReady = False, ExitCode = (null), Urls = {  }, EnvironmentVariables = {  }, Properties = { resource.parentName = myProject-jenaxqxa }, HealthReports = {  }, Commands = {  }\n| [2026-10-06T16:23:25] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Endpoint resources.\n| [2026-10-06T16:23:25] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Service resources.\n| [2026-10-06T16:23:25] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP ContainerExec resources.\n| [2026-10-06T16:23:25] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Container resources.\n| [2026-10-06T16:23:25] Aspire.Hosting.Dcp.DcpExecutor Debug: Watching over DCP Executable resources.\n| [2026-10-06T16:23:25] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Converting relative endpoint URLs to absolute URLs for resource 'myProject-rebuilder'.\n| [2026-10-06T16:23:25] Aspire.Hosting.Orchestrator.ApplicationOrchestrator Trace: Added total of 0 URLs to resource 'myProject-rebuilder'\n| [2026-10-06T16:23:25] Aspire.Hosting.ApplicationModel.Res",
+      "standard_error": "",
+      "classification": "flaky",
+      "reason": "Matches prior cause aspire-hosting-resourcecommandservice-rebuild-asserttrue-flaky (issue #20750) with identical test name and Assert.True() error pattern at same line number; this test file was not touched by the triggering merge."
+    }
+  ],
+  "causes": [
+    "aspire-hosting-resourcecommandservice-rebuild-asserttrue-flaky"
+  ]
+}
