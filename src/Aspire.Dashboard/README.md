@@ -16,9 +16,12 @@ as well as field names such as `commandText`, `queryText`, `sql`, `sqlQuery`,
 `sqlStatement`, `sql.query`, and `sql.statement`, ignoring case for these additional names.
 For fields that can contain non-SQL queries, `db.system.name` or legacy `db.system`
 is used when present to restrict automatic SQL highlighting to known SQL databases.
-Structured-log attribute detection is limited to logger categories starting with
-`Microsoft.EntityFrameworkCore`, `Npgsql`, or `MySqlConnector`; span attribute
-detection does not require a logger category.
+Structured-log attribute detection requires either a nonempty `db.system.name` or
+legacy `db.system` attribute, or a logger category starting with
+`Microsoft.EntityFrameworkCore`, `Npgsql`, or `MySqlConnector`. Custom logger sources
+are supported when database-system metadata is present. Recognized query fields
+are still required, and database-system validation applies as described above.
+Span attribute detection does not require a logger category.
 
 Entire command-log messages are also automatically highlighted as SQL for logger
 categories starting with `Microsoft.EntityFrameworkCore.Database.Command`,
