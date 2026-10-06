@@ -1,0 +1,9 @@
+{
+  "author": "sebastienros",
+  "comment": "Documents the Front Door origin-name compatibility override in TypeScript, matching the Front Door origin identity changelog entry (PR #20035)",
+  "mergedAt": "2026-10-05T18:59:54Z",
+  "number": 1798,
+  "runDate": "2026-10-06T00:10:19Z",
+  "status": "included",
+  "title": "docs: add TypeScript Front Door origin naming example"
+}

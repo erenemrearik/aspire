@@ -1,0 +1,9 @@
+{
+  "author": "IEvangelist",
+  "comment": "aspire.dev internal tooling/automation fix (Integration Data Updater), not documenting a product change",
+  "mergedAt": "2026-10-05T14:27:49Z",
+  "number": 1813,
+  "runDate": "2026-10-06T00:10:19Z",
+  "status": "excluded",
+  "title": "Unblock Integration Data Updater and parallelize API regeneration"
+}

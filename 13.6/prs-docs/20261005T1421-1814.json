@@ -1,0 +1,9 @@
+{
+  "author": "IEvangelist",
+  "comment": "Broad CLI config schema sync and general config docs overhaul spanning many releases; not tied to a single product PR or changelog entry",
+  "mergedAt": "2026-10-05T14:21:51Z",
+  "number": 1814,
+  "runDate": "2026-10-06T00:10:19Z",
+  "status": "excluded",
+  "title": "Sync Aspire CLI config schemas through 13.6.0 and fix config docs"
+}
