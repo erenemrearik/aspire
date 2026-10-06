@@ -55,8 +55,8 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
     }
 
     internal async Task<IntegrationHostServerProcess> StartAsync(
-        bool failStartup = false, bool skipRegistration = false, bool useAppHostExecutable = false, bool missingCommand = false,
-        TimeSpan? invocationTimeout = null)
+        ITestOutputHelper output, bool failStartup = false, bool skipRegistration = false, bool useAppHostExecutable = false, bool missingCommand = false,
+        TimeSpan? invocationTimeout = null, IntegrationHostTestOptions? options = null)
     {
         var directory = _directory.CreateSubdirectory(Guid.NewGuid().ToString("N")[..8]);
         var script = Path.Combine(directory.FullName, "host.js");
@@ -65,7 +65,13 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
         {
             AtsAssemblies = new[] { "LifetimeTestHost" },
             ASPIRE_INTEGRATION_HOSTS_ENABLED = true,
-            IntegrationHost = new { InvocationTimeout = invocationTimeout ?? TimeSpan.FromSeconds(60) },
+            IntegrationHost = new
+            {
+                InvocationTimeout = invocationTimeout ?? TimeSpan.FromSeconds(60),
+                options?.RegistrationTimeout,
+                options?.DiscoveryTimeout,
+                options?.MaxRestartAttempts
+            },
             IntegrationHosts = new[]
             {
                 new { Language = "test/node", PackageName = "lifetime-test", HostEntryPoint = script }
@@ -83,8 +89,12 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
         {
             await File.WriteAllTextAsync(Path.Combine(directory.FullName, "missing-command"), "");
         }
+        if (options?.StallDiscovery == true)
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "stall-discovery"), "");
+        }
 
-        return new IntegrationHostServerProcess(directory.FullName, _hostAssembly, useAppHostExecutable);
+        return new IntegrationHostServerProcess(directory.FullName, _hostAssembly, useAppHostExecutable, output);
     }
 
     private static async Task RunDotnetAsync(string workingDirectory, string[] arguments)
@@ -226,14 +236,19 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
                     continue;
                 }
                 if (message.method === 'getCapabilities') {
+                    if (fs.existsSync('stall-discovery')) {
+                        fs.writeFileSync('discovery-started', '');
+                        continue;
+                    }
                     send({ jsonrpc: '2.0', id: message.id, result: { capabilities: [{
-                        id: 'test.external/value', method: 'value',
+                        id: 'test.external/value', method: fs.existsSync('changed-signature') ? 'changed' : 'value',
                         returnType: { typeId: 'string', category: 'Primitive' }
                     }] } });
                     if (fs.existsSync('crash-loop')) setTimeout(() => process.exit(24), 100);
                 } else if (message.method === 'handleExternalCapability') {
                     const args = message.params[1] ?? {};
-                    if (args.action === 'crash' || args.action === 'crashLoop') {
+                    if (args.action === 'crash' || args.action === 'crashLoop' || args.action === 'changeSignature') {
+                        if (args.action === 'changeSignature') fs.writeFileSync('changed-signature', '');
                         if (args.action === 'crashLoop') fs.writeFileSync('crash-loop', '');
                         fs.appendFileSync('side-effects', 'once\n');
                         process.exit(23);
@@ -273,18 +288,28 @@ public sealed class IntegrationHostProcessFixture : IAsyncLifetime
         """;
 }
 
+internal sealed record IntegrationHostTestOptions
+{
+    public TimeSpan? RegistrationTimeout { get; init; }
+    public TimeSpan? DiscoveryTimeout { get; init; }
+    public int? MaxRestartAttempts { get; init; }
+    public bool StallDiscovery { get; init; }
+}
+
 internal sealed class IntegrationHostServerProcess : IAsyncDisposable
 {
     private readonly Process _server;
     private readonly string _socketPath;
     private readonly ConcurrentQueue<string> _diagnostics = new();
     private readonly Task _readers;
+    private readonly ITestOutputHelper _output;
     private JsonRpc? _rpc;
     private Task? _disposeTask;
     private int? _exitCode;
 
-    public IntegrationHostServerProcess(string directory, string hostAssembly, bool useAppHostExecutable)
+    public IntegrationHostServerProcess(string directory, string hostAssembly, bool useAppHostExecutable, ITestOutputHelper output)
     {
+        _output = output;
         Directory = directory;
         _socketPath = OperatingSystem.IsWindows()
             ? $"aspire-host-lifetime-{Guid.NewGuid():N}"
@@ -434,8 +459,15 @@ internal sealed class IntegrationHostServerProcess : IAsyncDisposable
         }
         finally
         {
-            await _readers.WaitAsync(TimeSpan.FromSeconds(10));
-            _server.Dispose();
+            try
+            {
+                await _readers.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                _output.WriteLine(Diagnostics);
+                _server.Dispose();
+            }
         }
     }
 }

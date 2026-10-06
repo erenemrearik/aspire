@@ -21,13 +21,13 @@ namespace Aspire.Shared;
 /// </summary>
 internal class ChildProcess : IChildProcess
 {
-    private static readonly TimeSpan s_drainIdleTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan s_drainPollInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly ProcessStartInfo _startInfo;
     protected readonly ILogger _logger;
     private readonly ChildProcessOptions _options;
     private readonly bool _isWindows;
+    private readonly bool _isSupervisor;
     private readonly Lock _lifecycleLock = new();
     private Process? _process;
     private int _processId;
@@ -42,10 +42,12 @@ internal class ChildProcess : IChildProcess
         ChildProcessOptions options,
         bool isWindows)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.OutputDrainIdleTimeout, TimeSpan.Zero);
         _startInfo = startInfo;
         _logger = logger;
         _options = options;
         _isWindows = isWindows;
+        _isSupervisor = startInfo.Environment.ContainsKey(ProcessSupervisor.CommandVariable);
         _lastActivityTimestamp = options.TimeProvider.GetTimestamp();
         EnvironmentVariables = new ReadOnlyDictionary<string, string?>(startInfo.Environment);
     }
@@ -407,11 +409,14 @@ internal class ChildProcess : IChildProcess
     private void OnErrorLine(string line)
     {
         RecordActivity();
-        if (_logger.IsEnabled(LogLevel.Trace))
+        if (!_isSupervisor || !ProcessSupervisorLogger.TryForward(line, _logger))
         {
-            _logger.LogTrace("{FileName}({ProcessId}) stderr: {Line}", FileName, _processId, line);
+            if (_logger.IsEnabled(LogLevel.Trace))
+            {
+                _logger.LogTrace("{FileName}({ProcessId}) stderr: {Line}", FileName, _processId, line);
+            }
+            _options.StandardErrorCallback?.Invoke(line);
         }
-        _options.StandardErrorCallback?.Invoke(line);
         RecordActivity();
     }
 
@@ -442,9 +447,10 @@ internal class ChildProcess : IChildProcess
             // RecordActivity, so only a genuinely stalled reader (no output for the whole window)
             // gives up. The reader keeps running in the background until DisposeAsync releases the
             // pipes — this method never closes streams while callbacks may still be processing data.
-            if (_options.TimeProvider.GetElapsedTime(Interlocked.Read(ref _lastActivityTimestamp)) >= s_drainIdleTimeout)
+            if (_options.TimeProvider.GetElapsedTime(Interlocked.Read(ref _lastActivityTimestamp)) >= _options.OutputDrainIdleTimeout)
             {
-                _logger.LogWarning("{FileName}({ProcessId}) stdout/stderr did not drain within idle timeout after exit", FileName, _processId);
+                _logger.LogWarning("{FileName}({ProcessId}) stdout/stderr did not drain within idle timeout {Timeout} after exit",
+                    FileName, _processId, _options.OutputDrainIdleTimeout);
                 return;
             }
 

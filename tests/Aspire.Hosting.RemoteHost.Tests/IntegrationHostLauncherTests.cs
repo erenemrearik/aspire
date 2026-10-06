@@ -25,9 +25,10 @@ public class IntegrationHostLauncherTests
             ["ASPIRE_INTEGRATION_HOST_BOOTSTRAP"] = "true",
             ["IntegrationHosts:0:PackageName"] = "needs-generated-sdk"
         }).Build();
-        var launcher = new IntegrationHostLauncher(
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        await using var launcher = IntegrationHostTestServices.CreateLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
-            new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance),
+            registry,
             configuration,
             new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance),
             NullLogger<IntegrationHostLauncher>.Instance);
@@ -46,9 +47,10 @@ public class IntegrationHostLauncherTests
             ["ASPIRE_INTEGRATION_HOSTS_ENABLED"] = "true",
             ["IntegrationHosts:0:PackageName"] = "missing-language-and-entrypoint"
         }).Build();
-        var launcher = new IntegrationHostLauncher(
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        await using var launcher = IntegrationHostTestServices.CreateLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
-            new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance),
+            registry,
             configuration,
             new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance),
             NullLogger<IntegrationHostLauncher>.Instance);
@@ -73,7 +75,7 @@ public class IntegrationHostLauncherTests
             ["IntegrationHosts:0:PackageName"] = "disabled-integration"
         }).Build();
         using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
-        await using var launcher = new IntegrationHostLauncher(
+        await using var launcher = IntegrationHostTestServices.CreateLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
             registry, configuration,
             new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance),
@@ -92,8 +94,8 @@ public class IntegrationHostLauncherTests
     public async Task InitializeHostsAsync_WaitsForEveryRegistrationBeforeDiscovery()
     {
         using var services = new ServiceCollection().BuildServiceProvider();
-        var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
-        var launcher = new IntegrationHostLauncher(
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        await using var launcher = IntegrationHostTestServices.CreateLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
             registry, new ConfigurationBuilder().Build(),
             new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance), NullLogger<IntegrationHostLauncher>.Instance);
@@ -129,8 +131,8 @@ public class IntegrationHostLauncherTests
     public async Task InitializeHostsAsync_MissingRegistrationStopsDiscovery()
     {
         using var services = new ServiceCollection().BuildServiceProvider();
-        var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
-        var launcher = new IntegrationHostLauncher(
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        await using var launcher = IntegrationHostTestServices.CreateLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
             registry, new ConfigurationBuilder().Build(),
             new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance), NullLogger<IntegrationHostLauncher>.Instance);
@@ -150,7 +152,7 @@ public class IntegrationHostLauncherTests
     {
         using var services = new ServiceCollection().BuildServiceProvider();
         using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
-        await using var launcher = new IntegrationHostLauncher(
+        await using var launcher = IntegrationHostTestServices.CreateLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
             registry, new ConfigurationBuilder().Build(),
             new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance), NullLogger<IntegrationHostLauncher>.Instance);
@@ -178,9 +180,10 @@ public class IntegrationHostLauncherTests
     public async Task InitializeHostsAsync_CancellationStopsWaitingForRegistration()
     {
         using var services = new ServiceCollection().BuildServiceProvider();
-        var launcher = new IntegrationHostLauncher(
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
+        await using var launcher = IntegrationHostTestServices.CreateLauncher(
             new LanguageSupportResolver(services, () => [], NullLogger<LanguageSupportResolver>.Instance),
-            new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance),
+            registry,
             new ConfigurationBuilder().Build(),
             new ApplicationLifetime(NullLogger<ApplicationLifetime>.Instance), NullLogger<IntegrationHostLauncher>.Instance);
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
@@ -197,7 +200,7 @@ public class IntegrationHostLauncherTests
     public void CreateProcessStartInfo_PreservesArgumentBoundariesAndExpandsEntryPoint()
     {
         var entryPoint = Path.GetFullPath(Path.Combine("integration packages", "host entry.mts"));
-        var startInfo = IntegrationHostLauncher.CreateProcessStartInfo(
+        var startInfo = IntegrationHostProcessLauncher.CreateProcessStartInfo(
             "integration-runtime",
             [
                 "--no-install",
@@ -241,7 +244,7 @@ public class IntegrationHostLauncherTests
     {
         var entryPoint = Path.GetFullPath("host.mts");
 
-        var startInfo = IntegrationHostLauncher.CreateProcessStartInfo("integration-runtime", [], entryPoint, isWindows: false);
+        var startInfo = IntegrationHostProcessLauncher.CreateProcessStartInfo("integration-runtime", [], entryPoint, isWindows: false);
 
         Assert.Empty(startInfo.ArgumentList);
         Assert.Empty(startInfo.Arguments);
@@ -256,7 +259,7 @@ public class IntegrationHostLauncherTests
         var command = $@"C:\Program Files\%TEMP%\nodejs\{shim}";
         var entryPoint = Path.GetFullPath(Path.Combine("integration %TEMP%! packages", "host entry.mts"));
 
-        var startInfo = IntegrationHostLauncher.CreateProcessStartInfo(
+        var startInfo = IntegrationHostProcessLauncher.CreateProcessStartInfo(
             command, ["--no-install", "tsx", "{entryPoint}", "", "literal %PATH%! & value"], entryPoint, isWindows: true);
 
         Assert.Equal(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", startInfo.FileName);

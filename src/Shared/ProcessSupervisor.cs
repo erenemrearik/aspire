@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Aspire.Hosting;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace Aspire.Shared;
 
@@ -20,9 +20,15 @@ internal static partial class ProcessSupervisor
     private const string ParentIdVariable = "ASPIRE_PROCESS_SUPERVISOR_PARENT_PID";
     private const string ParentStartedVariable = "ASPIRE_PROCESS_SUPERVISOR_PARENT_STARTED";
     private const string ExitCodePathVariable = "ASPIRE_PROCESS_SUPERVISOR_EXIT_CODE_PATH";
+    private const string TerminationTimeoutVariable = "ASPIRE_PROCESS_SUPERVISOR_TERMINATION_TIMEOUT_MS";
 
     internal static ProcessStartInfo CreateStartInfo(ProcessStartInfo runtimeStartInfo, string? exitCodePath = null)
+        => CreateStartInfo(runtimeStartInfo, exitCodePath, TimeSpan.FromSeconds(5));
+
+    internal static ProcessStartInfo CreateStartInfo(ProcessStartInfo runtimeStartInfo, string? exitCodePath, TimeSpan terminationTimeout)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(terminationTimeout, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(terminationTimeout.TotalMilliseconds, uint.MaxValue - 1d);
         var executable = Environment.ProcessPath
             ?? throw new InvalidOperationException("Cannot locate the owner executable for process supervision.");
         var arguments = Environment.GetCommandLineArgs();
@@ -67,6 +73,7 @@ internal static partial class ProcessSupervisor
             .ToString(CultureInfo.InvariantCulture)
             ?? throw new InvalidOperationException("Cannot inspect the owner's process identity.");
         startInfo.Environment.Remove(ExitCodePathVariable);
+        startInfo.Environment[TerminationTimeoutVariable] = terminationTimeout.TotalMilliseconds.ToString(CultureInfo.InvariantCulture);
         if (exitCodePath is not null)
         {
             startInfo.Environment[ExitCodePathVariable] = exitCodePath;
@@ -79,6 +86,7 @@ internal static partial class ProcessSupervisor
 
     internal static async Task RunAsync()
     {
+        var logger = new ProcessSupervisorLogger(Console.Error);
         // The private handoff is {"FileName":"node","Arguments":"","ArgumentList":["--import","tsx","host.ts"]}.
         // Preserve raw Arguments as well: Windows batch shims use cmd's own quoting rules.
         var command = JsonSerializer.Deserialize(
@@ -87,6 +95,8 @@ internal static partial class ProcessSupervisor
         var parentId = int.Parse(Environment.GetEnvironmentVariable(ParentIdVariable)!, CultureInfo.InvariantCulture);
         var parentStarted = long.Parse(Environment.GetEnvironmentVariable(ParentStartedVariable)!, CultureInfo.InvariantCulture);
         var exitCodePath = Environment.GetEnvironmentVariable(ExitCodePathVariable);
+        var terminationTimeout = TimeSpan.FromMilliseconds(double.Parse(
+            Environment.GetEnvironmentVariable(TerminationTimeoutVariable)!, CultureInfo.InvariantCulture));
         // Establish containment before spawning anything. Doing this inside the
         // guardian also supports net10 AppHost servers without net11 Process APIs.
         // https://pubs.opengroup.org/onlinepubs/9799919799/functions/setsid.html
@@ -110,10 +120,11 @@ internal static partial class ProcessSupervisor
         startInfo.Environment.Remove(ParentIdVariable);
         startInfo.Environment.Remove(ParentStartedVariable);
         startInfo.Environment.Remove(ExitCodePathVariable);
+        startInfo.Environment.Remove(TerminationTimeoutVariable);
         // Inherit the guardian's pipes rather than adding another output pump. Diagnostics go
         // directly to the owner even when the guardian must kill its own Unix process group.
         var process = new ChildProcess(
-            startInfo, NullLogger.Instance, new ChildProcessOptions(), OperatingSystem.IsWindows());
+            startInfo, logger, new ChildProcessOptions(), OperatingSystem.IsWindows());
         await using var processLifetime = process.ConfigureAwait(false);
 
         var started = false;
@@ -136,17 +147,18 @@ internal static partial class ProcessSupervisor
             }
             started = true;
 
-            Console.Error.WriteLine(
-                $"Process supervisor {Environment.ProcessId} started '{command.FileName}' (PID {process.ProcessId}, owner {parentId}, cwd '{Environment.CurrentDirectory}').");
+            logger.LogInformation("Started '{Command}' (runtime PID {Pid}, owner PID {OwnerPid}, cwd '{Directory}').",
+                command.FileName, process.ProcessId, parentId, Environment.CurrentDirectory);
             var exited = process.WaitForRootExitAsync(CancellationToken.None);
             if (await Task.WhenAny(exited, parentExited.Task).ConfigureAwait(false) != exited)
             {
-                Console.Error.WriteLine($"Owner process {parentId} exited; terminating its supervised process scope.");
+                logger.LogWarning("Owner process {OwnerPid} exited; terminating its supervised process scope.", parentId);
                 return;
             }
 
             await exited.ConfigureAwait(false);
-            Console.Error.WriteLine($"Supervised command '{command.FileName}' exited with code {process.ExitCode}.");
+            logger.Log(process.ExitCode == 0 ? LogLevel.Information : LogLevel.Warning,
+                "Supervised command '{Command}' exited with code {ExitCode}.", command.FileName, process.ExitCode);
             if (exitCodePath is not null)
             {
                 // Unix cleanup kills the guardian together with its group, so its OS exit status
@@ -158,7 +170,7 @@ internal static partial class ProcessSupervisor
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Process supervisor failed: {ex}");
+            logger.LogError(ex, "Process supervisor failed.");
             throw;
         }
         finally
@@ -174,7 +186,16 @@ internal static partial class ProcessSupervisor
                     catch (InvalidOperationException) when (process.HasExited)
                     {
                     }
-                    await process.WaitForRootExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                    try
+                    {
+                        await process.WaitForRootExitAsync(CancellationToken.None).WaitAsync(terminationTimeout).ConfigureAwait(false);
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        logger.LogError(ex, "Could not observe runtime PID {Pid} termination within {Timeout}.",
+                            process.ProcessId, terminationTimeout);
+                        throw;
+                    }
                 }
             }
             else

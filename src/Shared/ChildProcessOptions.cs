@@ -12,6 +12,7 @@ internal sealed class ChildProcessOptions
     /// Gets the clock used for output-drain deadlines.
     /// </summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+    public TimeSpan OutputDrainIdleTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
     public Action<string>? StandardOutputCallback { get; init; }
     public Action<string>? StandardErrorCallback { get; init; }

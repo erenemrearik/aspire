@@ -246,7 +246,7 @@ public class ApiReferenceExportTests
         var atsContextFactory = new AtsContextFactory(loader, NullLogger<AtsContextFactory>.Instance, telemetry);
         var externalCapabilityRegistry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance);
         var languageResolver = new LanguageSupportResolver(services, loader, NullLogger<LanguageSupportResolver>.Instance);
-        var integrationHostLauncher = new IntegrationHostLauncher(
+        var integrationHostLauncher = IntegrationHostTestServices.CreateLauncher(
             languageResolver, externalCapabilityRegistry, configuration,
             new Microsoft.Extensions.Hosting.Internal.ApplicationLifetime(
                 NullLogger<Microsoft.Extensions.Hosting.Internal.ApplicationLifetime>.Instance),

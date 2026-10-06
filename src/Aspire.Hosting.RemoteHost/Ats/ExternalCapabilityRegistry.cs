@@ -3,12 +3,12 @@
 
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Aspire.TypeSystem;
-using Microsoft.Extensions.Configuration;
+using Aspire.Hosting.RemoteHost.Diagnostics;
+using Aspire.Hosting.RemoteHost.Language;
 using Microsoft.Extensions.Logging;
 using StreamJsonRpc;
 
@@ -29,7 +29,8 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     private volatile FrozenDictionary<string, ExternalCapabilityRegistration> _capabilities = FrozenDictionary<string, ExternalCapabilityRegistration>.Empty;
     private readonly ConcurrentDictionary<JsonRpc, byte> _integrationHosts = new();
     private readonly ConcurrentDictionary<JsonRpc, JsonRpcCallbackInvoker> _integrationCallbackInvokers = new();
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonRpc>> _pendingRegistrations = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, PendingRegistration> _pendingRegistrations = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<JsonRpc, string> _hostPackages = new();
     private readonly ConcurrentDictionary<JsonRpc, byte> _unavailableHosts = new();
     private readonly ConcurrentDictionary<string, CallbackOwner> _callbackOwners = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _hostRegisteredSignal = new(initialCount: 0);
@@ -37,6 +38,8 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     private readonly object _registrationGate = new();
     private readonly ILogger<ExternalCapabilityRegistry> _logger;
     private readonly TimeSpan _invocationTimeout;
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
+    private readonly RemoteHostProfilingTelemetry _profilingTelemetry = RemoteHostProfilingTelemetry.Disabled;
     private InvalidOperationException? _initializationException;
 
     static ExternalCapabilityRegistry()
@@ -45,20 +48,28 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     }
 
     public ExternalCapabilityRegistry(ILogger<ExternalCapabilityRegistry> logger)
-        : this(logger, TimeSpan.FromSeconds(60))
+        : this(logger, IntegrationHostConfiguration.Default.InvocationTimeout)
     {
     }
 
-    public ExternalCapabilityRegistry(ILogger<ExternalCapabilityRegistry> logger, IConfiguration configuration)
-        : this(logger, configuration.GetValue("IntegrationHost:InvocationTimeout", TimeSpan.FromSeconds(60)))
+    public ExternalCapabilityRegistry(ILogger<ExternalCapabilityRegistry> logger, IntegrationHostConfiguration configuration,
+        TimeProvider timeProvider, RemoteHostProfilingTelemetry profilingTelemetry)
+        : this(logger, configuration.InvocationTimeout, timeProvider)
     {
+        _profilingTelemetry = profilingTelemetry;
     }
 
     internal ExternalCapabilityRegistry(ILogger<ExternalCapabilityRegistry> logger, TimeSpan invocationTimeout)
+        : this(logger, invocationTimeout, TimeProvider.System)
+    {
+    }
+
+    internal ExternalCapabilityRegistry(ILogger<ExternalCapabilityRegistry> logger, TimeSpan invocationTimeout, TimeProvider timeProvider)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(invocationTimeout, TimeSpan.Zero);
         _logger = logger;
         _invocationTimeout = invocationTimeout;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>
@@ -82,14 +93,18 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     }
 
     internal Task<JsonRpc> ExpectHostRegistration(string registrationId)
+        => ExpectHostRegistration(registrationId, null);
+
+    internal Task<JsonRpc> ExpectHostRegistration(string registrationId, string? packageName)
     {
-        var registration = new TaskCompletionSource<JsonRpc>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registration = new PendingRegistration(
+            new TaskCompletionSource<JsonRpc>(TaskCreationOptions.RunContinuationsAsynchronously), packageName);
         if (!_pendingRegistrations.TryAdd(registrationId, registration))
         {
             throw new InvalidOperationException($"Integration host registration '{registrationId}' is already pending.");
         }
 
-        return registration.Task;
+        return registration.Completion.Task;
     }
 
     internal void ForgetHostRegistration(string registrationId)
@@ -106,14 +121,19 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
         {
             lock (_registrationGate)
             {
+                if (registration.PackageName is { } packageName)
+                {
+                    _hostPackages[clientRpc] = packageName;
+                }
                 AddIntegrationHost(clientRpc);
                 _integrationCallbackInvokers[clientRpc] = callbackInvoker;
-                registration.SetResult(clientRpc);
+                registration.Completion.SetResult(clientRpc);
             }
         }
         catch (Exception ex)
         {
-            registration.TrySetException(ex);
+            _hostPackages.TryRemove(clientRpc, out _);
+            registration.Completion.TrySetException(ex);
             throw;
         }
     }
@@ -162,14 +182,22 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
         var registered = 0;
         while (registered < expectedCount)
         {
-            var got = await _hostRegisteredSignal.WaitAsync(timeoutPerHost, cancellationToken).ConfigureAwait(false);
-
-            if (!got)
+            using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            try
+            {
+                await _hostRegisteredSignal.WaitAsync(waitCancellation.Token)
+                    .WaitAsync(timeoutPerHost, _timeProvider, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
             {
                 _logger.LogWarning(
                     "Timed out waiting for integration host registration after {Registered}/{Expected} (per-host timeout {Timeout}).",
                     registered, expectedCount, timeoutPerHost);
                 break;
+            }
+            finally
+            {
+                waitCancellation.Cancel();
             }
 
             registered++;
@@ -202,13 +230,18 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             using var discoveryCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             List<ExternalCapabilityRegistration> registrations;
+            _hostPackages.TryGetValue(host, out var packageName);
+            using var activity = _profilingTelemetry.StartIntegrationHostPhase("discovery", packageName, timeout: timeoutPerHost);
+            var started = _timeProvider.GetTimestamp();
+            _logger.LogInformation("Integration capability discovery started: package {Name}, connection {Host}, timeout {Timeout}.",
+                packageName, host.GetHashCode(), timeoutPerHost);
             try
             {
                 var capsPayload = await host.InvokeWithCancellationAsync<JsonElement>(
                     "getCapabilities",
                     Array.Empty<object>(),
                     discoveryCancellation.Token)
-                    .WaitAsync(timeoutPerHost, cancellationToken).ConfigureAwait(false);
+                    .WaitAsync(timeoutPerHost, _timeProvider, cancellationToken).ConfigureAwait(false);
 
                 registrations = ReadCapabilities(capsPayload).Select(cap => new ExternalCapabilityRegistration
                 {
@@ -219,8 +252,9 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
                     Signature = CreateSignature(cap)
                 }).ToList();
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
             {
+                activity.SetError(ex);
                 throw;
             }
             catch (TimeoutException ex)
@@ -228,17 +262,24 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
                 // Bound the local wait even if the integration host ignores RPC cancellation.
                 discoveryCancellation.Cancel();
                 _initializationException = new InvalidOperationException(
-                    $"Timed out getting capabilities from integration host {host.GetHashCode()} after {timeoutPerHost}. " +
+                    $"Timed out getting capabilities from integration host '{packageName}' (connection {host.GetHashCode()}) after {timeoutPerHost}. " +
                     "SDK generation cannot continue without all configured integrations.", ex);
                 _logger.LogError(_initializationException, "Integration host capability discovery failed.");
+                activity.SetError(_initializationException);
                 throw _initializationException;
             }
             catch (Exception ex)
             {
                 _initializationException = new InvalidOperationException(
-                    $"Failed to get capabilities from integration host {host.GetHashCode()}.", ex);
+                    $"Failed to get capabilities from integration host '{packageName}' (connection {host.GetHashCode()}).", ex);
                 _logger.LogError(_initializationException, "Integration host capability discovery failed.");
+                activity.SetError(_initializationException);
                 throw _initializationException;
+            }
+            finally
+            {
+                _logger.LogInformation("Integration capability discovery finished: package {Name}, connection {Host}, elapsed {Elapsed}, timeout {Timeout}.",
+                    packageName, host.GetHashCode(), _timeProvider.GetElapsedTime(started), timeoutPerHost);
             }
 
             foreach (var registration in registrations)
@@ -250,6 +291,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
                         $"Capability ID '{registration.CapabilityId}' is provided by multiple external registrations " +
                         $"(integration hosts {previous.ClientRpc.GetHashCode()} and {host.GetHashCode()}). Capability IDs must be unique.");
                     _logger.LogError(_initializationException, "Conflicting external capability registrations.");
+                    activity.SetError(_initializationException);
                     throw _initializationException;
                 }
             }
@@ -287,7 +329,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
         {
             var payload = await replacement.InvokeWithCancellationAsync<JsonElement>(
                 "getCapabilities", Array.Empty<object>(), discoveryCancellation.Token)
-                .WaitAsync(timeout, discoveryCancellation.Token).ConfigureAwait(false);
+                .WaitAsync(timeout, _timeProvider, discoveryCancellation.Token).ConfigureAwait(false);
             discovered = ReadCapabilities(payload).Select(cap => new ExternalCapabilityRegistration
             {
                 CapabilityId = cap.Id,
@@ -330,6 +372,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
             _capabilities = updated.ToFrozenDictionary(StringComparer.Ordinal);
             _unavailableHosts.TryRemove(previous, out _);
             _integrationCallbackInvokers.TryRemove(previous, out _);
+            _hostPackages.TryRemove(previous, out _);
         }
     }
 
@@ -418,7 +461,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
         }
 
         var invocationId = Guid.NewGuid().ToString("N");
-        var started = Stopwatch.GetTimestamp();
+        var started = _timeProvider.GetTimestamp();
         var forwardedArgs = args?.DeepClone().AsObject();
         using var invocationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken, _shutdown.Token, ownerInvoker?.LifetimeToken ?? CancellationToken.None);
@@ -435,7 +478,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
                 registration.SupportsInvocationIds
                     ? new object?[] { capabilityId, forwardedArgs, invocationId }
                     : new object?[] { capabilityId, forwardedArgs },
-                invocationCancellation.Token).WaitAsync(_invocationTimeout, invocationCancellation.Token).ConfigureAwait(false);
+                invocationCancellation.Token).WaitAsync(_invocationTimeout, _timeProvider, invocationCancellation.Token).ConfigureAwait(false);
 
             // SystemTextJsonFormatter returns JsonElement for object?
             JsonNode? result;
@@ -469,7 +512,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
             _logger.LogError(error,
                 "Integration invocation {InvocationId} stalled: capability {CapabilityId}, host {Host}, elapsed {Elapsed}, timeout {Timeout}. " +
                 "Retired the connection; supervised process cleanup must complete before recovery. In-flight work is not replayed.",
-                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), Stopwatch.GetElapsedTime(started), _invocationTimeout);
+                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), _timeProvider.GetElapsedTime(started), _invocationTimeout);
             throw error;
         }
         catch (OperationCanceledException) when (invocationCancellation.IsCancellationRequested)
@@ -480,19 +523,19 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
             _logger.LogInformation(
                 "Integration invocation {InvocationId} canceled: capability {CapabilityId}, host {Host}, elapsed {Elapsed}. " +
                 "The connection was retired; in-flight work is not replayed.",
-                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), Stopwatch.GetElapsedTime(started));
+                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), _timeProvider.GetElapsedTime(started));
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Integration invocation {InvocationId} failed: capability {CapabilityId}, host {Host}, elapsed {Elapsed}.",
-                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), Stopwatch.GetElapsedTime(started));
+                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), _timeProvider.GetElapsedTime(started));
             throw;
         }
         finally
         {
             _logger.LogInformation("Integration invocation {InvocationId} finished: capability {CapabilityId}, host {Host}, elapsed {Elapsed}.",
-                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), Stopwatch.GetElapsedTime(started));
+                invocationId, capabilityId, registration.ClientRpc.GetHashCode(), _timeProvider.GetElapsedTime(started));
         }
     }
 
@@ -513,7 +556,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
                 "Its owning connection may have disconnected; restart the AppHost session to rebuild deferred callbacks.");
         }
 
-        var started = Stopwatch.GetTimestamp();
+        var started = _timeProvider.GetTimestamp();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token, owner.Invoker.LifetimeToken);
         _logger.LogInformation(
             "Guest callback relay {CallbackId} started: integration invocation {InvocationId}, capability {CapabilityId}, host {Host}, timeout {Timeout}.",
@@ -529,7 +572,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
             _logger.LogError(ex,
                 "Guest callback relay {CallbackId} stalled: integration invocation {InvocationId}, capability {CapabilityId}, host {Host}, elapsed {Elapsed}, timeout {Timeout}. " +
                 "The integration connection was retired; restart the AppHost session to rebuild callbacks.",
-                callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), Stopwatch.GetElapsedTime(started), _invocationTimeout);
+                callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), _timeProvider.GetElapsedTime(started), _invocationTimeout);
             throw new TimeoutException(
                 $"Guest callback relay '{callbackId}' for integration capability '{owner.CapabilityId}' " +
                 $"(invocation {owner.InvocationId}) timed out after {_invocationTimeout}. Restart the AppHost session to rebuild callbacks.", ex);
@@ -538,14 +581,14 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
         {
             _logger.LogError(ex,
                 "Guest callback relay {CallbackId} failed: integration invocation {InvocationId}, capability {CapabilityId}, host {Host}, elapsed {Elapsed}.",
-                callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), Stopwatch.GetElapsedTime(started));
+                callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), _timeProvider.GetElapsedTime(started));
             throw;
         }
         finally
         {
             _logger.LogInformation(
                 "Guest callback relay {CallbackId} finished: integration invocation {InvocationId}, capability {CapabilityId}, host {Host}, elapsed {Elapsed}.",
-                callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), Stopwatch.GetElapsedTime(started));
+                callbackId, owner.InvocationId, owner.CapabilityId, host.GetHashCode(), _timeProvider.GetElapsedTime(started));
         }
     }
 
@@ -637,7 +680,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
             }
             foreach (var registration in _pendingRegistrations.Values)
             {
-                registration.TrySetCanceled(_shutdown.Token);
+                registration.Completion.TrySetCanceled(_shutdown.Token);
             }
             _pendingRegistrations.Clear();
             _callbackOwners.Clear();
@@ -648,6 +691,7 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
     {
         Stop();
         _integrationCallbackInvokers.Clear();
+        _hostPackages.Clear();
         _shutdown.Dispose();
         _hostRegisteredSignal.Dispose();
     }
@@ -769,6 +813,8 @@ internal sealed class ExternalCapabilityRegistry : IDisposable
         public bool SupportsInvocationIds { get; init; }
         public required AtsCapabilityInfo ProjectedCapability { get; init; }
     }
+
+    private sealed record PendingRegistration(TaskCompletionSource<JsonRpc> Completion, string? PackageName);
 
     private sealed record CallbackOwner(
         JsonRpc Host, JsonRpcCallbackInvoker Invoker, string CallbackId, string InvocationId, string CapabilityId);

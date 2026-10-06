@@ -154,7 +154,7 @@ public class ServiceErrorMessageTests
         ExternalCapabilityRegistry externalCapabilityRegistry,
         IConfiguration configuration)
     {
-        var launcher = new IntegrationHostLauncher(
+        var launcher = IntegrationHostTestServices.CreateLauncher(
             languageResolver,
             externalCapabilityRegistry,
             configuration,

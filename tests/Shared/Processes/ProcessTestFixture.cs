@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO.Pipes;
 using System.Security;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -51,7 +52,7 @@ public sealed class ProcessTestFixture : IAsyncLifetime
         string[] sources =
         [
             "IChildProcess.cs", "ChildProcess.cs", "ChildProcessOptions.cs", "ProcessScope.cs",
-            "ProcessSupervisor.cs", "ProcessSupervisor.Windows.cs", "ParentProcessLivenessMonitor.cs",
+            "ProcessSupervisor.cs", "ProcessSupervisorLogger.cs", "ProcessSupervisor.Windows.cs", "ParentProcessLivenessMonitor.cs",
             "ProcessStartTimeHelper.cs", "ProcessSignaler.cs", "KnownConfigNames.cs"
         ];
         var includes = string.Join(Environment.NewLine, sources.Select(source =>
@@ -112,7 +113,10 @@ public sealed class ProcessTestFixture : IAsyncLifetime
     }
 
     internal static ChildProcess CreateProcess(ProcessStartInfo startInfo, ChildProcessOptions options) =>
-        new(startInfo, NullLogger.Instance, options, OperatingSystem.IsWindows());
+        CreateProcess(startInfo, NullLogger.Instance, options);
+
+    internal static ChildProcess CreateProcess(ProcessStartInfo startInfo, ILogger logger, ChildProcessOptions options) =>
+        new(startInfo, logger, options, OperatingSystem.IsWindows());
 
     internal static async Task AssertExitedAsync(ProcessTestIdentity identity)
     {

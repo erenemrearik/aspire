@@ -12,7 +12,8 @@ namespace Aspire.Shared;
 /// </summary>
 internal sealed partial class ProcessScope : IAsyncDisposable
 {
-    private static readonly TimeSpan s_exitTimeout = TimeSpan.FromSeconds(5);
+    private readonly TimeSpan _exitTimeout;
+    private readonly TimeProvider _timeProvider;
     private readonly IChildProcess _execution;
     private readonly ILogger _logger;
     private readonly string _description;
@@ -20,7 +21,15 @@ internal sealed partial class ProcessScope : IAsyncDisposable
     private int _disposed;
 
     internal ProcessScope(IChildProcess execution, ILogger logger, string description)
+        : this(execution, logger, description, TimeSpan.FromSeconds(5), TimeProvider.System)
     {
+    }
+
+    internal ProcessScope(IChildProcess execution, ILogger logger, string description, TimeSpan exitTimeout, TimeProvider timeProvider)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(exitTimeout, TimeSpan.Zero);
+        _exitTimeout = exitTimeout;
+        _timeProvider = timeProvider;
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(execution.ProcessId);
         if (execution.ProcessId == Environment.ProcessId)
         {
@@ -73,33 +82,42 @@ internal sealed partial class ProcessScope : IAsyncDisposable
         {
             try
             {
-                await Exit.WaitAsync(s_exitTimeout).ConfigureAwait(false);
+                await Exit.WaitAsync(_exitTimeout, _timeProvider).ConfigureAwait(false);
             }
             catch (TimeoutException)
             {
-                _logger.LogWarning("Process scope '{Name}' did not stop gracefully; terminating it.", _description);
+                _logger.LogWarning("Process scope '{Name}' did not stop gracefully within {Timeout}; terminating it.", _description, _exitTimeout);
             }
 
             RequestScopeTermination();
 
-            await Exit.WaitAsync(s_exitTimeout).ConfigureAwait(false);
+            await Exit.WaitAsync(_exitTimeout, _timeProvider).ConfigureAwait(false);
             if (!OperatingSystem.IsWindows())
             {
                 // The guardian can establish its group between the first group
                 // signal and root termination. Signal again after reaping it so
                 // descendants spawned in that startup window cannot survive.
                 RequestGroupTermination();
-                using var groupExitCancellation = new CancellationTokenSource(s_exitTimeout);
-                while (GroupExists(_processId))
+                using var groupExitCancellation = new CancellationTokenSource(_exitTimeout, _timeProvider);
+                try
                 {
-                    await Task.Delay(25, groupExitCancellation.Token).ConfigureAwait(false);
+                    while (GroupExists(_processId))
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(25), _timeProvider, groupExitCancellation.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException ex) when (groupExitCancellation.IsCancellationRequested)
+                {
+                    throw new TimeoutException(
+                        $"Process group {_processId} for '{_description}' still exists after cleanup timeout {_exitTimeout}.", ex);
                 }
             }
             _logger.LogDebug("Process scope '{Name}' (supervisor PID {Pid}) terminated and cleanup verified.", _description, _processId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to clean up process scope '{Name}' (supervisor PID {Pid}).", _description, _processId);
+            _logger.LogError(ex, "Failed to clean up process scope '{Name}' (supervisor PID {Pid}, timeout {Timeout}).",
+                _description, _processId, _exitTimeout);
             // An exit-observation failure must not skip termination of the owned group.
             // Keep both causes if the last cleanup attempt fails as well.
             try

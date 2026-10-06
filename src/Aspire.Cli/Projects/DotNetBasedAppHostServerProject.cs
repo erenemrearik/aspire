@@ -617,13 +617,13 @@ internal sealed class DotNetBasedAppHostServerProject : IAppHostServerProject
 
         void OnStdout(string line)
         {
-            _logger.LogTrace("AppHostServer({ProcessId}) stdout: {Line}", execution.ProcessId, line);
+            _logger.LogDebug("AppHostServer({ProcessId}) stdout: {Line}", execution.ProcessId, line);
             outputCollector.AppendOutput(line);
         }
 
         void OnStderr(string line)
         {
-            _logger.LogTrace("AppHostServer({ProcessId}) stderr: {Line}", execution.ProcessId, line);
+            _logger.LogInformation("AppHostServer({ProcessId}) stderr: {Line}", execution.ProcessId, line);
             outputCollector.AppendError(line);
         }
 

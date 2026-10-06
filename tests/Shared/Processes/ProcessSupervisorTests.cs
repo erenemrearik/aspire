@@ -1,10 +1,13 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using Aspire.TestUtilities;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
 using Xunit;
 
 namespace Aspire.Shared.Tests;
@@ -21,10 +24,14 @@ public class ProcessSupervisorTests(ProcessTestFixture fixture)
         var directory = fixture.CreateDirectory();
         using var readiness = new ProcessTestReadiness();
         var completionPath = Path.Combine(directory.FullName, "exit-code");
+        var sink = new TestSink();
+        var stderr = new ConcurrentQueue<string>();
         await using var guardian = ProcessTestFixture.CreateProcess(fixture.CreateSupervisorStartInfo(
             fixture.CreateStartInfo("tree-exit", readiness.Name, exitCode.ToString(CultureInfo.InvariantCulture)),
-            completionPath), new ChildProcessOptions());
+            completionPath), new TestLogger("guardian owner", sink, enabled: true),
+            new ChildProcessOptions { StandardErrorCallback = stderr.Enqueue });
         await guardian.StartAsync(TestContext.Current.CancellationToken);
+        var guardianPid = guardian.ProcessId;
         await using var scope = new ProcessScope(guardian, NullLogger.Instance, "test completion");
         var identities = await readiness.ReadTreeAsync();
 
@@ -32,6 +39,10 @@ public class ProcessSupervisorTests(ProcessTestFixture fixture)
         await scope.DisposeAsync();
 
         Assert.Equal(exitCode.ToString(CultureInfo.InvariantCulture), await File.ReadAllTextAsync(completionPath));
+        var exit = Assert.Single(sink.Writes, entry => entry.Message?.Contains("Supervised command", StringComparison.Ordinal) == true);
+        Assert.Equal(exitCode == 0 ? LogLevel.Information : LogLevel.Warning, exit.LogLevel);
+        Assert.Equal($"Process supervisor {guardianPid}: Supervised command 'dotnet' exited with code {exitCode}.", exit.Message);
+        Assert.Empty(stderr);
         await Task.WhenAll(identities.Select(ProcessTestFixture.AssertExitedAsync));
     }
 

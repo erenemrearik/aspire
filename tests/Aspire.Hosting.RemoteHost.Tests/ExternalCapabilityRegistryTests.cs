@@ -5,11 +5,13 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Aspire.Hosting.RemoteHost.Ats;
 using Aspire.Hosting.RemoteHost.Diagnostics;
+using Aspire.Hosting.RemoteHost.Language;
 using Aspire.TypeSystem;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Testing;
+using Microsoft.Extensions.Time.Testing;
 using StreamJsonRpc;
 using Xunit;
 
@@ -45,7 +47,8 @@ public class ExternalCapabilityRegistryTests
     {
         var sink = new TestSink();
         using var loggerFactory = new TestLoggerFactory(sink, enabled: true);
-        using var registry = new ExternalCapabilityRegistry(loggerFactory.CreateLogger<ExternalCapabilityRegistry>(), TimeSpan.FromMilliseconds(100));
+        var clock = new FakeTimeProvider();
+        using var registry = new ExternalCapabilityRegistry(loggerFactory.CreateLogger<ExternalCapabilityRegistry>(), TimeSpan.FromMilliseconds(100), clock);
         var requestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var response = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var connection = new IntegrationHostTestConnection(CreateCapabilities("test.external/stall"), (_, _) =>
@@ -59,6 +62,7 @@ public class ExternalCapabilityRegistryTests
         try
         {
             await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            clock.Advance(TimeSpan.FromMilliseconds(100));
             var error = await Assert.ThrowsAsync<TimeoutException>(() => invocation.WaitAsync(TimeSpan.FromSeconds(10)));
             Assert.StartsWith("Integration capability 'test.external/stall' (invocation ", error.Message);
             await connection.ServerRpc.Completion.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
@@ -75,7 +79,7 @@ public class ExternalCapabilityRegistryTests
             Assert.All(states, state => Assert.Equal(invocationId, state["InvocationId"]));
             Assert.All(states, state => Assert.Equal(connection.ServerRpc.GetHashCode(), state["Host"]));
             Assert.Equal(TimeSpan.FromMilliseconds(100), states[1]["Timeout"]);
-            Assert.InRange((TimeSpan)states[1]["Elapsed"]!, TimeSpan.FromMilliseconds(90), TimeSpan.FromSeconds(10));
+            Assert.Equal(TimeSpan.FromMilliseconds(100), states[1]["Elapsed"]);
         }
         finally
         {
@@ -228,7 +232,8 @@ public class ExternalCapabilityRegistryTests
     [Fact]
     public async Task InvokeGuestCallbackAsync_StalledRelayRetiresBothConnectionsAndRequiresSessionRestart()
     {
-        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance, TimeSpan.FromMilliseconds(100));
+        var clock = new FakeTimeProvider();
+        using var registry = new ExternalCapabilityRegistry(NullLogger<ExternalCapabilityRegistry>.Instance, TimeSpan.FromMilliseconds(100), clock);
         string? relayId = null;
         using var integration = new IntegrationHostTestConnection(CreateCallbackCapabilities(), (_, args) =>
         {
@@ -237,15 +242,23 @@ public class ExternalCapabilityRegistryTests
         });
         var response = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var guest = new IntegrationHostTestConnection(CreateCapabilities(), (_, _, _) => response.Task);
+        using var guestInvoker = new JsonRpcCallbackInvoker(
+            NullLogger<JsonRpcCallbackInvoker>.Instance,
+            new IntegrationHostConfiguration(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ASPIRE_INTEGRATION_HOSTS_ENABLED"] = "true"
+            }).Build()), clock);
+        guestInvoker.SetConnection(guest.ServerRpc);
         _ = registry.ExpectHostRegistration("integration");
         registry.AddIntegrationHost("integration", integration.ServerRpc, integration.CallbackInvoker);
         await registry.InitializeAllHostsAsync(1, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
-        await registry.TryInvokeAsync("test.external/callback", new JsonObject { ["configure"] = "guest_callback" }, guest.CallbackInvoker);
+        await registry.TryInvokeAsync("test.external/callback", new JsonObject { ["configure"] = "guest_callback" }, guestInvoker);
         Assert.NotNull(relayId);
         try
         {
-            var error = await Assert.ThrowsAsync<TimeoutException>(() => registry.InvokeGuestCallbackAsync(
-                integration.ServerRpc, relayId, null, TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(10)));
+            var invocation = registry.InvokeGuestCallbackAsync(integration.ServerRpc, relayId, null, TestContext.Current.CancellationToken);
+            clock.Advance(TimeSpan.FromMilliseconds(100));
+            var error = await Assert.ThrowsAsync<TimeoutException>(() => invocation.WaitAsync(TimeSpan.FromSeconds(10)));
             Assert.Contains("Restart the AppHost session to rebuild callbacks.", error.Message);
             await integration.ServerRpc.Completion.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
             await guest.ServerRpc.Completion.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);

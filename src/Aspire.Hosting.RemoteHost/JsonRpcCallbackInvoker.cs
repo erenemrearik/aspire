@@ -2,7 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Configuration;
+using Aspire.Hosting.RemoteHost.Language;
 using Microsoft.Extensions.Logging;
 using StreamJsonRpc;
 
@@ -13,7 +13,8 @@ namespace Aspire.Hosting.RemoteHost;
 /// </summary>
 internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IAsyncDisposable
 {
-    private static readonly TimeSpan s_callbackTimeout = TimeSpan.FromSeconds(60);
+    private readonly TimeSpan _callbackTimeout = IntegrationHostConfiguration.Default.CallbackTimeout;
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
 
     private JsonRpc? _clientRpc;
     private readonly object _callbackGate = new();
@@ -31,10 +32,12 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IA
         LifetimeToken = _lifetime.Token;
     }
 
-    public JsonRpcCallbackInvoker(ILogger<JsonRpcCallbackInvoker> logger, IConfiguration configuration)
+    public JsonRpcCallbackInvoker(ILogger<JsonRpcCallbackInvoker> logger, IntegrationHostConfiguration configuration, TimeProvider timeProvider)
         : this(logger)
     {
-        _retireOnTimeout = configuration.GetValue<bool>(KnownConfigNames.IntegrationHostsEnabled);
+        _retireOnTimeout = configuration.Enabled;
+        _callbackTimeout = configuration.CallbackTimeout;
+        _timeProvider = timeProvider;
     }
 
     internal CancellationToken LifetimeToken { get; }
@@ -80,7 +83,7 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IA
 
     /// <inheritdoc />
     public Task<TResult> InvokeAsync<TResult>(string callbackId, JsonNode? args, CancellationToken cancellationToken = default)
-        => InvokeAsync<TResult>(callbackId, args, cancellationToken, s_callbackTimeout);
+        => InvokeAsync<TResult>(callbackId, args, cancellationToken, _callbackTimeout);
 
     internal async Task<TResult> InvokeAsync<TResult>(string callbackId, JsonNode? args, CancellationToken cancellationToken, TimeSpan timeout)
     {
@@ -90,7 +93,7 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IA
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, LifetimeToken);
-        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var started = _timeProvider.GetTimestamp();
         _logger.LogDebug("Callback {CallbackId} started on connection {Host}, timeout {Timeout}.",
             callbackId, _clientRpc.GetHashCode(), timeout);
 
@@ -99,7 +102,7 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IA
             return await _clientRpc.InvokeWithCancellationAsync<TResult>(
                 "invokeCallback",
                 [callbackId, args],
-                cts.Token).WaitAsync(timeout, cts.Token).ConfigureAwait(false);
+                cts.Token).WaitAsync(timeout, _timeProvider, cts.Token).ConfigureAwait(false);
         }
         catch (TimeoutException ex)
         {
@@ -107,7 +110,7 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IA
             if (!_retireOnTimeout)
             {
                 _logger.LogError(ex, "Callback {CallbackId} timed out on connection {Host} after {Elapsed}, timeout {Timeout}.",
-                    callbackId, _clientRpc.GetHashCode(), System.Diagnostics.Stopwatch.GetElapsedTime(started), timeout);
+                    callbackId, _clientRpc.GetHashCode(), _timeProvider.GetElapsedTime(started), timeout);
                 throw new TimeoutException($"Callback '{callbackId}' timed out after {timeout.TotalSeconds}s.", ex);
             }
 
@@ -116,13 +119,13 @@ internal sealed class JsonRpcCallbackInvoker : ICallbackInvoker, IDisposable, IA
             StopAcceptingCallbacks();
             _clientRpc.Dispose();
             _logger.LogError(ex, "Callback {CallbackId} stalled on connection {Host} after {Elapsed}, timeout {Timeout}. Retired its owner connection.",
-                callbackId, _clientRpc.GetHashCode(), System.Diagnostics.Stopwatch.GetElapsedTime(started), timeout);
+                callbackId, _clientRpc.GetHashCode(), _timeProvider.GetElapsedTime(started), timeout);
             throw new TimeoutException($"Callback '{callbackId}' timed out after {timeout.TotalSeconds}s; its owner connection was retired.", ex);
         }
         finally
         {
             _logger.LogDebug("Callback {CallbackId} finished on connection {Host} after {Elapsed}.",
-                callbackId, _clientRpc.GetHashCode(), System.Diagnostics.Stopwatch.GetElapsedTime(started));
+                callbackId, _clientRpc.GetHashCode(), _timeProvider.GetElapsedTime(started));
         }
     }
 

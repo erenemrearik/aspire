@@ -81,6 +81,11 @@ public static class RemoteHostServer
 
     private static void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
+        var integrationConfiguration = new IntegrationHostConfiguration(configuration);
+        services.AddSingleton(integrationConfiguration);
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<IChildProcessFactory, ChildProcessFactory>();
+        services.AddSingleton<IntegrationHostProcessLauncher>();
         // Hosted services
         services.AddHostedService<OrphanDetector>();
         services.AddHostedService<JsonRpcServer>();
@@ -97,7 +102,7 @@ public static class RemoteHostServer
         services.AddSingleton<CodeGeneratorResolver>();
         services.AddSingleton<LanguageSupportResolver>();
         services.AddSingleton<ExternalCapabilityRegistry>();
-        if (configuration.GetValue<bool>(KnownConfigNames.IntegrationHostsEnabled))
+        if (integrationConfiguration.Enabled)
         {
             // Integration hosts resolve handles created by the guest, so opted-in sessions
             // share capability tokens and clean them up when the server shuts down.

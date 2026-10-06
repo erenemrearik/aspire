@@ -67,10 +67,10 @@ internal sealed class IntegrationHostTestConnection : IDisposable
     public string? LastInvocationId { get; private set; }
     public JsonRpcCallbackInvoker CallbackInvoker { get; } = new(
         NullLogger<JsonRpcCallbackInvoker>.Instance,
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        new Language.IntegrationHostConfiguration(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ASPIRE_INTEGRATION_HOSTS_ENABLED"] = "true"
-        }).Build());
+        }).Build()), TimeProvider.System);
 
     public void Dispose()
     {

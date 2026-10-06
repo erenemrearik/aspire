@@ -271,6 +271,7 @@
     <Compile Include="$(SharedDir)ChildProcessOptions.cs" Link="Processes\ChildProcessOptions.cs" />
     <Compile Include="$(SharedDir)ProcessScope.cs" Link="Processes\ProcessScope.cs" />
     <Compile Include="$(SharedDir)ProcessSupervisor.cs" Link="Processes\ProcessSupervisor.cs" />
+    <Compile Include="$(SharedDir)ProcessSupervisorLogger.cs" Link="Processes\ProcessSupervisorLogger.cs" />
     <Compile Include="$(SharedDir)ProcessSupervisor.Windows.cs" Link="Processes\ProcessSupervisor.Windows.cs" />
     <Compile Include="$(SharedDir)ProcessStartTimeHelper.cs" Link="Utils\ProcessStartTimeHelper.cs" />
     <Compile Include="$(SharedDir)ProcessStartInfoHelper.cs" Link="Utils\ProcessStartInfoHelper.cs" />

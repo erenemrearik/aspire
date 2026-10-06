@@ -200,19 +200,17 @@ internal sealed class JsonRpcServer : BackgroundService
         var disconnectReason = "unknown";
         using var activity = _profilingTelemetry.StartJsonRpcConnection();
 
-        // Create a DI scope for this client connection. Scoped services resolved below are
-        // per-client; singleton services such as HandleRegistry are shared across connections.
-        _logger.LogDebug("Creating DI scope for client {ClientId}", clientId);
-        var scope = _scopeFactory.CreateAsyncScope();
-        await using var _ = scope.ConfigureAwait(false);
-
-        // Resolve the scoped RemoteAppHostService
-        var clientService = scope.ServiceProvider.GetRequiredService<RemoteAppHostService>();
-        var codeGenerationService = scope.ServiceProvider.GetRequiredService<CodeGenerationService>();
-        var languageService = scope.ServiceProvider.GetRequiredService<LanguageService>();
-
         try
         {
+            // Service activation must stay inside the connection ownership boundary so setup
+            // failures are logged and close the accepted stream instead of stranding the client.
+            _logger.LogDebug("Creating DI scope for client {ClientId}", clientId);
+            var scope = _scopeFactory.CreateAsyncScope();
+            await using var _ = scope.ConfigureAwait(false);
+            var clientService = scope.ServiceProvider.GetRequiredService<RemoteAppHostService>();
+            var codeGenerationService = scope.ServiceProvider.GetRequiredService<CodeGenerationService>();
+            var languageService = scope.ServiceProvider.GetRequiredService<LanguageService>();
+
             // Use System.Text.Json formatter instead of the default Newtonsoft.Json formatter
             var formatter = new SystemTextJsonFormatter();
             var handler = new HeaderDelimitedMessageHandler(clientStream, clientStream, formatter);
@@ -282,11 +280,13 @@ internal sealed class JsonRpcServer : BackgroundService
         }
         catch (IOException ex)
         {
+            disconnectReason = "I/O error";
             activity.SetError(ex);
             _logger.LogWarning(ex, "Client {ClientId} I/O error", clientId);
         }
         catch (Exception ex)
         {
+            disconnectReason = "unexpected error";
             activity.SetError(ex);
             _logger.LogError(ex, "Client {ClientId} unexpected error", clientId);
         }
