@@ -13,6 +13,7 @@ import { AspireDebugSession } from '../debugger/AspireDebugSession';
 import * as cliModule from '../utils/process/cliProcess';
 import { deactivate as deactivateExtension } from '../extension';
 import { extensionLogOutputChannel } from '../utils/logging';
+import type { AppHostDataRepository } from '../data/AppHostDataRepository';
 
 suite('AspireExtensionContext', () => {
     test('extension deactivate returns the AspireExtensionContext shutdown promise', () => {
@@ -26,6 +27,104 @@ suite('AspireExtensionContext', () => {
         finally {
             deactivateStub.restore();
         }
+    });
+
+    test('deactivation awaits data-source cleanup before disposing shared infrastructure', async () => {
+        const order: string[] = [];
+        const termination = createDeferred<void>();
+        const context = createContext(order, {
+            shutdown: () => {
+                order.push('stop data sources');
+                return termination.promise;
+            },
+            dispose: () => { },
+        });
+
+        const shutdown = context.deactivate();
+        assert.strictEqual(context.deactivate(), shutdown);
+        try {
+            await new Promise(resolve => setImmediate(resolve));
+            context.dispose();
+            assert.deepStrictEqual(order, ['stop data sources']);
+        } finally {
+            termination.resolve();
+            await shutdown;
+        }
+        assert.ok(order.includes('rpc server'));
+    });
+
+    test('deactivation reports data-source cleanup failure after disposing infrastructure', async () => {
+        const order: string[] = [];
+        const expectedError = new Error('ps process-tree cleanup failed');
+        const errorStub = sinon.stub(extensionLogOutputChannel, 'error');
+        const context = createContext(order, {
+            shutdown: () => Promise.reject(expectedError),
+            dispose: () => { },
+        });
+
+        try {
+            const shutdown = context.deactivate();
+            await assert.rejects(shutdown, error => error === expectedError);
+            assert.strictEqual(context.deactivate(), shutdown);
+            assert.ok(order.includes('rpc server'));
+            sinon.assert.calledWithMatch(errorStub, expectedError.message);
+        } finally {
+            errorStub.restore();
+        }
+    });
+
+    test('deactivation drains debug sessions arriving during data-source cleanup', async () => {
+        const order: string[] = [];
+        const termination = createDeferred<void>();
+        const orderedStop = createDeferred<void>();
+        const disposeLateSession = sinon.spy(() => assert.strictEqual(order.length, 0));
+        const context = createContext(order, {
+            shutdown: () => termination.promise,
+            dispose: () => { },
+        });
+        const shutdown = context.deactivate();
+
+        try {
+            await new Promise(resolve => setImmediate(resolve));
+            addSession(context, 'late', async () => { }, disposeLateSession, () => { }, () => orderedStop.promise);
+
+            termination.resolve();
+            await new Promise(resolve => setImmediate(resolve));
+            assert.strictEqual(order.length, 0);
+            sinon.assert.notCalled(disposeLateSession);
+        } finally {
+            termination.resolve();
+            orderedStop.resolve();
+            await shutdown;
+        }
+
+        sinon.assert.calledOnce(disposeLateSession);
+        assert.ok(order.includes('rpc server'));
+    });
+
+    test('debug shutdown failure still waits for pending data-source cleanup', async () => {
+        const order: string[] = [];
+        const expectedError = new Error('debug shutdown failed');
+        const termination = createDeferred<void>();
+        const disposeSession = sinon.spy(() => assert.strictEqual(order.length, 0));
+        const context = createContext(order, {
+            shutdown: () => termination.promise,
+            dispose: () => { },
+        });
+        addSession(context, 'session', async () => { }, disposeSession,
+            () => { }, () => Promise.reject(expectedError));
+
+        const shutdown = context.deactivate();
+        const rejection = assert.rejects(shutdown, error => error === expectedError);
+        try {
+            await new Promise(resolve => setImmediate(resolve));
+            assert.strictEqual(order.length, 0);
+        } finally {
+            termination.resolve();
+            await rejection;
+        }
+        sinon.assert.calledOnce(disposeSession);
+        assert.ok(order.includes('rpc server'));
     });
 
     test('deactivation waits for every CLI stop request before disposing transport', async () => {
@@ -777,7 +876,10 @@ suite('AspireExtensionContext', () => {
     });
 });
 
-function createContext(order: string[]): AspireExtensionContext {
+function createContext(order: string[], dataRepository: Pick<AppHostDataRepository, 'shutdown' | 'dispose'> = {
+    shutdown: () => Promise.resolve(),
+    dispose: () => { },
+}): AspireExtensionContext {
     const context = new AspireExtensionContext();
     context.initialize(
         { dispose: () => order.push('rpc server') } as any,
@@ -785,7 +887,8 @@ function createContext(order: string[]): AspireExtensionContext {
         { dispose: () => { } } as any,
         { dispose: () => order.push('dcp server') } as any,
         { dispose: () => order.push('terminal provider') } as any,
-        { dispose: () => order.push('editor command provider') } as any);
+        { dispose: () => order.push('editor command provider') } as any,
+        dataRepository);
     return context;
 }
 

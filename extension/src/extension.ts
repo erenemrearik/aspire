@@ -26,7 +26,7 @@ import { ConfigInfoProvider } from './utils/configInfoProvider';
 import { AppHostLaunchService } from './services/AppHostLaunchService';
 import { stopExternalAppHost } from './services/AppHostStopper';
 import { cloneAppHostState, createStateSnapshot, getDashboardUrl } from './extensionState';
-import { createE2eStateFileBridge } from './testing/e2eStateFileBridge';
+import { createE2ePsFollowProcessTracker, createE2eStateFileBridge } from './testing/e2eStateFileBridge';
 import type { AspireAppHostState, AspireExtensionApi, AspireExtensionStateSnapshot, WaitForStateOptions } from './types/extensionApi';
 import { AppHostsViewTelemetry } from './views/AppHostsViewTelemetry';
 import { CliPathEnvironmentSynchronizer } from './utils/cliPathEnvironment';
@@ -46,6 +46,7 @@ import { FileSystemOutdatedCliSuppressionStore } from './utils/outdatedCliSuppre
 let aspireExtensionContext = new AspireExtensionContext();
 
 export async function activate(context: vscode.ExtensionContext) {
+  context.subscriptions.push(createE2ePsFollowProcessTracker());
   initializeHotReloadAdvisory(context.workspaceState);
 
   const gitCommitSha = readGitCommitSha(context);
@@ -228,7 +229,7 @@ export async function activate(context: vscode.ExtensionContext) {
     getAspireDebugSession: aspireExtensionContext.getAspireDebugSession.bind(aspireExtensionContext),
   }));
 
-  aspireExtensionContext.initialize(rpcServer, context, dynamicDebugConfigProvider, dcpServer, terminalProvider, editorCommandProvider);
+  aspireExtensionContext.initialize(rpcServer, context, dynamicDebugConfigProvider, dcpServer, terminalProvider, editorCommandProvider, dataRepository);
 
   // Register Aspire MCP server definition provider so the Aspire MCP server
   // appears automatically in VS Code's MCP tools list for Aspire workspaces.

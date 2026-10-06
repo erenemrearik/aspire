@@ -137,6 +137,7 @@ export class AppHostDataRepository {
     private _describeErrorIsCompatibility = false;
     private _describeErrorAppHostPath: string | undefined;
     private _psErrorMessage: string | undefined;
+    private _psCleanupErrorMessage: string | undefined;
     private _errorMessage: string | undefined;
     private _errorIsCompatibility = false;
 
@@ -153,12 +154,12 @@ export class AppHostDataRepository {
         this._psPoller = new AppHostPsPoller(
             _terminalProvider,
             this._cliRunner,
-            () => this._disposed,
             () => this._dataActive,
             () => this._clearPostStopRefreshTimers());
         this._psPollerDisposable = vscode.Disposable.from(
             this._psPoller.onDidReceivePsOutput(psOutput => this._handlePsOutput(psOutput.stdout, psOutput.canCompleteGlobalLoading)),
             this._psPoller.onDidChangePsError(message => this._setPsError(message)),
+            this._psPoller.onDidChangePsCleanupError(message => this._setPsCleanupError(message)),
             this._psPoller.onDidRequestClearLoading(() => this._clearLoading()),
             this._psPoller.onDidStartPsFollow(() => this._handlePsFollowStarted()));
         this._configInfoProvider = configInfoProvider ?? new ConfigInfoProvider(_terminalProvider);
@@ -554,12 +555,21 @@ export class AppHostDataRepository {
         }
     }
 
+    shutdown(): Promise<void> {
+        this.dispose();
+        return this._psPoller.shutdown();
+    }
+
     dispose(): void {
+        if (this._disposed) {
+            return;
+        }
+
         this._disposed = true;
         this._clearPostStopRefreshTimers();
         this._psPoller.clearPendingAuthoritativeSnapshot();
         this._runtimeSnapshotAfterWorkspaceDiscovery = false;
-        this._psPoller.stopPolling();
+        this._psPoller.dispose();
         this._stopAllDescribes();
         this._cliRunner.dispose();
         this._cancelWorkspaceAppHostDiscovery();
@@ -567,7 +577,6 @@ export class AppHostDataRepository {
         this._appHostDiscoveryChangeDisposable.dispose();
         this._workspaceFoldersChangeDisposable.dispose();
         this._psPollerDisposable.dispose();
-        this._psPoller.dispose();
         this._onDidChangeData.dispose();
         if (this._ownsAppHostDiscoveryService) {
             this._appHostDiscoveryService.dispose();
@@ -590,8 +599,7 @@ export class AppHostDataRepository {
         }
 
         if (this._dataActive) {
-            const pollingActive = this._psPoller.pollingActive;
-            if (!pollingActive) {
+            if (!this._psPoller.pollingRequested) {
                 this._psPoller.startPsPolling();
                 if (refreshBeforeFollowOnResume && this._psPoller.supportsPsFollow && this._appHosts.length > 0) {
                     this._psPoller.refreshAppHostsFromAuthoritativeSnapshot();
@@ -1462,12 +1470,20 @@ export class AppHostDataRepository {
         }
     }
 
+    private _setPsCleanupError(message: string | undefined): void {
+        if (this._psCleanupErrorMessage !== message) {
+            this._psCleanupErrorMessage = message;
+            this._updateErrorMessage();
+        }
+    }
+
     private _updateErrorMessage(): void {
         const workspaceMode = this._viewMode === 'workspace';
-        const message = workspaceMode
+        const dataError = workspaceMode
             ? this._describeErrorMessage ?? this._psErrorMessage
             : this._psErrorMessage;
-        const isCompatibilityError = workspaceMode
+        const message = this._psCleanupErrorMessage ?? dataError;
+        const isCompatibilityError = this._psCleanupErrorMessage === undefined && workspaceMode
             ? (this._describeErrorMessage !== undefined
                 ? this._describeErrorIsCompatibility
                 : false)

@@ -13,6 +13,14 @@ const windowsForcedTaskkillCloseReserveMs = 250;
 const windowsForcedTaskkillTotalReserveMs = 1_250;
 const windowsTaskkillProcessNotFoundExitCode = 128;
 const managedPosixProcessGroups = new WeakSet<ChildProcessWithoutNullStreams>();
+const cliProcessSpawned = new vscode.EventEmitter<CliProcessSpawnEvent>();
+
+export interface CliProcessSpawnEvent {
+    readonly childProcess: ChildProcessWithoutNullStreams;
+    readonly args: readonly string[];
+}
+
+export const onDidSpawnCliProcess = cliProcessSpawned.event;
 
 export interface SpawnProcessOptions {
     stdoutCallback?: (data: string) => void;
@@ -115,6 +123,7 @@ export function spawnCliProcess(terminalProvider: AspireTerminalProvider, comman
         options?.exitCallback?.(code);
     });
 
+    cliProcessSpawned.fire({ childProcess: child, args: args ?? [] });
     return child;
 }
 
@@ -167,10 +176,12 @@ export function terminateCliProcess(childProcess: ChildProcessWithoutNullStreams
                 clearTimeout(confirmationTimer);
                 confirmationTimer = undefined;
             }
-            managedPosixProcessGroups.delete(childProcess);
             if (error) {
+                // Keep group ownership on failure so a live-leader retry cannot degrade to
+                // leader-only termination and leave its descendants behind.
                 reject(error);
             } else {
+                managedPosixProcessGroups.delete(childProcess);
                 resolve();
             }
         };
