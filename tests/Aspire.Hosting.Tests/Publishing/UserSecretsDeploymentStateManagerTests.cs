@@ -16,7 +16,7 @@ namespace Aspire.Hosting.Tests.Pipelines;
 public class UserSecretsDeploymentStateManagerTests
 {
     [Fact]
-    public async Task SaveSectionAsync_DoesNotLogAzureMessage_WhenSavingNonAzureSection()
+    public async Task SaveSectionAsync_LogsGenericDebugMessage_WhenSavingNonAzureSection()
     {
         var logger = new FakeLogger<UserSecretsDeploymentStateManager>();
         var stateManager = new UserSecretsDeploymentStateManager(logger, new MockUserSecretsManager());
@@ -25,14 +25,15 @@ public class UserSecretsDeploymentStateManagerTests
         section.Data["foo"] = "bar";
         await stateManager.SaveSectionAsync(section);
 
-        var logs = logger.Collector.GetSnapshot();
-        Assert.DoesNotContain(logs, log => log.Message.Contains("Azure", StringComparison.Ordinal));
-        Assert.Contains(logs, log => log.Level == LogLevel.Debug &&
-            log.Message.Contains("Deployment state saved to", StringComparison.Ordinal));
+        Assert.Collection(logger.Collector.GetSnapshot(), log =>
+        {
+            Assert.Equal(LogLevel.Debug, log.Level);
+            Assert.Equal("Deployment state saved to /mock/path/secrets.json", log.Message);
+        });
     }
 
     [Fact]
-    public async Task SaveSectionAsync_DoesNotLogAzureError_WhenUserSecretsAreMalformed()
+    public async Task SaveSectionAsync_LogsDeploymentStateError_WhenUserSecretsAreMalformed()
     {
         var logger = new FakeLogger<UserSecretsDeploymentStateManager>();
         var userSecretsManager = new MockUserSecretsManager { SaveStateException = new JsonException() };
@@ -42,7 +43,10 @@ public class UserSecretsDeploymentStateManagerTests
         section.Data["foo"] = "bar";
         await Assert.ThrowsAsync<JsonException>(() => stateManager.SaveSectionAsync(section));
 
-        var error = Assert.Single(logger.Collector.GetSnapshot(), log => log.Level == LogLevel.Error);
-        Assert.DoesNotContain("Azure", error.Message, StringComparison.Ordinal);
+        Assert.Collection(logger.Collector.GetSnapshot(), log =>
+        {
+            Assert.Equal(LogLevel.Error, log.Level);
+            Assert.Equal("Failed to save deployment state because user secrets file is not well-formed JSON.", log.Message);
+        });
     }
 }
